@@ -145,9 +145,9 @@
 
 ### 5.3 权限过滤是每张表都要的
 
-不是"在策略表上加一列 `owner_user_id`"就完事：`runs` 也必须按 `user_id`
-过滤，否则甲能从运行列表里看到乙的成交明细。这类"漏了一处"的越权很难靠人工
-审查发现，故实现上要求**查询入口统一收口**，不散落各处。
+不是"在策略表上加一列 `Strategies.OwnerUserId`"就完事：`Runs` 也必须按
+`UserId` 过滤，否则甲能从运行列表里看到乙的成交明细。这类"漏了一处"的越权
+很难靠人工审查发现，故实现上要求**查询入口统一收口**，不散落各处。
 
 ---
 
@@ -175,7 +175,8 @@ Strategies(
   VisibilityType,  -- private / shared / public
   CreatedAt, UpdatedAt,
   DeletedAt,       -- 软删除；硬删会撞上历史运行的外键
-  UNIQUE(OwnerUserId, Name)
+  -- 名字只在未删行之间唯一（部分唯一索引），见 §6 修订 ③
+  UNIQUE INDEX(OwnerUserId, Name) WHERE DeletedAt IS NULL
 )
 
 -- 策略版本：留档，append-only，永不改写
@@ -186,8 +187,8 @@ StrategyVersions(
   ManifestJson,    -- 参数 schema + 支持的行情模式
   SourceHash,      -- sha256，兼作内容寻址
   StoragePath, UploadedAt, UploadedByUserId FK->Users,
-  UNIQUE(StrategyId, VersionNo),
-  UNIQUE(StrategyId, SourceHash)  -- 内容未变则不产生新版本号
+  UNIQUE(StrategyId, VersionNo)
+  -- 判重的键是 (SourceHash, ManifestJson) 两列，不加约束，见 §6 修订 ②
 )
 
 -- 策略授权：多对多（共享）
@@ -220,10 +221,10 @@ Runs(
 
 **四条设计要点**：
 
-1. **归属不是表**。策略属于谁由 `strategies.owner_user_id` 一列表达，
+1. **归属不是表**。策略属于谁由 `Strategies.OwnerUserId` 一列表达，
    一对一，建表即冗余。真正需要表的只有**共享**（多对多）。
-2. **运行钉版本，不钉策略**。`runs.strategy_id` 供"按策略分组看历史"，
-   `strategy_version_id` 供"逐字复现"。两者职责不同，**不是冗余**。
+2. **运行钉版本，不钉策略**。`Runs.StrategyId` 供"按策略分组看历史"，
+   `Runs.StrategyVersionId` 供"逐字复现"。两者职责不同，**不是冗余**。
    只钉策略的话，策略改动后历史运行的参数与结果就对不上，对比不可信。
 3. **镜像成列是必需的**。列表页与对比页要**按指标排序与筛序**，
    逐行去解数百个 `result.json` 不可行。`MissingRateKeys` 等长尾键
@@ -234,6 +235,23 @@ Runs(
    但可复现性优先——这是本平台唯一不能退让的指标。
 5. **策略软删除**（`Strategies.DeletedAt`）。计划原稿未提，实现时补入：
    硬删会与历史运行的外键冲突，而"删策略不影响历史运行"是既定要求。
+
+**P2 实施中的三处修订**（上文 DDL 已按修订后的形态书写）：
+
+① **`StrategyGrants` 的 `PK(StrategyId, GranteeUserId)` 不在 P2 落地**，
+   授权接口推迟到 P2b。表已建，但 P2 不暴露写入路径。
+
+② **`UNIQUE(StrategyId, SourceHash)` 撤销**。版本判重的键改为
+   `(SourceHash, ManifestJson)` 这一对：同一份源码配不同 manifest（改了入口
+   文件名、或增删了参数）是一份**新**版本。只钉 `SourceHash` 会把这种上传挡成
+   完整性冲突，逼用户"改参数必须连源码一起改"——荒谬。判重挪到服务层做，
+   那里判错也只是多一个目录，不伤完整性；`(StrategyId, VersionNo)` 仍是硬约束。
+
+③ **`UNIQUE(OwnerUserId, Name)` 改成部分唯一索引**（`WHERE DeletedAt IS NULL`）。
+   整表唯一会连已删策略的名字一起占住，而列表页与详情页都不再显示这条记录——
+   用户看到的是"名字没人用，却说我重名"，且平台不提供硬删，没有任何接口能释放它。
+   部分索引的语义正是"名字在**在用的**策略之间唯一"。**注意**：`sqlite_where`
+   是方言选项，日后换库必须把同一条件带过去，否则索引会静默退化成整表唯一。
 
 **artifact 不建表**：它是 `runs/<RunId>/` 下的文件，路径可由约定推出，建表即重复。
 
@@ -247,8 +265,15 @@ Runs(
   两条路都落到 `strategy_versions.manifest_json`，故不必二选一。
 - **不收 zip**：解压要逐条校验路径防 zip-slip，为一个单文件场景引入一整类
   漏洞面不划算。多文件策略（辅助模块）需要时再评估。
-- 上传即建一个 `strategy_versions` 版本。`source_hash` 与已有版本相同则
-  复用该版本，不重复占盘（**内容未变不产生新版本号**）。
+- 上传即建一个 `strategy_versions` 版本。`(source_hash, manifest_json)` 与
+  该策略下**任一既有**版本相同则复用该版本，不重复占盘
+  （**内容未变不产生新版本号**）。判重比的是"任一既有版本"而非"最新版本"：
+  改了参数又改回去，就该命中那个老版本——版本号要能表达"内容变过几次"，
+  不是"上传过几次"。
+- **上传编码用 multipart**（`UploadFile`），`.py` 作文件部件，manifest 作一个
+  文本字段：前端既可填表单，也可读入一份 `manifest.json` 再灌进同一字段，
+  两条路落到同一处，服务端只有一条路径。Starlette 解析该编码需要
+  `python-multipart`，已入 `requirements.txt`。
 
 ### 7.2 manifest 内容
 
@@ -258,6 +283,13 @@ Runs(
 | `config_filename` | 策略配置文件名，平台据此渲染参数并写出该文件 |
 | `supported_match_modes` | 该策略支持的行情模式，`Bar` / `Tick` |
 | `params` | 参数列表：键 / 标签 / 类型 / 默认值 / 范围 / 枚举 |
+
+**注意**：`params` 的类型枚举、取值范围、分组与联动**尚未定案**（见
+`PROGRESS.md` ❓）。P2 只落地在任何方案下都成立的两条不变量——每项是一个 JSON
+对象、且 `key` 非空且互不重复。参数项模型用 `extra="allow"`（未知键原样保留进
+`ManifestJson`），manifest 顶层用 `extra="forbid"`：顶层键名写错（如 `param`
+少个 s）会让参数整批静默落空，而参数项里的未知键此刻**正是**待定案的载体。
+定案后补类型化字段即可，已上传的 manifest 不必改写。
 
 ### 7.3 为什么 manifest 必须声明行情模式
 
@@ -313,13 +345,7 @@ QuantPlatform/
 
 | 方法 | 路径 | 说明 |
 | ---- | ---- | ---- |
-| `GET` | `/api/health` | 引擎自检：引擎根、`.pyd`、Python 版本、runs 根可写 |
-
-> **修订（2026-09-25，P1 实施时）**：`/api/health` **由匿名改为要求认证**，
-> 偏离了本节原稿。理由是响应体携带引擎根绝对路径与缺失 DLL 的文件名，
-> 而单机部署下不存在负载均衡这类匿名消费者——没有人为它买单，
-> 它就只有泄漏面。多机部署后若确需匿名探活，应另开一个只回
-> `{"ready": true}` 的精简端点，而不是放宽这一个。
+| `GET` | `/api/health` | 引擎自检：引擎根、`.pyd`、Python 版本、runs 根可写（**admin**） |
 | `POST` | `/api/auth/login` | 登录换取 JWT |
 | `GET` | `/api/auth/me` | 当前用户 |
 | `GET` | `/api/users` | 用户列表（admin） |
@@ -341,6 +367,21 @@ QuantPlatform/
 | `POST` | `/api/runs/{id}/cancel` | 终止进程 → 标 `interrupted` |
 | `DELETE` | `/api/runs/{id}` | 删除 run（含工作目录） |
 | `GET` | `/api/runs/compare?ids=a,b,c` | 多轮指标对比（仅本人的 run） |
+
+> **修订（2026-09-25）**：`/api/health` 由本节原稿的**免认证**，经 P1 实施时
+> 收为**需认证**，再于 P2 开工前收为**仅管理员**。理由是响应体携带引擎根与
+> 运行根的绝对路径、缺失 DLL 的文件名与解释器版本——这是本机内部布局的清单，
+> 而单机部署下不存在负载均衡这类匿名消费者。普通用户并非"少一道授权"，
+> 而是**他所能做的动作里没有一项需要这份清单**，故给到他的只有泄漏面。
+> 若日后多机部署确需匿名探活，应另开一个只回 `{"ready": true}` 的端点，
+> 而不是放宽这一个。
+
+> **P2 落地范围**：本节中 `POST /api/strategies`、`POST /api/strategies/{id}/versions`、
+> `GET /api/strategies`、`GET /api/strategies/{id}`、`DELETE /api/strategies/{id}`
+> 已实现。`PUT /api/strategies/{id}/grants` 推迟到 **P2b**——授权会牵出"被授权人
+> 能对该策略做什么"的一整串判定，与上传落盘是两件事，混在一批里改，出问题时
+> 分不清是哪半边。写操作（传新版本、删除）只对归属人开放，非归属人一律 404，
+> 不区分"无权"与"不存在"——区分了等于确认该 id 存在。
 
 **三条安全硬约束**（Harness §6）：
 
@@ -378,8 +419,10 @@ QuantPlatform/
 | 阶段 | 内容 | 验收 |
 | ---- | ---- | ---- |
 | **P0 地基探针** ✅ | 已按第 4 节契约跑通 | **2026-09-25 通过**：退出码 0，7 项指标与基准逐位一致 |
-| **P1 后端骨架 + 多用户** ✅ | 五张表 / 登录 / JWT / 查询统一收口加 `user_id` | **2026-09-25 通过**：两账号互不可见；越权返回 404（94 项测试） |
+| **P1 后端骨架 + 多用户** ✅ | 五张表 / 登录 / JWT / 查询统一收口加 `user_id` | **2026-09-25 通过**：两账号互不可见；越权返回 404（175 项测试） |
 | P2 策略上传 | 上传 `.py` + manifest / 校验 / 版本留档 / 落盘 | 上传后能跑通；manifest 缺模式或参数越界被拒 |
+| **P2 上传核心** 🔄 | 建策略+首版 / 传新版本 / 列表详情 / 软删 | **2026-09-25 部分通过**：manifest 缺模式、文件名非法、参数 key 重复均被拒（261 项测试）。**「上传后能跑通」待 P3** |
+| P2b 策略授权 | `PUT /{id}/grants`，`StrategyGrants` 写入路径 | 被授权人可见可跑；非授权人一律 404 |
 | P3 runner 本体 | 队列 / subprocess / 结果回收 / 启动恢复 / 作业目录构造 | 轮询至 `succeeded`；重启后端须标 `interrupted` |
 | P4 前端骨架 | Vue 3 + TS + Vite + Tailwind + Pinia | 完成「登录 → 上传策略 → 提交 → 看指标 → 下载」闭环 |
 | P5 可视化 | 权益曲线 + 回撤、明细分页表 | 曲线与实测数据点吻合（`1000000.0 → 999549.73`） |

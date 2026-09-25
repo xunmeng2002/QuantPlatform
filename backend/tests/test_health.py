@@ -13,6 +13,8 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.auth.dependencies import ADMIN_REQUIRED_DETAIL
+from app.catalog.database import PlatformDatabase
 from app.config import PlatformSettings
 from app.main import UNEXPECTED_ERROR_DETAIL
 from app.routers.health import (
@@ -22,17 +24,34 @@ from app.routers.health import (
 )
 
 from .conftest import TEST_BASE_URL, TEST_ADMIN_PASSWORD, TEST_ADMIN_USERNAME
-from .helpers import bearer_headers, login
+from .helpers import (
+    DEFAULT_MEMBER_PASSWORD,
+    bearer_headers,
+    create_user_record,
+    login,
+)
 
 
 HEALTH_PATH = "/api/health"
 BINDING_FILENAME_PREFIX = "QuantTrading."
 BINDING_FILENAME_SUFFIX = ".pyd"
+HEALTH_MEMBER_USERNAME = "health-probing-member"
 
 
 @pytest_asyncio.fixture
 async def health_token(client: AsyncClient) -> str:
     return await login(client, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD)
+
+
+@pytest_asyncio.fixture
+async def member_token(
+    client: AsyncClient, database: PlatformDatabase
+) -> str:
+    """建一个普通账号并登录, 用于验证非管理员的拒绝路径."""
+
+    await create_user_record(database, HEALTH_MEMBER_USERNAME)
+
+    return await login(client, HEALTH_MEMBER_USERNAME, DEFAULT_MEMBER_PASSWORD)
 
 
 def _settings(application: FastAPI) -> PlatformSettings:
@@ -71,6 +90,18 @@ async def test_health_requires_authentication(client: AsyncClient) -> None:
 
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
+
+
+async def test_health_is_closed_to_a_signed_in_non_admin(
+    client: AsyncClient, member_token: str
+) -> None:
+    """普通用户能做的动作里没有一项需要这份内部布局清单."""
+
+    response = await client.get(HEALTH_PATH, headers=bearer_headers(member_token))
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == ADMIN_REQUIRED_DETAIL
+    assert "engine" not in response.text.lower()
 
 
 async def test_health_reports_ready_when_engine_is_complete(

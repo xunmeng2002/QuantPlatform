@@ -4,8 +4,9 @@
 Python 小版本不匹配即不可用)、引擎运行时 DLL 齐备、运行根可写. 这些条件不满足时提交回测
 只会得到一个难以归因的启动失败, 故在设置页提前暴露.
 
-本端点要求认证 (计划原文把它列为免认证): 单机部署没有负载均衡这类匿名消费者, 而响应要报出
-绝对路径与缺失的 DLL 名, 对匿名调用者开放等于泄漏内部布局.
+本端点要求管理员 (计划原文把它列为免认证, P1 实施时先收为需认证, 现再收为仅管理员): 响应要
+报出引擎根与运行根的绝对路径、缺失的 DLL 名与解释器版本, 即本机内部布局的清单. 单机部署没有
+负载均衡这类匿名消费者, 而普通用户拿到这份清单只有泄漏面——他能做的动作里没有一项需要它.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from pathlib import Path
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from ..auth.dependencies import CurrentUserDependency
+from ..auth.dependencies import AdminUserDependency
 from ..dependencies import SettingsDependency
 
 
@@ -89,7 +90,7 @@ def _probe_directory_writable(directory: Path) -> bool:
 @router.get("", response_model=EngineHealthResponse)
 async def read_health_handler(
     settings: SettingsDependency,
-    current_user: CurrentUserDependency,
+    admin_user: AdminUserDependency,
 ) -> EngineHealthResponse:
     """引擎自检: 扩展模块、运行时 DLL 与运行根可写性."""
 

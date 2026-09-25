@@ -21,12 +21,14 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     MetaData,
     PrimaryKeyConstraint,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -77,12 +79,26 @@ class StrategyModel(Base):
     """策略逻辑实体: 一个名字对应一个归属人.
 
     DeletedAt 供软删除使用. 硬删会与历史运行的外键冲突, 而计划要求删策略不影响历史运行.
+
+    名字的唯一性做成**部分**唯一索引 (只约束 DeletedAt IS NULL 的行), 不是整表唯一约束: 整表
+    唯一会把已删策略的名字一起占住, 而列表页与详情页都不再显示这条记录——用户看见的现象是
+    "名字明明没在用, 却被判重名", 且没有任何接口能释放它 (不提供硬删). 只约束未删行的意思
+    正是"名字在**在用的**策略之间唯一".
+
+    这个索引是 SQLite 方言的偏条件. 若日后换库, 必须把同样的条件带过去: 换个方言而条件丢失,
+    索引会退化成整表唯一, 上面那个故障就原样回来, 且没有任何测试会因此变红.
     """
 
     __tablename__ = "Strategies"
 
     __table_args__ = (
-        UniqueConstraint("OwnerUserId", "Name", name="UqStrategiesOwnerUserIdName"),
+        Index(
+            "UidxStrategiesOwnerUserIdNameLive",
+            "OwnerUserId",
+            "Name",
+            unique=True,
+            sqlite_where=text("DeletedAt IS NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column("Id", String(32), primary_key=True)
@@ -111,16 +127,19 @@ class StrategyModel(Base):
 class StrategyVersionModel(Base):
     """策略版本: 只追加, 永不改写.
 
-    同一策略下 (StrategyId, SourceHash) 唯一, 使内容未变时不产生新版本号.
+    同一策略下 (StrategyId, VersionNo) 唯一——版本号不得重复, 这是完整性.
+
+    版本判重不在此处加约束: 判同的键是 (SourceHash, ManifestJson) 两列, 而 ManifestJson 是
+    Text, 拿它做唯一索引不划算. 更要紧的是单看 SourceHash 会**判错**: 同一份源码配不同
+    manifest (改了入口文件名、或增删了参数) 是一份新版本, 只钉 SourceHash 的唯一约束会把
+    这种上传挡成完整性冲突, 使"改参数必须连源码一起改"——荒谬. 故判重放在
+    services/strategy_store 内做, 那里判错也只是多个目录, 不伤及完整性.
     """
 
     __tablename__ = "StrategyVersions"
 
     __table_args__ = (
         UniqueConstraint("StrategyId", "VersionNo", name="UqStrategyVersionsStrategyIdVersionNo"),
-        UniqueConstraint(
-            "StrategyId", "SourceHash", name="UqStrategyVersionsStrategyIdSourceHash"
-        ),
     )
 
     id: Mapped[str] = mapped_column("Id", String(32), primary_key=True)

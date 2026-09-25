@@ -219,7 +219,7 @@ async def create_strategy_version_record(
             config_filename="StrategyConfig.json",
             manifest_json="{}",
             source_hash=generate_identifier(),
-            storage_path=f"users/{uploaded_by.id}/strategies/{strategy.id}/1",
+            storage_path=f"{uploaded_by.id}/strategies/{strategy.id}/1",
             uploaded_by_user_id=uploaded_by.id,
         ),
     )

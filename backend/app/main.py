@@ -9,13 +9,13 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 import uvicorn
 
 from .bootstrap import ensure_initial_admin
@@ -27,7 +27,9 @@ from .errors import (
     PermissionDeniedError,
     ResourceNotFoundError,
 )
+from .manifest import MAXIMUM_MANIFEST_BYTES
 from .routers import auth, health, runs, strategies, users
+from .routers.strategies import MAXIMUM_SOURCE_BYTES
 
 
 APPLICATION_TITLE = "QuantPlatform"
@@ -43,7 +45,15 @@ USERS_PREFIX = "/api/users"
 STRATEGIES_PREFIX = "/api/strategies"
 RUNS_PREFIX = "/api/runs"
 
+MULTIPART_FRAMING_ALLOWANCE_BYTES = 64 * 1024
+
+MAXIMUM_REQUEST_BODY_BYTES = (
+    MAXIMUM_SOURCE_BYTES + MAXIMUM_MANIFEST_BYTES + MULTIPART_FRAMING_ALLOWANCE_BYTES
+)
+
 UNEXPECTED_ERROR_DETAIL = "服务器内部错误"
+REQUEST_TOO_LARGE_DETAIL = "请求体过大"
+INVALID_CONTENT_LENGTH_DETAIL = "Content-Length 不合法"
 
 SENSITIVE_FIELD_NAMES = frozenset({"password", "password_hash"})
 REDACTED_FIELD_VALUE = "***"
@@ -137,6 +147,57 @@ def _register_exception_handlers(application: FastAPI) -> None:
         return JSONResponse(status_code=500, content={"detail": UNEXPECTED_ERROR_DETAIL})
 
 
+def _register_request_size_guard(application: FastAPI) -> None:
+    """在解析请求体之前拦下超限的请求.
+
+    处理函数里的那种"按上限分块读"只保护内存, 不保护磁盘: 轮到它执行时, Starlette 早已把整个
+    multipart 体读完, 超过约 1 MB 的部分已经落进磁盘临时文件. 于是"上传限 1 MB"这句话对磁盘
+    并不成立——任何登录用户都能用一次请求把盘写满, 且他不需要真的准备一份大文件, 慢速发送即可.
+
+    这道闸按 `Content-Length` 在路由之前回 413, 体一个字节都不读.
+
+    只认 `Content-Length`: 分块编码 (Transfer-Encoding: chunked) 不携带这个头, 绕得过这道闸.
+    堵住它得在读取过程中计字节数, 那又要把每个请求体过一遍手, 代价与收益不成比例——留到 P8
+    由反向代理按字节数兜底. 见 PROGRESS.md ❓.
+
+    解析这个头**不能拿 `str.isdigit()` 当守卫**: 成帧层为了判长度会按 OWS 裁掉首尾空白, 但 ASGI
+    scope 里放的是**未裁剪的原文**, 于是 `"1179649 "` 这种取值 `isdigit()` 为假, 闸整条跳过,
+    请求被完整解析、超限部分落进磁盘临时文件后才由内层那道管内存的闸拦下——而这正是它想防的
+    事. 一个尾随空格就够了. `int()` 自己会吃掉 OWS, 故直接交给它; 解析不出来就拒, 不留 500:
+    这个头是客户端给的, 它给了一个应用层读不懂的值, 没有理由放行. 拒绝必须发生在**这道中间件
+    内部**——注册的异常处理器在用户中间件栈的内侧, 从这里抛出去的异常会绕开它, 客户端拿到的是
+    Starlette 的纯文本 500, 中文固定文案与 `logger.exception` 都不生效.
+
+    上限的余量取 64 KB, 按两个真实上限推出来, 不另设魔数: 源码与 manifest 各有一道自己的闸,
+    这一道只是把二者之前的那段 (multipart 分隔符、各部件头、名字与说明) 也圈进来.
+    """
+
+    @application.middleware("http")
+    async def _reject_oversized_request(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        declared_length = request.headers.get("content-length")
+
+        if declared_length is not None:
+            try:
+                declared_bytes = int(declared_length)
+            except ValueError:
+                logger.warning("Content-Length 无法解析, 已拒绝该请求")
+
+                return JSONResponse(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content={"detail": INVALID_CONTENT_LENGTH_DETAIL},
+                )
+
+            if declared_bytes > MAXIMUM_REQUEST_BODY_BYTES:
+                return JSONResponse(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    content={"detail": REQUEST_TOO_LARGE_DETAIL},
+                )
+
+        return await call_next(request)
+
+
 def _register_routers(application: FastAPI) -> None:
     """挂载各路由模块."""
 
@@ -164,6 +225,7 @@ def create_application(settings: PlatformSettings | None = None) -> FastAPI:
     application.state.database = PlatformDatabase(resolved_settings.database_url)
 
     _register_exception_handlers(application)
+    _register_request_size_guard(application)
     _register_routers(application)
 
     return application

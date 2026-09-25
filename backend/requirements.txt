@@ -3,3 +3,6 @@ uvicorn>=0.34
 pydantic>=2.9
 sqlalchemy>=2.0
 aiosqlite>=0.20
+
+# 策略上传走 multipart (UploadFile), Starlette 解析该编码需要此包.
+python-multipart>=0.0.20
