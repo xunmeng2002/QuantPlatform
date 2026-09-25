@@ -9,6 +9,9 @@ users/
 # 平台 catalog、JWT 密钥与运行态，属运行数据而非平台代码
 backend/data/
 
+# 真引擎验收的 pytest 临时根（`--basetemp=_acc_tmp` 的产物，四例约 22 MB）
+backend/_acc_tmp/
+
 # 前端依赖
 node_modules/
 

@@ -4,7 +4,8 @@
 上游依据是 `QuantTrading` 的 [`docs/backtest-run-contract.md`](../../QuantTrading/docs/backtest-run-contract.md)
 （该文定义引擎侧契约，本文只补调度侧如何构造目录与拉起宿主）。
 
-本文全部结论已在 Phase 0 实测验证，记录见末节。
+本文全部结论已在 Phase 0 与 Phase 3 两轮真引擎实测中验证，记录见末节 §6。
+两轮的**前提不同**（种子库在不在盘上），各自成表，不可互相覆盖。
 
 ---
 
@@ -26,6 +27,12 @@ runs/<RunId>/
 `RunId` 由调度侧生成并经 `BackTest.json` 的 `RunId` 注入，同时用作目录名。
 两者必须同值——这是调度侧一次生成时的唯一约束。
 
+调度侧**构造**这个目录时写入四个输入（`BackTest.json` 渲染、`Sessions.json` 复制、
+策略入口复制、策略配置渲染），并顺带建一个空的 `Dump/`。**`Dump/` 不必预建**：
+P3 实测（2026-09-25，目录里只有那四个输入文件）引擎会自己建出 `Dump/` 与
+`Dump/<RunId>/`。预建是便宜的冗余，不是前提。`result.json` **绝不在构造阶段出现**
+——它的缺席是"本轮没走到收尾"的唯一信号。
+
 ---
 
 ## 2. 路径相对性
@@ -43,43 +50,62 @@ runs/<RunId>/
 > **警告**：把 `DbHost` 或 `DumpPath` 写成绝对路径，会让「每 job 独立工作目录」
 > 的隔离**静默失效**——两个并发 job 会写同一个库且不报错。
 
+**这条约束在渲染器里是结构性的**（P3，2026-09-25）：`render_engine_config()` 的形参
+只有运行级字段与两个**读**路径（`market_data_path` / `seed_database_path`），
+写路径在函数体内是常量 `./BackTest.db` 与 `./Dump`。调用点**没有入口**能传入绝对写
+路径，故"隔离静默失效"从"靠测试发现"变成"写不出来"。判据落在
+`tests/test_engine_config.py::test_the_renderer_takes_no_write_path_parameter`。
+
+**派生行为**：`DbHost` 恒写 `./BackTest.db`，引擎自己派生成
+`BackTest_<RunId>.db`（已实测）。平台若先拼一份 RunId 进去，会得到
+`BackTest_<RunId>_<RunId>.db`——不报错，只是与 `result.json.DbPath` 不符。
+
+**策略配置文件里的运行级字段**（P3 新增）：策略配置（`TestStrategyGrid.json` 一类）
+除 `params` 之外还要拿到 `exchange_id` / `instrument_id` / `bar_period` 三个字段，
+键名由 manifest 的 `run_field_keys` 声明（见 `platform-plan.md` §6.1）。
+其中 `bar_period` **两处都要写**：`BackTest.json` 的 `BarPreces` 是引擎实际聚合周期，
+策略配置里那个是 `declare_bar_period` 的期望周期，**两者不一致时策略收不到 bar、
+静默 0 成交**（P0 记的那类失效）。有映射时由平台写同一个值，一致性因此是结构性的；
+策略未声明映射时平台只写 `BackTest.json`，这份差异由策略作者承担。
+
 ---
 
 ## 3. 启动契约
 
-### 3.1 `argv[0]` 必须是无路径分隔符的裸文件名
+### 3.1 `argv[0]` 传裸文件名（**不是硬约束**，是固定选择）
 
-这是 Phase 0 挖出的**硬约束**，它不由回测引擎决定，而由 Spark 的
-`Utility::ParseProcessName`（`Spark/src/Core/Utility/Utility.cpp:13`）决定：
+> **2026-09-25 订正**：本节原记「带路径的 `argv[0]` 会在启动期被日志器 `fopen`
+> 失败打死（退出码 1）」，**该结论已被实测推翻**，原文与订正理由见
+> `PROGRESS-archive.md` 的 `D.01`。订正后的实测事实如下。
 
-```cpp
-const char* temp = strrchr(fullProcessName, '\\');   // 只找反斜杠
-const char* dot = strchr(temp, '.');                 // 首个点截断扩展名
-```
+在 P0 所用引擎构建（`QuantTrading.cp314-win_amd64.pyd`）上复测三种形态，
+各自跑完**整轮 Bar 回测**、退出码均为 `0`：
 
-Windows 分支**只承认反斜杠为目录分隔符**，随后按**首个点**截断扩展名，
-所得串被用作日志文件名 `log/<processName_>.<时间戳>.log`。于是：
+| `argv[0]` | 实测结果 |
+| ---- | ---- |
+| `grid_strategy.py`（裸文件名） | 退出码 0，全轮通过 |
+| `./grid_strategy.py`（正斜杠相对路径） | 退出码 0，全轮通过 |
+| `C:\...\Temp\<job>\grid_strategy.py`（反斜杠绝对路径） | 退出码 0，全轮通过 |
 
-| `argv[0]` | 日志路径 | 结果 |
-| ---- | ---- | ---- |
-| `D:/.../grid_strategy.py` | `log/D:/...` | 含 `:`，`fopen` 失败 |
-| `D:\...\grid_strategy.py` | `log/grid_strategy.*.log` | 侥幸可用 |
-| `grid_strategy.py` | `log/grid_strategy.*.log` | 稳 |
+即：**日志器并没有因为拿到路径而打死进程**。`Utility::ParseProcessName`
+（`Spark/src/Core/Utility/Utility.cpp:13`）仍只以 `strrchr(..., '\\')` 找分隔符、
+再按首个点截断扩展名，但这条拼出来的日志名显然不是启动期的硬闸。
 
-**关键推论**：这与绝对/相对**无关**，只与分隔符有关。正斜杠相对路径
-（如 `strategies/grid/entry.py`）同样会炸。唯一在两种约定下都安全的形态是
-**裸文件名**。
+**平台仍固定用裸文件名**，理由是它与其余契约自洽，而不是"否则起不来"：
 
-日志器在启动期打不开日志文件即**直接终止进程**（退出码 1），
-故这不是"日志缺失"级别的降级，而是**启动失败**。
-
-**因此 runner 必须：**
-
-1. 把策略入口文件**原样复制**到 job 目录根部（保留原文件名）。
-2. 以 `cwd=<job 目录>` 启动，`argv[0]` 传**裸文件名**。
+1. 入口文件**原样复制**到 job 目录根部（保留原文件名），`cwd=<job 目录>`。
+   策略读自己的配置文件（`TestStrategyGrid.json`）、引擎写全部产物，都相对 CWD
+   解析——入口在 job 根让这三件事落在同一处。
+2. 传给 `create_subprocess_exec` 的是 `sys.executable` + **裸文件名**
+   （Windows 的 `CreateProcess` 不认文件关联，直接拿 `.py` 当可执行文件会得到
+   `WinError 2`，已实测），配 `cwd=` 解析。
 
 > **注意**：复制到 job 目录根部也意味着入口文件名不得与引擎配置文件
 > （`BackTest.json`、`Sessions.json`、`result.json`）撞名。v1 策略均为 `.py`，无此风险。
+
+> **对后人的提醒**：这条订正的意思是"多一种可行形式不构成改设计的理由"，
+> 不是"可以随便传绝对路径"。契约的其余部分（相对写路径、`PYTHONPATH`、
+> 目录隔离）都建立在上面的形态上；要改形态，得重新走一遍真引擎验收。
 
 ### 3.2 `PYTHONPATH` 必须指向引擎根
 
@@ -131,7 +157,9 @@ python grid_strategy.py
 
 ---
 
-## 6. Phase 0 实测记录（2026-09-25）
+## 6. 实测记录
+
+### 6.1 Phase 0（2026-09-25 上午，种子库 `BackTestInit.db` **在盘上**）
 
 **方法**：在 `runs/probe/` 按本文契约构造工作目录，以裸文件名启动
 `QuantTrading` 仓内的 `grid_strategy.py`（**未做任何修改**）。
@@ -156,3 +184,41 @@ python grid_strategy.py
 **结论**：硬钉子 ② 已解——隔离到独立工作目录不改变回测结果，
 且 `RunId` 配置注入生效。基准取自 `QuantTrading/bin/Release/result.json`
 （Python 宿主补齐 `on_bar` 之后的一轮）。
+
+### 6.2 Phase 3（2026-09-25 晚，种子库 `BackTestInit.db` **不在盘上**）
+
+**方法**：不再手工构造目录，改走**完整链路**——策略经上传接口落盘、作业目录由
+`app/scheduler/workspace.py` 构造、引擎由 runner 启动、结果由收尾镜像进库。
+用例见 `backend/tests/test_real_engine_acceptance.py`（标 `real_engine`，默认不跑）。
+
+**与 6.1 的已知差异只有一处前提**：本机 `bin/Release` 下**没有** `BackTestInit.db`，
+而引擎对它的缺失是**优雅降级**（`SimExchange.cpp` 只做 `exists` 检查，缺失仅
+Warning + `BasicDataLoaded=false`，继续跑完）。故费用三项退化成 0、余额因此
+**高出**费用的总和：
+
+| 指标 | 6.2 实测（无种子库） |
+| ---- | ---- |
+| `BarMarketDataCount` | 2928（与 6.1 同） |
+| `OrderCount` | 654（与 6.1 同） |
+| `TradeCount` | 84（与 6.1 同） |
+| `Balance` | **999377.0899999999** |
+| `TotalCommission` / `TotalStampTax` / `TotalTransferFee` | 0.0 / 0.0 / 0.0 |
+| `CommissionMissingCount` | 84 |
+| `BasicDataLoaded` | `false` |
+| `DbPath` | `./BackTest_<RunId>.db` |
+
+两份基线的差额 `999377.0899999999 − 998951.4506464996 = 425.6393535003`，与
+6.1 费用三项之和 `420.0 + 4.297395 + 1.3419585 = 425.6393535` 相符（末位差异来自
+浮点求和次序）。**故引擎行为未变，变的只是输入**——两份记录并存，各自注明前提，
+不要用新数字覆盖旧基线。
+
+另外三条本轮实测：
+
+- **引擎比预期快得多**：三个月的 5m 回测约 **1.7 秒**；2010–2024（58176 根 bar）约 **3.8 秒**。
+  故"制造一个跑得够久的作业"只能靠压时限，不能靠拉长时间范围。
+- **`Dump/` 父目录不必预建**（见 §1）。
+- **`DbHost` 派生**：写入 `./BackTest.db`，引擎落盘为 `BackTest_<RunId>.db`，
+  与 `result.json.DbPath` 逐字相符（见 §2）。
+
+**结论**：P2「上传后能跑通」与 P2b「被授权人可跑」至此结清；§2 的隔离与 §3.2 的
+`PYTHONPATH` 在真引擎上复验通过。

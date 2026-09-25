@@ -351,8 +351,10 @@ async def create_run_record(
     指标列可取非基线值: 排序与筛选的断言要靠互不相同的取值才区分得开.
     """
 
+    run_id = generate_identifier()
+
     run = RunModel(
-        id=generate_identifier(),
+        id=run_id,
         user_id=user.id,
         strategy_id=strategy.id,
         strategy_version_id=version.id,
@@ -360,7 +362,10 @@ async def create_run_record(
         trade_count=trade_count,
         order_count=order_count,
         balance=balance,
-        workspace_path=f"runs/{generate_identifier()}",
+        # 工作目录名就是主键, 二者是同一件事: 调度侧按 `runs_root / <WorkspacePath>` 找它, 而
+        # 提交侧写的正是 `RunId`. 这里写成 `runs/<id>` 会让作业目录嵌进 `runs/runs/<id>`, 与
+        # 真实作业对不上——造出来的行于是走不完"目录已存在"以外的任何一条真实路径.
+        workspace_path=run_id,
     )
 
     if submitted_at is not None:

@@ -23,6 +23,14 @@ DEFAULT_HTTP_PORT = 8000
 MAXIMUM_PORT = 65535
 JWT_SECRET_KEY_BYTES = 48
 
+# 引擎自己认的文件名, 由引擎写死故为常量: 会话表要复制进每个 job 目录, 种子库是只读输入.
+SESSION_FILENAME = "Sessions.json"
+SEED_DATABASE_FILENAME = "BackTestInit.db"
+
+# 本机布局的默认值, 与 engine_root 的默认值同一性质: 换机器必须由环境变量覆盖.
+DEFAULT_MARKET_DATA_ROOT = Path("D:/MdBaoStock")
+DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES = 8 * 1024
+
 
 def read_integer_environment(name: str, fallback: int) -> int:
     """读取整型环境变量.
@@ -86,9 +94,13 @@ class PlatformSettings:
     initial_admin_password: str | None
     http_host: str
     http_port: int
+    market_data_root: Path
+    session_file_path: Path
+    seed_database_path: Path
+    maximum_output_tail_bytes: int = DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES
 
     def __post_init__(self) -> None:
-        """校验数值项取值, 避免并发闸门为 0 时永久阻塞、超时为 0 时秒杀作业."""
+        """校验数值项与路径项, 避免并发闸门为 0 时永久阻塞、超时为 0 时秒杀作业."""
 
         if self.access_token_expire_minutes < 1:
             raise ValueError("access_token_expire_minutes 需 >= 1")
@@ -99,26 +111,37 @@ class PlatformSettings:
         if self.run_timeout_seconds < 1:
             raise ValueError("run_timeout_seconds 需 >= 1")
 
+        if self.maximum_output_tail_bytes < 1:
+            raise ValueError("maximum_output_tail_bytes 需 >= 1")
+
         if not 1 <= self.http_port <= MAXIMUM_PORT:
             raise ValueError(f"http_port 需在 1..{MAXIMUM_PORT} 之间")
+
+        # 三个引擎侧路径必须绝对: 引擎相对 **job 目录** 解析读路径, 而平台的复制动作相对
+        # **后端进程的 CWD** 解析. 同一个相对值在这两处指向不同的地方, 且都不报错——配置里
+        # 留一个相对值, 故障只在作业跑起来之后才以"没有行情数据"的面目出现.
+        for field_name in ("market_data_root", "session_file_path", "seed_database_path"):
+            if not getattr(self, field_name).is_absolute():
+                raise ValueError(f"{field_name} 需为绝对路径")
 
     @classmethod
     def from_environment(cls) -> PlatformSettings:
         """按环境变量构造配置, 缺省值指向本仓的默认布局."""
 
         catalog_database_path = BACKEND_ROOT / "data" / "catalog.db"
+        engine_root = Path(
+            os.getenv(
+                "QUANT_ENGINE_ROOT",
+                PLATFORM_ROOT.parent / "QuantTrading" / "bin" / "Release",
+            )
+        )
 
         return cls(
             database_url=os.getenv(
                 "QUANT_DATABASE_URL",
                 f"sqlite+aiosqlite:///{catalog_database_path.as_posix()}",
             ),
-            engine_root=Path(
-                os.getenv(
-                    "QUANT_ENGINE_ROOT",
-                    PLATFORM_ROOT.parent / "QuantTrading" / "bin" / "Release",
-                )
-            ),
+            engine_root=engine_root,
             runs_root=Path(os.getenv("QUANT_RUNS_ROOT", PLATFORM_ROOT / "runs")),
             user_library_root=Path(
                 os.getenv("QUANT_USER_LIBRARY_ROOT", PLATFORM_ROOT / "users")
@@ -139,4 +162,16 @@ class PlatformSettings:
             initial_admin_password=os.getenv("QUANT_INITIAL_ADMIN_PASSWORD") or None,
             http_host=os.getenv("QUANT_HTTP_HOST", DEFAULT_HTTP_HOST),
             http_port=read_integer_environment("QUANT_HTTP_PORT", DEFAULT_HTTP_PORT),
+            market_data_root=Path(
+                os.getenv("QUANT_MARKET_DATA_ROOT", DEFAULT_MARKET_DATA_ROOT)
+            ),
+            session_file_path=Path(
+                os.getenv("QUANT_SESSION_FILE_PATH", engine_root / SESSION_FILENAME)
+            ),
+            seed_database_path=Path(
+                os.getenv("QUANT_SEED_DATABASE_PATH", engine_root / SEED_DATABASE_FILENAME)
+            ),
+            maximum_output_tail_bytes=read_integer_environment(
+                "QUANT_MAXIMUM_OUTPUT_TAIL_BYTES", DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES
+            ),
         )

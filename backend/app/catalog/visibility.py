@@ -75,12 +75,23 @@ def build_owned_run_query(user: UserModel) -> Select[tuple[RunModel]]:
 
 
 async def _load_one_or_raise(
-    session: AsyncSession, query: Select[tuple[RecordType]], not_found_message: str
+    session: AsyncSession,
+    query: Select[tuple[RecordType]],
+    not_found_message: str,
+    populate_existing: bool = False,
 ) -> RecordType:
     """取单条记录, 取不到即抛"不存在".
 
     取件一律经此: 越权与真不存在必须给出同一种结果, 两处分开写就会分开判, 差别即泄漏.
+
+    `populate_existing=True` 让本次查询**覆盖** identity map 里的那份取值, 供"重读一行"的重试
+    循环用. 用 `session.expire_all()` 代替是不行的: 它会把同一个会话里认证时取到的用户对象也
+    一并作废, 而下一次读它的属性会触发一次同步的惰性加载——在异步会话里那是 `MissingGreenlet`,
+    表现为每个请求都 500.
     """
+
+    if populate_existing:
+        query = query.execution_options(populate_existing=True)
 
     row = (await session.execute(query)).scalar_one_or_none()
 
@@ -114,13 +125,23 @@ async def load_owned_strategy(
     )
 
 
-async def load_owned_run(session: AsyncSession, user: UserModel, run_id: str) -> RunModel:
-    """取当前用户提交的运行, 取不到即视为不存在."""
+async def load_owned_run(
+    session: AsyncSession,
+    user: UserModel,
+    run_id: str,
+    populate_existing: bool = False,
+) -> RunModel:
+    """取当前用户提交的运行, 取不到即视为不存在.
+
+    `populate_existing` 供"重读一行"用: 取消端点的重试循环要读到**刚刚**被调度器或收尾写下的
+    状态, 而不是会话里那份陈旧对象.
+    """
 
     return await _load_one_or_raise(
         session,
         build_owned_run_query(user).where(RunModel.id == run_id),
         RUN_NOT_FOUND_MESSAGE,
+        populate_existing=populate_existing,
     )
 
 

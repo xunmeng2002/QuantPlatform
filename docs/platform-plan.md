@@ -48,7 +48,8 @@
 
 本轮在开发机上实测所得，是后续所有设计的依据：
 
-- 工具链：**Python 3.11.1**（正是 `.pyd` 的 `cp311`）、**Node 24.15 / npm 11.12**。
+- 工具链：**Python 3.14.5**（正是 `.pyd` 的 ABI 标签 `cp314`；**2026-09-25 订正**，
+  原记 3.11.1 / `cp311` 系早期误记）、**Node 24.15 / npm 11.12**。
 - 引擎产物：`result.json`、`BackTest_<RunId>.db`（17 张表）、
   `Dump/<RunId>/t_*.csv`（17 个）、`log/<名>.<时间戳>.log`。
 - 权益曲线数据源现成：`Capital` 表含 `TradingDay, Balance, Available`，
@@ -64,7 +65,10 @@
   `get_long_position` / `get_short_position` / `get_last_price`），
   模块级 `create_backtest_api` / `init_logger` / `shutdown_logger`。
 - 行情数据根 `D:/MdBaoStock/Bar/` 存在，按 `Identity=<板块>/Year=<年>/`
-  存放 `<年>_<周期>.parquet`。
+  存放 `<年>_<周期>.parquet`。**只有 `Bar/`，没有 tick 数据目录。**
+- 引擎单轮耗时（2026-09-25 P3 实测，`bin/Release` 下、5m 周期、单标的）：
+  三个月 **约 1.7 秒**，2010–2024（58176 根 bar，678 笔成交）**约 3.8 秒**——
+  比原估快得多，故"作业级超时"在真引擎上要靠**压时限**触发（见 §11 的 P3 行）。
 - 既有栈惯例（`amies-data-platform`）：
   **FastAPI + SQLAlchemy + aiosqlite** / **Vue 3.5 + TS + Vite + Tailwind + Pinia**。
 
@@ -73,7 +77,7 @@
 ## 3. 硬钉子 ②：工作目录与 `.pyd` 查找（P0 已解）
 
 `test/PythonStrategyGrid/grid_strategy.py` 靠 `__file__` 反推
-`REPO_ROOT/bin/Release` 来找 `QuantTrading.cp311-win_amd64.pyd`。
+`REPO_ROOT/bin/Release` 来找 `QuantTrading.cp314-win_amd64.pyd`。
 **脚本一进独立工作目录就 import 失败。**
 
 两条互补解法（**Phase 0 实测后已修正**，机制详见
@@ -87,9 +91,13 @@
    脚本被复制后 `__file__` 指向 job 目录，凡靠 `__file__` 反推
    `bin/Release` 的写法都会算错，引擎根必须由环境变量显式给出。
 
-原先"脚本留在原地、只改 CWD"的方案**已被实测否决**：引擎日志器（Spark 的
-`Utility::ParseProcessName`）在 Windows 上**只认反斜杠为目录分隔符**，
-拿到带路径的 `argv[0]` 会拼出非法日志路径，**启动期即终止进程（退出码 1）**。
+> **2026-09-25 订正（P3 实测）**：此处原记「"脚本留在原地、只改 CWD"的方案
+> **已被实测否决**：引擎日志器在 Windows 上只认反斜杠，拿到带路径的 `argv[0]`
+> 会拼出非法日志路径，**启动期即终止进程（退出码 1）**」。**这条已不成立**：
+> 以 `./grid_strategy.py`（正斜杠相对路径）与 `C:\...\Temp\<job>\grid_strategy.py`
+> （反斜杠绝对路径）各跑一轮真引擎，**都是退出码 0、整轮回测跑完**。
+> "脚本复制到 job 根部"仍是现行做法，但理由是它与其余契约自洽（配置文件与
+> 产物同落 CWD、入口与 `cwd` 同处），**不是"否则起不来"**。
 
 > **提示**：`PYTHONPATH` 单独一条即可满足 `import QuantTrading` 及 `.pyd`
 > 同目录依赖（`BackTest.dll`、`Core.dll`、`Network.dll` 等）——CPython 在
@@ -102,15 +110,17 @@
 
 ## 4. job 工作目录契约
 
-契约全文（目录布局、启动契约、退出码、产物、Phase 0 实测记录）见
+契约全文（目录布局、启动契约、退出码、产物、两轮实测记录）见
 [`job-workspace.md`](job-workspace.md)。此处只复述两条决定后端设计的硬约束：
 
 1. **写路径必须相对**：`DbHost` 与 `DumpPath` 一旦写成绝对路径，
    「每 job 独立工作目录」的隔离会**静默失效**——两个并发 job 会写
-   同一个库且不报错。
-2. **`argv[0]` 必须是无分隔符的裸文件名**：带正斜杠的路径会让引擎
-   日志器拼出非法路径并**在启动期终止进程**（退出码 1）。这条与
-   绝对/相对**无关**，只与分隔符有关。
+   同一个库且不报错。**P3 起这条在渲染器里是结构性的**：
+   `render_engine_config()` 没有写路径形参，调用点传不进去绝对写路径。
+2. **`argv[0]` 传裸文件名**（**不是硬约束，是固定选择**——
+   2026-09-25 实测订正，见 §3 与 [`job-workspace.md`](job-workspace.md) §3.1）。
+   带路径的形态实测同样能跑通，平台仍固定用裸文件名，因为它与
+   "入口在 job 根、产物落 CWD"这套契约自洽。
 
 ---
 
@@ -120,7 +130,7 @@
 
 - **现在**：本机 Windows，监听 `127.0.0.1`，单实例。
 - **将来**：**一台 Windows 云主机**。三点约束必须现在认下来：
-  1. `.pyd` 是 `cp311-win_amd64`，**Linux 无解**，云主机只能是 Windows。
+  1. `.pyd` 是 `cp314-win_amd64`，**Linux 无解**，云主机只能是 Windows。
   2. 后端**必须与引擎同机**（读行情 parquet 磁盘 + 用 `.pyd` 拉起宿主），
      故横向扩展没有余地，扩容只能是纵向的。
   3. 行情数据要一并上云（现约 1.2 MB/年/板块，可接受，但需同步策略）。
@@ -206,7 +216,9 @@ Runs(
   Status, SubmittedAt, StartedAt, FinishedAt, DurationMs,
   RunnerPid, Hostname, ExitCode,
   ParamsJson, BacktestConfigJson,
-  -- result.json 的 25 个镜像列，列表页与对比页的排序/筛选取自此
+  -- result.json 的 27 个镜像列（清单见 result.py 的 RESULT_MIRROR_COLUMN_NAMES），
+  -- 列表页与对比页的排序/筛选取自此。结果文件里的 Success 落到 IsSuccess 列;
+  -- 29 键里不镜像的两键是 RunId (即 Id 主键) 与 MissingRateKeys (长尾, 留在文件里)
   IsSuccess, ErrorId, ErrorMsg, SchemaVersion, MarketDataType,
   StartTradingDay, EndTradingDay, LastTradingDay, AccountId,
   Balance, Available, TotalCommission, TotalStampTax,
@@ -283,15 +295,44 @@ Runs(
 | ---- | ---- |
 | `entry_filename` | 入口文件名，决定 job 目录里的裸文件名与 `argv[0]` |
 | `config_filename` | 策略配置文件名，平台据此渲染参数并写出该文件 |
-| `supported_match_modes` | 该策略支持的行情模式，`Bar` / `Tick` |
+| `supported_match_modes` | 该策略**声明**支持的行情模式，`Bar` / `Tick` |
+| `run_field_keys` | 运行级字段在策略配置里的键名，见下 |
 | `params` | 参数列表：键 / 标签 / 类型 / 默认值 / 范围 / 枚举 |
 
-**注意**：`params` 的类型枚举、取值范围、分组与联动**尚未定案**（见
-`PROGRESS.md` ❓）。P2 只落地在任何方案下都成立的两条不变量——每项是一个 JSON
-对象、且 `key` 非空且互不重复。参数项模型用 `extra="allow"`（未知键原样保留进
-`ManifestJson`），manifest 顶层用 `extra="forbid"`：顶层键名写错（如 `param`
-少个 s）会让参数整批静默落空，而参数项里的未知键此刻**正是**待定案的载体。
-定案后补类型化字段即可，已上传的 manifest 不必改写。
+**`params` 的 schema 已于 2026-09-25（P3 开工前）定案**（原为 ❓，已结清）：
+
+| 字段 | 必填 | 说明 |
+| ---- | ---- | ---- |
+| `key` | ✅ | 非空、≤64、`^[A-Za-z0-9_.-]+$`、同 manifest 内互不重复 |
+| `label` | | 界面显示名，缺省回落 `key` |
+| `type` | | `integer` / `number` / `string` / `boolean`，缺省 `string` |
+| `default` | | **缺省即"提交方必须给出"**——不另设 `required` 标志 |
+| `minimum` / `maximum` | | 仅 `integer` / `number` 允许 |
+| `options` | | `[{"value": …, "label": …}]`，出现时取值必须落在其中 |
+| `group` | | 分组名，纯供前端表单分区 |
+
+- **为什么不设 `required`**：`required: true` 配 `default: 10` 是自相矛盾的组合，
+  而"没有 `default` 就必须提交"已完整表达同一件事，且**写不出矛盾组合**。
+- **为什么 `options` 不限类型**：`type=string + options`（周期）与
+  `type=integer + options`（从 {1,5,10} 里选格数）都是真实需求，故 `options`
+  是任何类型都可挂的约束，每项 `value` 按 `type` 校验。
+- **默认值与提交值走同一个校验函数**，否则会出现"默认值自己不合法、
+  提交方照抄默认值反被拒"。
+
+**`run_field_keys`**（P3 新增）把三个运行级字段映射到策略配置里的键名，
+键只允许 `exchange_id` / `instrument_id` / `bar_period`（`extra="forbid"` 收严，
+写错键名立刻报错），值按与 `params[].key` 相同的模式校验，且**不得与任一
+`params[].key` 重复**（否则同一份配置里有两个写入者，值以谁为准无从说起）。
+三项均可省略，**省略即该字段不写进策略配置**。
+
+它结清的是一类**静默失效**：`exchange_id` / `instrument_id` 引擎不认识，
+只有策略的 `subscribe_tick` 用；而 `bar_period` **两处都要写**——引擎配置里的
+`BarPreces`（实际聚合周期）与策略配置里的那个（`declare_bar_period` 的期望周期）
+不一致时，策略收不到 bar、**静默 0 成交**。有映射时两者由平台写同一个值，
+一致性从此是结构性的；**没有映射时平台只写引擎配置**，这份差异由策略作者承担。
+
+参数项继续 `extra="allow"`（未知键原样保留），manifest 顶层继续 `extra="forbid"`
+——顶层键名写错（如 `param` 少个 s）会让参数整批静默落空。
 
 ### 7.3 为什么 manifest 必须声明行情模式
 
@@ -364,9 +405,10 @@ QuantPlatform/
 │   │   ├── config.py          # 引擎根、runs 根、并发上限、超时
 │   │   ├── auth/              # 登录、JWT、当前用户依赖
 │   │   ├── catalog/           # db / models（五张表）/ schemas
-│   │   ├── routers/           # auth / users / strategies / runs / artifacts
-│   │   ├── scheduler/         # queue / workspace / runner / result / recovery
-│   │   └── services/          # results_db / artifacts / strategy_store
+│   │   ├── routers/           # auth / users / strategies / runs / health
+│   │   ├── scheduler/         # engine_config / result / output / workspace
+│   │   │                      # registry / runner / recovery / scheduler (常驻循环)
+│   │   └── services/          # results_db / artifacts / strategy_store / engine_probe
 │   ├── requirements.txt
 │   └── data/catalog.db        # catalog（gitignore）
 ├── frontend/                  # 复刻 amies 的 api/views/stores/components
@@ -396,7 +438,7 @@ QuantPlatform/
 | `POST` | `/api/strategies/{id}/versions` | 上传新版本 |
 | `PUT` | `/api/strategies/{id}/grants` | 授权共享（owner） |
 | `DELETE` | `/api/strategies/{id}` | 删除（owner；历史 run 不受影响） |
-| `POST` | `/api/runs` | 提交：校验模式 → 建工作目录 → 入队 → 返回 `run_id` |
+| `POST` | `/api/runs` | 提交：校验 → 落 `queued` 行 → 唤醒调度器 → 返回 `run_id`（**目录由调度侧构造**） |
 | `GET` | `/api/runs` | 本人运行列表，按状态/策略筛选、按指标排序、分页 |
 | `GET` | `/api/runs/{id}` | 元信息 + `result.json` 全文 |
 | `GET` | `/api/runs/{id}/equity` | 权益曲线序列（读 `Capital` 逐日 `Balance`） |
@@ -418,10 +460,16 @@ QuantPlatform/
 > **P2 落地范围**：本节中策略相关的六个端点已全部实现——`POST /api/strategies`、
 > `POST /api/strategies/{id}/versions`、`GET /api/strategies`、
 > `GET /api/strategies/{id}`、`PUT /api/strategies/{id}/grants`、
-> `DELETE /api/strategies/{id}`。`/api/runs` 与 `/api/health` 之外的其余端点
-> 属 P3 及以后。三个写操作（传新版本、删除、改授权）只对归属人开放，
-> 非归属人一律 404，不区分"无权"与"不存在"——区分了等于确认该 id 存在。
+> `DELETE /api/strategies/{id}`。三个写操作（传新版本、删除、改授权）只对归属人
+> 开放，非归属人一律 404，不区分"无权"与"不存在"——区分了等于确认该 id 存在。
 > 改授权的语义见 §7.5。
+
+> **P3 落地范围**：`POST /api/runs` 与 `POST /api/runs/{id}/cancel` 已实现。
+> **提交端点不碰文件系统**：它在 `commit()` 之后 `wake()` 调度器就返回 201，
+> 作业目录构造属调度侧——把长 IO 塞进请求路径会让调用方拿到一个"目录还没建好
+> 的运行"，而目录构造失败要由调度侧把该轮标 `failed`。
+> `/api/runs` 的其余 **读**端点（列表 / 详情 / 权益曲线 / 结果表 / 产物 / 对比）
+> 与 `DELETE` **不属 P3**：前者是 P5 的前置，后者要连工作目录一起删，留 P7。
 
 **三条安全硬约束**（Harness §6）：
 
@@ -460,10 +508,10 @@ QuantPlatform/
 | ---- | ---- | ---- |
 | **P0 地基探针** ✅ | 已按第 4 节契约跑通 | **2026-09-25 通过**：退出码 0，7 项指标与基准逐位一致 |
 | **P1 后端骨架 + 多用户** ✅ | 五张表 / 登录 / JWT / 查询统一收口加 `user_id` | **2026-09-25 通过**：两账号互不可见；越权返回 404（175 项测试） |
-| P2 策略上传 | 上传 `.py` + manifest / 校验 / 版本留档 / 落盘 | 上传后能跑通；manifest 缺模式或参数越界被拒 |
-| **P2 上传核心** 🔄 | 建策略+首版 / 传新版本 / 列表详情 / 软删 | **2026-09-25 部分通过**：manifest 缺模式、文件名非法、参数 key 重复均被拒（261 项测试）。**「上传后能跑通」待 P3** |
-| **P2b 策略授权** ✅ | `PUT /{id}/grants`，`StrategyGrants` 写入路径 | **2026-09-25 部分通过**：「被授权人可见、非授权人 404」通过（287 项测试）。**「可跑」待 P3**——`run` 权限此刻只是落库的一个取值，判定它要等 `POST /api/runs` |
-| P3 runner 本体 | 队列 / subprocess / 结果回收 / 启动恢复 / 作业目录构造 | 轮询至 `succeeded`；重启后端须标 `interrupted` |
+| **P2 策略上传** ✅ | 上传 `.py` + manifest / 校验 / 版本留档 / 落盘 | **2026-09-25 通过**：manifest 缺模式与参数越界均被拒；「上传后能跑通」由 P3 结清（同下行的「P2 上传核心」，本行是计划行、那行是落地行） |
+| **P2 上传核心** ✅ | 建策略+首版 / 传新版本 / 列表详情 / 软删 | **2026-09-25 通过**：manifest 缺模式、文件名非法、参数 key 重复均被拒（261 项测试）。**「上传后能跑通」已于 P3 结清**（真引擎一轮 Bar 成功，见下） |
+| **P2b 策略授权** ✅ | `PUT /{id}/grants`，`StrategyGrants` 写入路径 | **2026-09-25 通过**：「被授权人可见、非授权人 404」通过（287 项测试）。**「可跑」已于 P3 结清**：提交权限判定与可见性判定**逐字重合**，"授权即可跑"（含被授权人提交的用例） |
+| **P3 runner 本体** ✅ | 队列 / subprocess / 结果回收 / 启动恢复 / 作业目录构造 / cancel | **2026-09-25 通过**：`POST /api/runs` 提交后轮询至 `succeeded`；重启后端把在跑的轮标 `interrupted`；并发上限、超时、取消、输出捕获、结果镜像齐备（**380 项测试**，其中 4 项真引擎验收默认不跑，见 `backend/tests/test_real_engine_acceptance.py`）。真引擎实测：`Success=true`、`TradeCount == 84`、`BarMarketDataCount == 2928`，与 P0 基线同口径（前提差异见 [`job-workspace.md`](job-workspace.md) §6） |
 | P4 前端骨架 | Vue 3 + TS + Vite + Tailwind + Pinia | 完成「登录 → 上传策略 → 提交 → 看指标 → 下载」闭环 |
 | P5 可视化 | 权益曲线 + 回撤、明细分页表 | 曲线与实测数据点吻合（`1000000.0 → 999549.73`） |
 | P6 对比与模板 | 多轮对比、配置模板保存复用 | 同参不同 `GridStep` 的两轮指标并列且曲线叠加 |
@@ -476,16 +524,18 @@ P0 的验收里 `TradeCount>0` 是关键判据：`QuantTrading` 记载过 Python
 P1 的越权验收用 **404 而非 403**：403 会泄漏"该 id 存在"这一事实，
 多租户下应一律表现为"不存在"。
 
-P2b 的「可跑」在 P3 开工前要先把 `permission_type` 的判定定下来：`read` / `run`
-两档此刻只是落库的取值，没有任何一处读它；无 `run` 授权者提交回测该回 403 还是
-404，以及 `public` 是否隐含可跑（若隐含即是一次权限放宽），都须先拍板。
-未决项记在 `PROGRESS.md` 的 ❓ 区。
+P2b 的「可跑」所需的判定已于 P3 开工前（2026-09-25）**拍板**：**不区分 `read` /
+`run`，授权即可跑；`public` 隐含可跑**。理由是提交权限的判定与可见性判定**逐字
+重合**（`private` 下授权表本就不生效），于是跑权限检查就是那一次可见性取件，
+既不新增 403 分支（D.02 起的"跨租户一律 404"原样保住），也不必为两档粒度另编
+一套语义。`GrantPermission` 字段与 P2b 的端点契约**原样保留**，只是它不再被任何
+判定读取——`enums.py` 的 docstring 已写明"已拍板不判定"，免得后人当缺陷去修。
 
 ---
 
 ## 12. 风险与不做项
 
-1. **绑死 Windows + Python 3.11**：`.pyd` 是 `cp311-win_amd64`，
+1. **绑死 Windows + Python 3.14**：`.pyd` 是 `cp314-win_amd64`，
    Linux 无解，云主机只能是 Windows；后端必须与引擎同机，**横向扩展无余地**。
 2. **目录级隔离挡不住恶意读盘**（见 5.2）。开放给不可信用户前必须上系统级隔离。
 3. **磁盘膨胀**：实测单轮 **3.0 MB**（结果库 + 17 个 CSV + 日志），
@@ -494,12 +544,35 @@ P2b 的「可跑」在 P3 开工前要先把 `permission_type` 的判定定下�
    `terminate()` 够用，不必上 `psutil`。
 5. **输出编码**：引擎有 GBK 变体、日志含中文，runner 读 stdout/stderr 须
    `errors="replace"` 容错，否则收尾部时会崩。
-6. **引擎日志名由 `argv[0]` 经 `ParseProcessName` 决定**：Windows 上只认
-   反斜杠为分隔符、按首个点截断扩展名，故 `argv[0]` 必须传裸文件名，
-   否则**启动期即终止进程**，详见 [`job-workspace.md`](job-workspace.md) §3.1。
+6. **`argv[0]` 传裸文件名是固定选择，不是硬约束**（**2026-09-25 实测订正**）：
+   带路径的形态（正斜杠相对、反斜杠绝对）同样能跑完整轮、退出码 0，
+   原文"否则启动期即终止进程"**已不成立**。详见 §3 与
+   [`job-workspace.md`](job-workspace.md) §3.1。
 7. **`BarPreces` 是引擎侧既有拼写**（非笔误，不可擅改），平台配置键须逐字一致。
 8. **不做**：跨运行库级对比（`ATTACH` 上限 10，已决定暂不做）、盘后行情修正、
    C++ 策略宿主（三条再评估触发条件已留档）、zip 上传（见 7.1）。
+
+**P3 起新记的已知缺口**（明确不做，写在这里免得日后被当缺陷）：
+
+9. **队列是纯 FIFO，没有配额**：一个用户连发 100 个作业会饿死其他人
+   （`max_concurrent_runs=1` 时更明显）。本期不做配额。
+10. **不做"重启后续跑"**：重启时 `queued` / `running` 一律标 `interrupted`。
+    若日后要做，唤醒机制必须从"事件 + 看门狗"改成短轮询（看门狗会漏掉
+    重启前的行，而它们那时不在队列里）。
+11. **不做多 worker**：单实例是调度器的**硬前提**。`uvicorn --workers 2` 下，
+    B 进程的启动恢复会把 A 正在跑的作业标 `interrupted`。已写进
+    `recovery.py` 的 `logger.warning`。
+12. **孤儿进程不自动清理**：不按 `RunnerPid` 杀（PID 回收后会杀错无关进程，
+    且没有可验证的身份凭证）；孤儿的写入被"相对写路径"关在自己的作业目录里，
+    伤害是资源泄漏而非正确性破坏。恢复时把 `(RunId, RunnerPid)` 写进日志供人工核对。
+13. **Tick 模式不可提交**：manifest 仍可声明支持 `Tick`（那是策略作者的事），
+    但提交侧一律 400。引擎的 tick 撮合有**三档**（`OrderBook:0` / `LastPrice:1` /
+    `OppositePrice:2`），平台的 `MarketDataType` 只有两值，推不出那三档；
+    且 `D:/MdBaoStock` 下根本没有 tick 数据，从未验证过。判据是具名常量
+    `SUBMITTABLE_MATCH_MODES = frozenset({MarketDataType.BAR})`，开 Tick 时改它。
+14. **种子库 `BackTestInit.db` 不重建**：本机 `bin/Release` 下没有它，
+    费用三项恒为 0、`CommissionMissingCount` 恒 84、`BasicDataLoaded` 恒 `false`。
+    这是**输入缺失**而非缺陷，验收里已把这四条**钉成断言**（重建时会一起转红）。
 
 ---
 
@@ -519,3 +592,15 @@ P2b 的「可跑」在 P3 开工前要先把 `permission_type` 的判定定下�
 | 授权与可见性的衔接 | **授权驱动可见性** | 2026-09-25 P2b 开工前拍板；见 §7.5 |
 | 上云节奏 | 本机跑通再迁 | |
 | 上传形态 | `.py` 必需 + manifest 表单或文件 | 不收 zip |
+
+**P3 开工前新增的拍板**（2026-09-25）：
+
+| 决策点 | 选择 | 备注 |
+| ---- | ---- | ---- |
+| 授权粒度 | **不区分 `read` / `run`，授权即可跑** | 跑权限 = 可见性，不新增越权分支；`GrantPermission` 保留但不再被读；见 §11 |
+| `public` 语义 | **隐含可跑** | 一次有意的权限放宽 |
+| `params` schema | **本轮定案**（四类型 + `options` + 缺省即必填） | 见 §7.2 |
+| manifest 运行级字段映射 | **新增 `run_field_keys`** | 结清"`bar_period` 两处不一致 → 静默 0 成交"；见 §7.2 |
+| Tick 模式 | **本轮不开**（提交侧 400） | 三档撮合语义未定；见 §12.13 |
+| 种子库 | **不重建**，验收按"缺失"断言 | 见 §12.14 |
+| P3 范围 | 提交 + 队列 + 回收 + 恢复 **+ cancel** | 只读端点留 P5、`DELETE` 留 P7 |

@@ -61,6 +61,34 @@ class AccessTokenResponse(BaseModel):
     expires_in_minutes: int
 
 
+class RunSubmitRequest(BaseModel):
+    """提交一次回测.
+
+    这里只声明"有哪些字段、是什么类型", **取值规则一概不写在这里**: 那些规则要回 400 并只说
+    字段名与原因, 而 pydantic 的 422 会把出错的取值原样抄回响应体——这份请求体里装的是用户填的
+    参数与标的, 不该进接入层日志. 规则全部落在 `services/run_submission`.
+
+    `extra="forbid"`: 多写一个字段名 (如 `param` 少了个 s) 会让参数整批静默落空, 而策略随后
+    以"配置里没有这个键"的样子报错——把字段名写错这件事必须在提交这一步就拦住.
+
+    `params` 的 key 不在 model 里逐一声明 (声明由 manifest 给, 是数据不是 schema), 故它收一个
+    自由字典, 由提交侧按 manifest 校验.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    strategy_id: str = Field(min_length=1, max_length=32)
+    strategy_version_id: str | None = Field(default=None, min_length=1, max_length=32)
+    match_mode: MarketDataType
+    bar_period: str = ""
+    exchange_id: str | None = None
+    instrument_id: str | None = None
+    start_trading_day: str = ""
+    end_trading_day: str = ""
+    initial_capital: float
+    params: dict[str, object] = Field(default_factory=dict)
+
+
 class UserCreateRequest(BaseModel):
     """由管理员建号."""
 

@@ -151,7 +151,7 @@ async def store_strategy_version(
     在写盘处接, 接到提交处就永远走不到——改名先于提交失败. **这套语义是 Windows 的**:
     目标存在即 `FileExistsError`. POSIX 的 `rename(2)` 会静默替换空目录目标, 撞号不再报错
     而变成"两次上传共用一个目录", 后一次的回滚会删掉前一次仍在用的目录. 本平台绑死
-    Windows + Python 3.11 (`.pyd` 是 `cp311-win_amd64`), 故不为此加分支; 若日后换平台,
+    Windows + Python 3.14 (`.pyd` 是 `cp314-win_amd64`, 见 `PROGRESS.md` 备注), 故不为此加分支; 若日后换平台,
     这里必须先改成 `mkdir(exist_ok=False)` 之类的显式占位.
 
     复用路径上不碰 `UpdatedAt`: 没有任何新内容落库, 把"最近变更"往前推会让这个字段说谎.

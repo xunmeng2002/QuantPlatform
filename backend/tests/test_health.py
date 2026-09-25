@@ -17,10 +17,10 @@ from app.auth.dependencies import ADMIN_REQUIRED_DETAIL
 from app.catalog.database import PlatformDatabase
 from app.config import PlatformSettings
 from app.main import UNEXPECTED_ERROR_DETAIL
-from app.routers.health import (
+from app.routers.health import EngineHealthResponse
+from app.services.engine_probe import (
     ENGINE_RUNTIME_FILENAMES,
-    EngineHealthResponse,
-    _interpreter_tag,
+    interpreter_tag,
 )
 
 from .conftest import TEST_BASE_URL, TEST_ADMIN_PASSWORD, TEST_ADMIN_USERNAME
@@ -58,10 +58,10 @@ def _settings(application: FastAPI) -> PlatformSettings:
     return application.state.settings
 
 
-def _write_binding(engine_root: Path, interpreter_tag: str) -> str:
+def _write_binding(engine_root: Path, abi_tag: str) -> str:
     """放一个 ABI 标签匹配的扩展模块空文件, 并返回其文件名."""
 
-    filename = f"{BINDING_FILENAME_PREFIX}{interpreter_tag}-win_amd64{BINDING_FILENAME_SUFFIX}"
+    filename = f"{BINDING_FILENAME_PREFIX}{abi_tag}-win_amd64{BINDING_FILENAME_SUFFIX}"
     engine_root.mkdir(parents=True, exist_ok=True)
     (engine_root / filename).touch()
 
@@ -109,7 +109,7 @@ async def test_health_reports_ready_when_engine_is_complete(
 ) -> None:
     settings = _settings(application)
 
-    _write_binding(settings.engine_root, _interpreter_tag())
+    _write_binding(settings.engine_root, interpreter_tag())
     _write_runtime_libraries(settings.engine_root)
 
     health = await _read_health(client, health_token)
@@ -142,7 +142,7 @@ async def test_health_rejects_a_binding_built_for_another_interpreter(
     health_token: str,
     foreign_interpreter_tag: str,
 ) -> None:
-    """扩展模块是 cp311-win_amd64, 解释器小版本不匹配即不可用; 按 ABI 标签判, 不靠 import 试错."""
+    """扩展模块是 `cp314-win_amd64`, 解释器 ABI 不匹配即不可用; 按标签判, 不靠 import 试错."""
 
     settings = _settings(application)
 
@@ -161,7 +161,7 @@ async def test_health_reports_a_binding_missing_only_its_suffix(
     settings = _settings(application)
 
     settings.engine_root.mkdir(parents=True, exist_ok=True)
-    (settings.engine_root / f"{BINDING_FILENAME_PREFIX}{_interpreter_tag()}").touch()
+    (settings.engine_root / f"{BINDING_FILENAME_PREFIX}{interpreter_tag()}").touch()
 
     health = await _read_health(client, health_token)
 
@@ -173,7 +173,7 @@ async def test_health_lists_every_missing_runtime_library(
 ) -> None:
     settings = _settings(application)
 
-    _write_binding(settings.engine_root, _interpreter_tag())
+    _write_binding(settings.engine_root, interpreter_tag())
     settings.engine_root.mkdir(parents=True, exist_ok=True)
     (settings.engine_root / ENGINE_RUNTIME_FILENAMES[0]).touch()
 
@@ -190,7 +190,7 @@ async def test_health_reports_a_runs_root_that_cannot_be_created(
 
     settings = _settings(application)
 
-    _write_binding(settings.engine_root, _interpreter_tag())
+    _write_binding(settings.engine_root, interpreter_tag())
     _write_runtime_libraries(settings.engine_root)
     settings.runs_root.parent.mkdir(parents=True, exist_ok=True)
     settings.runs_root.touch()
@@ -220,8 +220,8 @@ async def test_health_reports_the_interpreter_it_ran_under(
 ) -> None:
     health = await _read_health(client, health_token)
 
-    assert health.interpreter_tag == _interpreter_tag()
-    assert health.python_version.startswith(f"{_interpreter_tag().removeprefix('cp')[0]}.")
+    assert health.interpreter_tag == interpreter_tag()
+    assert health.python_version.startswith(f"{interpreter_tag().removeprefix('cp')[0]}.")
 
 
 async def test_unexpected_failure_is_reported_without_leaking_internals(

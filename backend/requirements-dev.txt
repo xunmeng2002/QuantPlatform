@@ -1,3 +1,7 @@
 -r requirements.txt
 pytest>=8.0
 httpx>=0.27
+
+# pytest.ini 设了 asyncio_mode = auto, 那是本插件的配置项: 少了它, 照本文件装出来的环境连一条
+# 用例都跑不起来 (而 pytest 只会把那个 ini 项当未知项警告一下).
+pytest-asyncio>=0.24

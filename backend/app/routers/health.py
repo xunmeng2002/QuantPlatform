@@ -1,12 +1,17 @@
 """引擎自检.
 
-后端的可用性取决于引擎侧三个硬条件: 与当前解释器匹配的扩展模块存在 (它是 cp311-win_amd64,
-Python 小版本不匹配即不可用)、引擎运行时 DLL 齐备、运行根可写. 这些条件不满足时提交回测
-只会得到一个难以归因的启动失败, 故在设置页提前暴露.
+后端的可用性取决于引擎侧一组硬条件: 与当前解释器匹配的扩展模块存在 (名字里的 cpXXX 即 ABI
+标签, Python 小版本不匹配即不可用)、引擎运行时 DLL 齐备、运行根可写, 以及调度侧要读入的三个
+文件分别在位. 这些条件不满足时提交回测只会得到一个难以归因的启动失败, 故在设置页提前暴露.
 
 本端点要求管理员 (计划原文把它列为免认证, P1 实施时先收为需认证, 现再收为仅管理员): 响应要
 报出引擎根与运行根的绝对路径、缺失的 DLL 名与解释器版本, 即本机内部布局的清单. 单机部署没有
 负载均衡这类匿名消费者, 而普通用户拿到这份清单只有泄漏面——他能做的动作里没有一项需要它.
+
+三个引擎侧输入的缺失**不并入 `ready`**: `market_data_root` 与 `session_file_path` 缺失会让
+每个作业都构造不出工作目录, `seed_database_path` 缺失只是让费用三项退化成 0 (引擎自己
+`exists` 之后 Warning 并继续, 见 `SimExchange.cpp`). 分成三个独立的旗标, 调用方才能分辨
+"跑不了"与"跑得了但费用不全".
 """
 
 from __future__ import annotations
@@ -20,13 +25,15 @@ from pydantic import BaseModel
 
 from ..auth.dependencies import AdminUserDependency
 from ..dependencies import SettingsDependency
+from ..services.engine_probe import (
+    find_python_binding,
+    interpreter_tag,
+    missing_runtime_filenames,
+)
 
 
 router = APIRouter()
 
-PYTHON_BINDING_FILENAME_PREFIX = "QuantTrading."
-PYTHON_BINDING_FILENAME_SUFFIX = ".pyd"
-ENGINE_RUNTIME_FILENAMES = ("BackTest.dll", "Core.dll", "Network.dll")
 WRITE_PROBE_FILENAME_PREFIX = ".write-probe-"
 
 
@@ -42,31 +49,12 @@ class EngineHealthResponse(BaseModel):
     missing_runtime_filenames: list[str]
     runs_root: str
     runs_root_writable: bool
-
-
-def _find_python_binding(engine_root: Path) -> Path | None:
-    """找与当前解释器 ABI 匹配的扩展模块.
-
-    扩展模块名形如 `QuantTrading.cp311-win_amd64.pyd`, 其中的 cp311 即 ABI 标签, 故按解释器
-    版本派生出标签再比对文件名, 不靠 import 试错——试错失败时拿不到原因.
-    """
-
-    if not engine_root.is_dir():
-        return None
-
-    interpreter_tag = _interpreter_tag()
-
-    for candidate in sorted(engine_root.glob(f"{PYTHON_BINDING_FILENAME_PREFIX}*")):
-        if candidate.name.endswith(PYTHON_BINDING_FILENAME_SUFFIX) and interpreter_tag in candidate.name:
-            return candidate
-
-    return None
-
-
-def _interpreter_tag() -> str:
-    """当前解释器的 ABI 标签, 如 cp311."""
-
-    return f"cp{sys.version_info.major}{sys.version_info.minor}"
+    market_data_root: str
+    market_data_root_exists: bool
+    session_file_path: str
+    session_file_exists: bool
+    seed_database_path: str
+    seed_database_exists: bool
 
 
 def _probe_directory_writable(directory: Path) -> bool:
@@ -92,26 +80,32 @@ async def read_health_handler(
     settings: SettingsDependency,
     admin_user: AdminUserDependency,
 ) -> EngineHealthResponse:
-    """引擎自检: 扩展模块、运行时 DLL 与运行根可写性."""
+    """引擎自检: 扩展模块、运行时 DLL、运行根可写性与三个引擎侧输入."""
 
-    python_binding = _find_python_binding(settings.engine_root)
+    python_binding = find_python_binding(settings.engine_root)
 
-    missing_runtime_filenames = [
-        filename
-        for filename in ENGINE_RUNTIME_FILENAMES
-        if not (settings.engine_root / filename).is_file()
-    ]
+    absent_runtime_filenames = missing_runtime_filenames(settings.engine_root)
 
     runs_root_writable = _probe_directory_writable(settings.runs_root)
 
     return EngineHealthResponse(
-        ready=python_binding is not None and not missing_runtime_filenames and runs_root_writable,
-        interpreter_tag=_interpreter_tag(),
+        ready=(
+            python_binding is not None
+            and not absent_runtime_filenames
+            and runs_root_writable
+        ),
+        interpreter_tag=interpreter_tag(),
         python_version=".".join(str(part) for part in sys.version_info[:3]),
         engine_root=str(settings.engine_root),
         engine_root_exists=settings.engine_root.is_dir(),
         python_binding_filename=python_binding.name if python_binding else None,
-        missing_runtime_filenames=missing_runtime_filenames,
+        missing_runtime_filenames=absent_runtime_filenames,
         runs_root=str(settings.runs_root),
         runs_root_writable=runs_root_writable,
+        market_data_root=str(settings.market_data_root),
+        market_data_root_exists=settings.market_data_root.is_dir(),
+        session_file_path=str(settings.session_file_path),
+        session_file_exists=settings.session_file_path.is_file(),
+        seed_database_path=str(settings.seed_database_path),
+        seed_database_exists=settings.seed_database_path.is_file(),
     )

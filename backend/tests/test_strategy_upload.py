@@ -396,12 +396,16 @@ async def test_reusing_a_version_does_not_claim_the_strategy_was_updated(
     assert reread.strategy.updated_at == detail.strategy.updated_at
 
 
-async def test_parameter_entries_the_platform_does_not_know_yet_survive_verbatim(
+async def test_stored_manifest_keeps_the_declared_parameter_fields_unchanged(
     client: AsyncClient,
     owner_account: SignedInAccount,
     platform_settings: PlatformSettings,
 ) -> None:
-    """params 的类型枚举与校验规则尚未定案, 故此刻必须原样留存, 定案后不必回头改写已传的 manifest."""
+    """落盘的 manifest 里, 作者声明过的字段一个不改.
+
+    这是"平台按 manifest 渲染策略配置"的前提: 入库快照若与作者写下的取值有出入, 作者照着
+    自己的文件核对就永远对不上, 而配置渲染正是读这份快照.
+    """
 
     detail = await create_strategy(client, owner_account.token)
 
@@ -413,7 +417,63 @@ async def test_parameter_entries_the_platform_does_not_know_yet_survive_verbatim
     )
     stored = json.loads((directory / MANIFEST_FILENAME).read_text(encoding="utf-8"))
 
-    assert stored["params"] == PARAMETER_LIST
+    stored_parameters = stored["params"]
+
+    assert len(stored_parameters) == len(PARAMETER_LIST)
+
+    for stored_parameter, declared_parameter in zip(
+        stored_parameters, PARAMETER_LIST, strict=True
+    ):
+        # 声明过的字段逐项相等: 归一化只补默认值, 不改作者写下的取值.
+        for field_name, declared_value in declared_parameter.items():
+            assert stored_parameter[field_name] == declared_value, field_name
+
+    # 归一化确实发生过: 缺省字段被补成了空值, 而不是原样留了个空.
+    assert stored_parameters[0]["group"] == ""
+    assert stored_parameters[0]["options"] == []
+
+
+async def test_undeclared_parameter_fields_survive_verbatim(
+    client: AsyncClient,
+    owner_account: SignedInAccount,
+    platform_settings: PlatformSettings,
+) -> None:
+    """参数项里平台还不认识的键必须原样留存.
+
+    这是 `StrategyParameter` 用 `extra="allow"` 的兑现处: 界面提示、分组图标这类键平台此刻不
+    参与计算, 但写成 `extra="forbid"` 就会让作者加一个键就被整个上传拒掉, 而报错文案里只有
+    位置没有取值, 作者得逐个键试出来是哪个多余.
+    """
+
+    undeclared_fields = {
+        "ui_hint": "取值范围 0.1 ~ 100",
+        "advanced": True,
+        "widget": {"kind": "slider", "step": 0.5},
+    }
+
+    detail = await create_strategy(client, owner_account.token)
+
+    response = await post_strategy_version(
+        client,
+        owner_account.token,
+        detail.strategy.id,
+        manifest_text=manifest_payload(
+            params=[{**PARAMETER_LIST[0], **undeclared_fields}, PARAMETER_LIST[1]]
+        ),
+    )
+
+    assert response.status_code == 201, response.text
+
+    directory = version_directory(
+        platform_settings,
+        owner_account.user_id,
+        detail.strategy.id,
+        StrategyVersionResponse.model_validate(response.json()).version_no,
+    )
+    stored = json.loads((directory / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+
+    for field_name, field_value in undeclared_fields.items():
+        assert stored["params"][0][field_name] == field_value, field_name
 
 
 @pytest.mark.parametrize(
@@ -731,13 +791,16 @@ async def test_a_legal_upload_at_the_source_and_manifest_limits_is_accepted(
     只钉"超限被拒"是不够的: 把余量改小到装不下"源码 1 MB + manifest 64 KB"这个**允许**的
     组合, 全部既有测试照样是绿的, 而用户正常上传会莫名拿到 413. 体积闸有两个方向, 这里钉的是
     另一头——四次变异检查全在"改大/摘掉"那一侧, 恰好漏掉它.
+
+    填充必须落在**平台不参与校验的键**上: 声明过的字符串字段各有自己的长度上限 (`label` 128),
+    拿它们去凑 64 KB 会先被 manifest 校验拒掉, 那测的就不是体积闸了.
     """
 
     manifest_padding = MAXIMUM_MANIFEST_BYTES - len(
-        manifest_payload(params=[{"key": "GridStep", "label": ""}]).encode("utf-8")
+        manifest_payload(params=[{"key": "GridStep", "ui_padding": ""}]).encode("utf-8")
     )
     sized_manifest = manifest_payload(
-        params=[{"key": "GridStep", "label": "x" * manifest_padding}]
+        params=[{"key": "GridStep", "ui_padding": "x" * manifest_padding}]
     )
     sized_source = b"#" * MAXIMUM_SOURCE_BYTES
 

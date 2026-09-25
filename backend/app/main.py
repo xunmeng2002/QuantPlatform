@@ -30,6 +30,8 @@ from .errors import (
 from .manifest import MAXIMUM_MANIFEST_BYTES
 from .routers import auth, health, runs, strategies, users
 from .routers.strategies import MAXIMUM_SOURCE_BYTES
+from .scheduler.recovery import recover_interrupted_runs
+from .scheduler.scheduler import RunScheduler
 
 
 APPLICATION_TITLE = "QuantPlatform"
@@ -83,17 +85,25 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _application_lifespan(application: FastAPI) -> AsyncIterator[None]:
-    """建表、播种, 并在退出时释放连接池."""
+    """建表、播种、结清上一轮残留, 再起调度器; 退出时反序收场.
+
+    次序不能换: 恢复必须在调度器**启动之前**跑完. 反过来的话, 恢复那条 UPDATE 会把调度器刚认领
+    的作业一起标成中断, 而那个作业的进程已经起来了——库里说"中断", 进程还在写盘.
+    """
 
     settings: PlatformSettings = application.state.settings
     database: PlatformDatabase = application.state.database
+    scheduler: RunScheduler = application.state.scheduler
 
     await database.initialize()
     await ensure_initial_admin(database, settings)
+    await recover_interrupted_runs(database)
+    await scheduler.start()
 
     try:
         yield
     finally:
+        await scheduler.stop()
         await database.close()
 
 
@@ -221,8 +231,13 @@ def create_application(settings: PlatformSettings | None = None) -> FastAPI:
         version=APPLICATION_VERSION,
         lifespan=_application_lifespan,
     )
+    database = PlatformDatabase(resolved_settings.database_url)
+
     application.state.settings = resolved_settings
-    application.state.database = PlatformDatabase(resolved_settings.database_url)
+    application.state.database = database
+    # 调度器在装配期就建好 (而不是在 lifespan 里): 取消端点要经依赖取它, 而依赖函数只做取出.
+    # 未起循环时注册表为空、信号量满格, 端点照样能答——它只是取不到句柄而已.
+    application.state.scheduler = RunScheduler(resolved_settings, database)
 
     _register_exception_handlers(application)
     _register_request_size_guard(application)

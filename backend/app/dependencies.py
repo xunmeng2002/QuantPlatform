@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .catalog.database import PlatformDatabase
 from .config import PlatformSettings
+from .scheduler.scheduler import RunScheduler
 
 
 def get_settings(request: Request) -> PlatformSettings:
@@ -25,6 +26,12 @@ def get_database(request: Request) -> PlatformDatabase:
     """取装配时挂上的数据库门面."""
 
     return request.app.state.database
+
+
+def get_scheduler(request: Request) -> RunScheduler:
+    """取装配时挂上的调度器."""
+
+    return request.app.state.scheduler
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
@@ -45,3 +52,5 @@ SettingsDependency: TypeAlias = Annotated[PlatformSettings, Depends(get_settings
 DatabaseDependency: TypeAlias = Annotated[PlatformDatabase, Depends(get_database)]
 
 SessionDependency: TypeAlias = Annotated[AsyncSession, Depends(get_session)]
+
+SchedulerDependency: TypeAlias = Annotated[RunScheduler, Depends(get_scheduler)]
