@@ -1,3 +1,20 @@
+# ── QuantPlatform 运行时产物 ──────────────────────────────────
+
+# 每 job 独立工作目录：含引擎产物（单轮约 3 MB），可再生，不入库
+runs/
+
+# 策略库：用户上传的源码与版本留档，属运行数据而非平台代码
+users/
+
+# 平台 catalog 与运行态（本机单用户）
+backend/data/
+
+# 前端依赖
+node_modules/
+
+# Visual Studio 本地缓存
+.vs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

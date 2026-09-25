@@ -1,0 +1,410 @@
+# 量化回测平台实施计划
+
+本文是 `QuantPlatform` 的总体实施计划：以 Vue 3 前端 + FastAPI 后端，包裹
+`../QuantTrading` 的 C++ 回测引擎，做成一个**云上多用户**的回测平台。
+
+计划的**前提不是本文新拟的**，而是承接 `QuantTrading` 仓内已定案的平台化结论
+（`PROGRESS.md` 与归档 `D.48`，2026-09-18 用户拍板）。本文只解决那些定案中
+「剩余全在调度侧」的部分，叠加上 2026-09-25 由用户拍板的多用户与上传决策。
+
+---
+
+## 1. 已定案的前提
+
+以下八条来自 `QuantTrading` 归档 `D.48`，本平台**不得与之冲突**：
+
+| 条目 | 定案 |
+| ---- | ---- |
+| 形态 | **调度层就是 web 后端**，不是另一个程序 |
+| 部署 | web 后端**必须与引擎同机** |
+| 通信 | 一次性进程 + 常驻调度层，**文件 + 退出码**，不走 RPC |
+| RunId | **由调度侧经配置注入**，引擎不再自生成 |
+| 隔离 | **每 job 独立工作目录** |
+| catalog | **由调度侧写**，引擎零改动 |
+| 策略 | **只收 Python 宿主**；平台拉起的是**用户策略程序** |
+| 产物 | 本机磁盘 + SQLite，**不上对象存储** |
+
+`QuantTrading/PROGRESS.md` 列的「上平台剩余四件」中：
+
+- ① result 口径 —— **已了结**（第十六批）。
+- ② job 工作目录的构造与 `.pyd` 查找 —— 标注为**硬钉子**，已由 P0 解除。
+- ③ runner 本体 —— 拉进程、限时、收 stdout/stderr、读 `result.json`、写 catalog。
+- ④ catalog 表结构 —— 见第 6 节。
+
+2026-09-25 追加拍板（推翻同日更早的两项初判）：
+
+| 条目 | 定案 |
+| ---- | ---- |
+| 用户 | **云上多用户**，现在就做多用户骨架 |
+| 策略 | **由用户上传**，不再"仅内置策略" |
+| 鉴权 | **要做**（推翻"不做，仅本机单用户"） |
+| 隔离 | **目录级**起步，系统级为开放给不可信用户的前置门槛 |
+| 可见性 | `private` / `shared` / `public` 三档 |
+| 上云 | **本机先跑通，再迁 Windows 云主机** |
+
+---
+
+## 2. 实测确认的技术事实
+
+本轮在开发机上实测所得，是后续所有设计的依据：
+
+- 工具链：**Python 3.11.1**（正是 `.pyd` 的 `cp311`）、**Node 24.15 / npm 11.12**。
+- 引擎产物：`result.json`、`BackTest_<RunId>.db`（17 张表）、
+  `Dump/<RunId>/t_*.csv`（17 个）、`log/<名>.<时间戳>.log`。
+- 权益曲线数据源现成：`Capital` 表含 `TradingDay, Balance, Available`，
+  逐日一行，实测序列 `1000000.0 → 999549.73 → 999164.41`。
+- 宿主契约：`python <策略>.py`，**从 CWD 读**两个硬编码名配置文件——
+  策略配置（如 `TestStrategyGrid.json`）与引擎配置（`BackTest.json`），
+  以 `sys.exit(main())` 走 0/1/2/3 退出码。
+- 策略可用接口：10 个可覆写钩子（`on_start` / `on_tick` / `on_bar` /
+  `on_trade` / `on_order` / `on_insert_order_rsp` / `on_cancel_order_rsp` /
+  `on_session_begin` / `on_session_end` / `on_end`），若干下单与查询方法
+  （`subscribe_tick` / `subscribe_bar` / `declare_bar_period` / `buy_open` /
+  `sell_open` / `buy_close` / `sell_close` / `cancel_order` /
+  `get_long_position` / `get_short_position` / `get_last_price`），
+  模块级 `create_backtest_api` / `init_logger` / `shutdown_logger`。
+- 行情数据根 `D:/MdBaoStock/Bar/` 存在，按 `Identity=<板块>/Year=<年>/`
+  存放 `<年>_<周期>.parquet`。
+- 既有栈惯例（`amies-data-platform`）：
+  **FastAPI + SQLAlchemy + aiosqlite** / **Vue 3.5 + TS + Vite + Tailwind + Pinia**。
+
+---
+
+## 3. 硬钉子 ②：工作目录与 `.pyd` 查找（P0 已解）
+
+`test/PythonStrategyGrid/grid_strategy.py` 靠 `__file__` 反推
+`REPO_ROOT/bin/Release` 来找 `QuantTrading.cp311-win_amd64.pyd`。
+**脚本一进独立工作目录就 import 失败。**
+
+两条互补解法（**Phase 0 实测后已修正**，机制详见
+[`job-workspace.md`](job-workspace.md) §3）：
+
+1. **脚本原样复制到 job 目录根部，以裸文件名启动。**
+   runner 把策略入口复制进 job 目录，以 `cwd=<job 目录>`、
+   `argv[0]="grid_strategy.py"` 启动。复制是**原样**的，故现有
+   `grid_strategy.py` **一行不改**即可运行。
+2. **`PYTHONPATH` 指向引擎根——这是必需项，不是兜底。**
+   脚本被复制后 `__file__` 指向 job 目录，凡靠 `__file__` 反推
+   `bin/Release` 的写法都会算错，引擎根必须由环境变量显式给出。
+
+原先"脚本留在原地、只改 CWD"的方案**已被实测否决**：引擎日志器（Spark 的
+`Utility::ParseProcessName`）在 Windows 上**只认反斜杠为目录分隔符**，
+拿到带路径的 `argv[0]` 会拼出非法日志路径，**启动期即终止进程（退出码 1）**。
+
+> **提示**：`PYTHONPATH` 单独一条即可满足 `import QuantTrading` 及 `.pyd`
+> 同目录依赖（`BackTest.dll`、`Core.dll`、`Network.dll` 等）——CPython 在
+> Windows 以 `LOAD_WITH_ALTERED_SEARCH_PATH` 加载扩展模块。Phase 0 已实测。
+
+**这条决定在多用户下更重要**：把策略入口复制进 job 目录，等于**冻结了当轮
+实际执行的代码**。策略事后被改动或删除，历史 job 目录仍逐字自描述。
+
+---
+
+## 4. job 工作目录契约
+
+契约全文（目录布局、启动契约、退出码、产物、Phase 0 实测记录）见
+[`job-workspace.md`](job-workspace.md)。此处只复述两条决定后端设计的硬约束：
+
+1. **写路径必须相对**：`DbHost` 与 `DumpPath` 一旦写成绝对路径，
+   「每 job 独立工作目录」的隔离会**静默失效**——两个并发 job 会写
+   同一个库且不报错。
+2. **`argv[0]` 必须是无分隔符的裸文件名**：带正斜杠的路径会让引擎
+   日志器拼出非法路径并**在启动期终止进程**（退出码 1）。这条与
+   绝对/相对**无关**，只与分隔符有关。
+
+---
+
+## 5. 部署形态与隔离边界
+
+### 5.1 部署
+
+- **现在**：本机 Windows，监听 `127.0.0.1`，单实例。
+- **将来**：**一台 Windows 云主机**。三点约束必须现在认下来：
+  1. `.pyd` 是 `cp311-win_amd64`，**Linux 无解**，云主机只能是 Windows。
+  2. 后端**必须与引擎同机**（读行情 parquet 磁盘 + 用 `.pyd` 拉起宿主），
+     故横向扩展没有余地，扩容只能是纵向的。
+  3. 行情数据要一并上云（现约 1.2 MB/年/板块，可接受，但需同步策略）。
+
+### 5.2 隔离档位（已选：目录级）
+
+平台要执行**用户上传的任意 Python**——这是设计的一部分（`D.48` 已承认
+"in-process 任意代码执行不比独立 exe 安全"）。本平台把它放在**独立子进程**
+里跑，不是在后端进程内，但**这不是沙箱**。
+
+| 档位 | 做法 | 挡得住 | 挡不住 |
+| ---- | ---- | ---- | ---- |
+| 目录级（本期） | 每用户独立目录 + 运行时只暴露本人路径 + 全表行级过滤 | 误访问、界面越权 | **恶意读盘** |
+| 系统级（上云前） | 每用户独立低权 OS 账号或容器 + ACL | 恶意代码 | —— |
+
+> **警告**：目录级隔离**挡不住恶意读盘**——策略是任意 Python，带后端身份运行，
+> 能自行按路径读他人的策略源码与产物，绕过全部 SQL 过滤。故本期**只对可信
+> 用户开放**；开放给不可信用户之前，系统级隔离是必须的前置门槛。
+
+**目录级隔离的落点**：策略与产物按用户分目录（见第 8 节），runner 构造 job
+时**只挂载本人路径**，不把他人目录写进任何配置项传给宿主。
+
+### 5.3 权限过滤是每张表都要的
+
+不是"在策略表上加一列 `owner_user_id`"就完事：`runs` 也必须按 `user_id`
+过滤，否则甲能从运行列表里看到乙的成交明细。这类"漏了一处"的越权很难靠人工
+审查发现，故实现上要求**查询入口统一收口**，不散落各处。
+
+---
+
+## 6. 数据模型
+
+五张表。`runs` 的 `result.json` 镜像列的完整清单见
+`QuantTrading/docs/backtest-run-contract.md` §2。
+
+```sql
+-- 用户
+users(
+  user_id PK, username UNIQUE, password_hash, display_name,
+  role,           -- admin / user
+  status,         -- active / disabled
+  created_at
+)
+
+-- 策略：逻辑实体（一个名字、一个归属）
+strategies(
+  strategy_id PK, owner_user_id FK->users, name, description,
+  visibility,     -- private / shared / public
+  created_at, updated_at,
+  UNIQUE(owner_user_id, name)
+)
+
+-- 策略版本：留档，append-only，永不改写
+strategy_versions(
+  version_id PK, strategy_id FK, version_no,
+  entry_filename,      -- 入口文件名，如 grid_strategy.py
+  config_filename,     -- 策略配置文件名，如 TestStrategyGrid.json
+  manifest_json,       -- 参数 schema + 支持的行情模式
+  source_hash,         -- sha256，兼作内容寻址
+  storage_path, uploaded_at, uploaded_by FK->users,
+  UNIQUE(strategy_id, version_no)
+)
+
+-- 策略授权：多对多（共享）
+strategy_grants(
+  strategy_id FK, grantee_user_id FK, permission,  -- run / read
+  granted_by FK->users, granted_at,
+  PK(strategy_id, grantee_user_id)
+)
+
+-- 运行：钉版本，不钉策略
+runs(
+  run_id PK, user_id FK->users,
+  strategy_id FK, strategy_version_id FK,   -- 前者供分组，后者供复现
+  status, submitted_at, started_at, finished_at, duration_ms,
+  runner_pid, hostname, exit_code,
+  params_json, backtest_config_json,
+  -- result.json 镜像列（列表页与对比页的排序/筛选取自此）
+  success, error_id, error_msg, schema_version, market_data_type,
+  start_trading_day, end_trading_day, last_trading_day, account_id,
+  balance, available, total_commission, total_stamp_tax,
+  total_transfer_fee, order_count, trade_count, md_subscribe_count,
+  bar_market_data_count, depth_market_data_count, instrument_count,
+  commission_missing_count, volume_multiple_fallback_product_count,
+  workspace_path, db_path, dump_path, stdout_tail, stderr_tail
+)
+```
+
+**三条设计要点**：
+
+1. **归属不是表**。策略属于谁由 `strategies.owner_user_id` 一列表达，
+   一对一，建表即冗余。真正需要表的只有**共享**（多对多）。
+2. **运行钉版本，不钉策略**。`runs.strategy_id` 供"按策略分组看历史"，
+   `strategy_version_id` 供"逐字复现"。两者职责不同，**不是冗余**。
+   只钉策略的话，策略改动后历史运行的参数与结果就对不上，对比不可信。
+3. **镜像成列是必需的**。列表页与对比页要**按指标排序与筛序**，
+   逐行去解数百个 `result.json` 不可行。`MissingRateKeys` 等长尾键
+   留在文件里按需读。
+
+**artifact 不建表**：它是 `runs/<RunId>/` 下的文件，路径可由约定推出，建表即重复。
+
+---
+
+## 7. 策略上传与管理
+
+### 7.1 上传形态
+
+- **上传 `.py` 为必需**；manifest 可在网页表单填写，或上传 `manifest.json` 导入。
+  两条路都落到 `strategy_versions.manifest_json`，故不必二选一。
+- **不收 zip**：解压要逐条校验路径防 zip-slip，为一个单文件场景引入一整类
+  漏洞面不划算。多文件策略（辅助模块）需要时再评估。
+- 上传即建一个 `strategy_versions` 版本。`source_hash` 与已有版本相同则
+  复用该版本，不重复占盘（**内容未变不产生新版本号**）。
+
+### 7.2 manifest 内容
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `entry_filename` | 入口文件名，决定 job 目录里的裸文件名与 `argv[0]` |
+| `config_filename` | 策略配置文件名，平台据此渲染参数并写出该文件 |
+| `supported_match_modes` | 该策略支持的行情模式，`Bar` / `Tick` |
+| `params` | 参数列表：键 / 标签 / 类型 / 默认值 / 范围 / 枚举 |
+
+### 7.3 为什么 manifest 必须声明行情模式
+
+`QuantTrading` 有实据：Python 策略漏写 `on_bar` 时，引擎在 `MatchMode: Bar` 下
+**静默 0 成交**——引擎报的 0 是忠实的，日志也正常，费率三项为 0 也是对的。
+当时能潜伏数轮，是因为策略与配置由同一个人一次写好、无人交叉校验。
+
+**上传之后这个前提消失了**：策略来自某个用户，运行配置来自提交表单，两者
+不同时间、可能不同人。故平台必须**在提交时**校验：
+`请求的 MatchMode ∈ manifest.supported_match_modes`，否则**直接拒绝**，
+而不是等用户对着 0 笔成交去排查。
+
+### 7.4 落盘与运行
+
+```text
+users/<user_id>/strategies/<strategy_id>/<version_no>/
+├── entry.py          # 用户上传原文，平台永不改写
+└── manifest.json     # 该版本的 manifest 快照
+```
+
+运行时把 `entry.py` 复制进 `runs/<RunId>/`，以裸文件名启动（见第 3 节），
+并按 manifest 渲染参数写出 `<config_filename>`。
+
+---
+
+## 8. 目录结构
+
+```text
+QuantPlatform/
+├── backend/
+│   ├── app/
+│   │   ├── main.py            # FastAPI 装配 + 启动恢复
+│   │   ├── config.py          # 引擎根、runs 根、并发上限、超时
+│   │   ├── auth/              # 登录、JWT、当前用户依赖
+│   │   ├── catalog/           # db / models（五张表）/ schemas
+│   │   ├── routers/           # auth / users / strategies / runs / artifacts
+│   │   ├── scheduler/         # queue / workspace / runner / result / recovery
+│   │   └── services/          # results_db / artifacts / strategy_store
+│   ├── requirements.txt
+│   └── data/catalog.db        # catalog（gitignore）
+├── frontend/                  # 复刻 amies 的 api/views/stores/components
+├── users/<user_id>/strategies/<strategy_id>/<version_no>/   # 策略库（gitignore）
+├── runs/<RunId>/              # 每 job 独立工作目录（gitignore）
+├── docs/{platform-plan.md, job-workspace.md}
+└── PROGRESS.md / PROGRESS-archive.md
+```
+
+---
+
+## 9. API 设计
+
+除 `/api/health` 与登录外，**全部端点要求已认证，且按当前用户过滤**。
+
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| `GET` | `/api/health` | 引擎自检：引擎根、`.pyd`、Python 版本、runs 根可写 |
+| `POST` | `/api/auth/login` | 登录换取 JWT |
+| `GET` | `/api/auth/me` | 当前用户 |
+| `GET` | `/api/users` | 用户列表（admin） |
+| `POST` | `/api/users` | 建用户（admin） |
+| `GET` | `/api/strategies` | 可见策略：本人 + 授权共享 + public |
+| `POST` | `/api/strategies` | 上传策略（`.py` + manifest） |
+| `GET` | `/api/strategies/{id}` | 详情与版本列表 |
+| `POST` | `/api/strategies/{id}/versions` | 上传新版本 |
+| `PUT` | `/api/strategies/{id}/grants` | 授权共享（owner） |
+| `DELETE` | `/api/strategies/{id}` | 删除（owner；历史 run 不受影响） |
+| `POST` | `/api/runs` | 提交：校验模式 → 建工作目录 → 入队 → 返回 `run_id` |
+| `GET` | `/api/runs` | 本人运行列表，按状态/策略筛选、按指标排序、分页 |
+| `GET` | `/api/runs/{id}` | 元信息 + `result.json` 全文 |
+| `GET` | `/api/runs/{id}/equity` | 权益曲线序列（读 `Capital` 逐日 `Balance`） |
+| `GET` | `/api/runs/{id}/tables/{table}` | 结果表分页查询 |
+| `GET` | `/api/runs/{id}/files` | 产物清单（名 + 大小） |
+| `GET` | `/api/runs/{id}/files/{relpath}` | 产物下载 |
+| `POST` | `/api/runs/{id}/cancel` | 终止进程 → 标 `interrupted` |
+| `DELETE` | `/api/runs/{id}` | 删除 run（含工作目录） |
+| `GET` | `/api/runs/compare?ids=a,b,c` | 多轮指标对比（仅本人的 run） |
+
+**三条安全硬约束**（Harness §6）：
+
+- `tables/{table}` 的表名走**白名单**，不得直接拼进 SQL。
+- `files/{relpath}` 必须 `resolve()` 后校验仍在 run 工作目录内，**防目录穿越**。
+- **每个查询入口统一收口**加 `user_id` 条件；不散落各处，避免漏一处即越权。
+
+**结果读取方式**：对 `BackTest_<RunId>.db` 开**只读连接**（`?mode=ro`），
+不解析 CSV。理由有两条：归档已核「读已完成的产物是纯只读、SHARED 锁可共存」；
+而 `SqliteWrapper` **未设 `busy_timeout`**，**绝不许**在运行中读——完成信号恒为
+「进程退出」，天然避开。CSV 仅用于打包下载。
+
+---
+
+## 10. 前端页面
+
+| 路由 | 页面 | 内容 |
+| ---- | ---- | ---- |
+| `/login` | 登录 | 换取 JWT |
+| `/runs` | 运行列表 | 状态徽章、耗时、RunId、关键指标列 |
+| `/runs/new` | 新建回测 | 选策略 → 由 manifest 动态生成参数表单 → 引擎配置 |
+| `/runs/:id` | 运行详情 | 概览 / 权益曲线 / 委托 / 成交 / 持仓 / 日志 / 产物 |
+| `/compare` | 对比 | 多轮指标表 + 权益曲线叠加 |
+| `/strategies` | 策略管理 | 列表、上传、版本历史、授权共享 |
+| `/users` | 用户管理 | admin |
+| `/settings` | 设置 | 引擎根、并发上限、超时、数据根，带 health 自检 |
+
+图表库选用 **ECharts + vue-echarts**（量化领域事实标准：K 线、缩放、
+大数据量折线开箱即用）。按需引入以控制体积。
+
+---
+
+## 11. 分期与验收
+
+| 阶段 | 内容 | 验收 |
+| ---- | ---- | ---- |
+| **P0 地基探针** ✅ | 已按第 4 节契约跑通 | **2026-09-25 通过**：退出码 0，7 项指标与基准逐位一致 |
+| P1 后端骨架 + 多用户 | 五张表 / 登录 / JWT / 查询统一收口加 `user_id` | 两个账号互相看不到对方的策略与运行；越权访问返回 404 而非 403 |
+| P2 策略上传 | 上传 `.py` + manifest / 校验 / 版本留档 / 落盘 | 上传后能跑通；manifest 缺模式或参数越界被拒 |
+| P3 runner 本体 | 队列 / subprocess / 结果回收 / 启动恢复 / 作业目录构造 | 轮询至 `succeeded`；重启后端须标 `interrupted` |
+| P4 前端骨架 | Vue 3 + TS + Vite + Tailwind + Pinia | 完成「登录 → 上传策略 → 提交 → 看指标 → 下载」闭环 |
+| P5 可视化 | 权益曲线 + 回撤、明细分页表 | 曲线与实测数据点吻合（`1000000.0 → 999549.73`） |
+| P6 对比与模板 | 多轮对比、配置模板保存复用 | 同参不同 `GridStep` 的两轮指标并列且曲线叠加 |
+| P7 加固 | 并发上限、超时、磁盘清理、日志轮转 | 并发上限内排队正确；超时轮标 `timeout` |
+| P8 上云 | 迁 Windows 云主机 + 传行情数据 + 系统级隔离评估 | 系统级隔离到位后方可对不可信用户开放 |
+
+P0 的验收里 `TradeCount>0` 是关键判据：`QuantTrading` 记载过 Python 宿主因漏写
+`on_bar` 而**静默 0 成交**（引擎报的 0 是忠实的），故只看 `Success` 不足以判定打通。
+
+P1 的越权验收用 **404 而非 403**：403 会泄漏"该 id 存在"这一事实，
+多租户下应一律表现为"不存在"。
+
+---
+
+## 12. 风险与不做项
+
+1. **绑死 Windows + Python 3.11**：`.pyd` 是 `cp311-win_amd64`，
+   Linux 无解，云主机只能是 Windows；后端必须与引擎同机，**横向扩展无余地**。
+2. **目录级隔离挡不住恶意读盘**（见 5.2）。开放给不可信用户前必须上系统级隔离。
+3. **磁盘膨胀**：实测单轮 **3.0 MB**（结果库 + 17 个 CSV + 日志），
+   多用户下增长更快，需按用户配额与清理策略（P7）。
+4. **cancel 的进程树**：宿主是单进程（引擎以库形式进程内加载），
+   `terminate()` 够用，不必上 `psutil`。
+5. **输出编码**：引擎有 GBK 变体、日志含中文，runner 读 stdout/stderr 须
+   `errors="replace"` 容错，否则收尾部时会崩。
+6. **引擎日志名由 `argv[0]` 经 `ParseProcessName` 决定**：Windows 上只认
+   反斜杠为分隔符、按首个点截断扩展名，故 `argv[0]` 必须传裸文件名，
+   否则**启动期即终止进程**，详见 [`job-workspace.md`](job-workspace.md) §3.1。
+7. **`BarPreces` 是引擎侧既有拼写**（非笔误，不可擅改），平台配置键须逐字一致。
+8. **不做**：跨运行库级对比（`ATTACH` 上限 10，已决定暂不做）、盘后行情修正、
+   C++ 策略宿主（三条再评估触发条件已留档）、zip 上传（见 7.1）。
+
+---
+
+## 13. 已锁定的实现选择
+
+2026-09-25 由用户拍板，**含同日更早两项初判的修正**：
+
+| 决策点 | 选择 | 备注 |
+| ---- | ---- | ---- |
+| 图表库 | ECharts + vue-echarts | |
+| 并发形态 | 后端进程内 `subprocess` | |
+| 用户模型 | 云上多用户，现在就做骨架 | |
+| 策略来源 | 用户上传 | **修正**：原"v1 仅内置策略"已废弃 |
+| 鉴权 | 做 | **修正**：原"不做，仅本机单用户"已废弃 |
+| 隔离档位 | 目录级起步 | 系统级为上云前置门槛 |
+| 可见性 | `private` / `shared` / `public` | |
+| 上云节奏 | 本机跑通再迁 | |
+| 上传形态 | `.py` 必需 + manifest 表单或文件 | 不收 zip |
