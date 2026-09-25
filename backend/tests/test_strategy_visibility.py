@@ -6,137 +6,156 @@ private 仅供归属人, 授权表对它不生效; shared 才吃授权表; publi
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 
 from app.catalog.database import PlatformDatabase
 from app.catalog.enums import GrantPermission, StrategyVisibility
-from app.catalog.models import UserModel
-from app.catalog.schemas import StrategyDetailResponse, StrategyResponse
 from app.catalog.visibility import STRATEGY_NOT_FOUND_MESSAGE
 
 from .helpers import (
-    DEFAULT_MEMBER_PASSWORD,
-    bearer_headers,
+    SignedInAccount,
+    create_signed_in_account,
     create_strategy_grant_record,
     create_strategy_record,
     create_user_record,
-    fetch_page,
-    login,
-    record_ids,
+    get_strategy_response,
+    list_visible_strategy_ids,
+    read_strategy_detail,
+    read_strategy_status_code,
     soft_delete_strategy_record,
 )
 
 
-STRATEGIES_PATH = "/api/strategies"
 OWNER_USERNAME = "visibility-owner"
 VIEWER_USERNAME = "visibility-viewer"
+
+ABSENT_STRATEGY_ID = "no-such-strategy-identifier"
+
+
+@dataclass(frozen=True)
+class AccountPair:
+    """归属人账号与另一个账号.
+
+    两者同为 `SignedInAccount`, 用元组装的话每个用例都得靠位置记"哪个是归属人"——而越权
+    断言恰恰是把两者对调的产物, 记反了整条用例就测成相反的意思.
+
+    留在本模块而不进 `helpers`: 只有这里用得着. `helpers` 放跨模块复用的基元,
+    单一场景的"角色组"与用到它的用例放一起 (授权测试的 `GrantCast` 同理).
+    """
+
+    owner: SignedInAccount
+    viewer: SignedInAccount
 
 
 @pytest_asyncio.fixture
 async def owner_and_viewer(
     database: PlatformDatabase, client: AsyncClient
-) -> tuple[UserModel, str, UserModel, str]:
-    """归属人与旁观者两个账号, 及各自的访问令牌."""
+) -> AccountPair:
+    """归属人与旁观者两个账号."""
 
-    owner = await create_user_record(database, OWNER_USERNAME)
-    viewer = await create_user_record(database, VIEWER_USERNAME)
-
-    return (
-        owner,
-        await login(client, OWNER_USERNAME, DEFAULT_MEMBER_PASSWORD),
-        viewer,
-        await login(client, VIEWER_USERNAME, DEFAULT_MEMBER_PASSWORD),
+    return AccountPair(
+        owner=await create_signed_in_account(database, client, OWNER_USERNAME),
+        viewer=await create_signed_in_account(database, client, VIEWER_USERNAME),
     )
-
-
-async def _list_visible_strategy_ids(client: AsyncClient, token: str) -> list[str]:
-    return record_ids(
-        await fetch_page(client, STRATEGIES_PATH, token, StrategyResponse)
-    )
-
-
-async def _read_strategy_status_code(client: AsyncClient, token: str, strategy_id: str) -> int:
-    response = await client.get(
-        f"{STRATEGIES_PATH}/{strategy_id}", headers=bearer_headers(token)
-    )
-
-    return response.status_code
 
 
 async def test_public_strategy_is_visible_to_another_account(
     client: AsyncClient,
     database: PlatformDatabase,
-    owner_and_viewer: tuple[UserModel, str, UserModel, str],
+    owner_and_viewer: AccountPair,
 ) -> None:
-    owner, _, _, viewer_token = owner_and_viewer
     strategy = await create_strategy_record(
-        database, owner, "public-grid", visibility_type=StrategyVisibility.PUBLIC
+        database,
+        owner_and_viewer.owner.user,
+        "public-grid",
+        visibility_type=StrategyVisibility.PUBLIC,
     )
 
-    assert strategy.id in await _list_visible_strategy_ids(client, viewer_token)
-    assert await _read_strategy_status_code(client, viewer_token, strategy.id) == 200
+    viewer_token = owner_and_viewer.viewer.token
+
+    assert strategy.id in await list_visible_strategy_ids(client, viewer_token)
+    assert await read_strategy_status_code(client, viewer_token, strategy.id) == 200
 
 
 async def test_shared_strategy_with_grant_is_visible(
     client: AsyncClient,
     database: PlatformDatabase,
-    owner_and_viewer: tuple[UserModel, str, UserModel, str],
+    owner_and_viewer: AccountPair,
 ) -> None:
-    owner, _, viewer, viewer_token = owner_and_viewer
     strategy = await create_strategy_record(
-        database, owner, "shared-grid", visibility_type=StrategyVisibility.SHARED
+        database,
+        owner_and_viewer.owner.user,
+        "shared-grid",
+        visibility_type=StrategyVisibility.SHARED,
     )
     await create_strategy_grant_record(
-        database, strategy, grantee=viewer, granted_by=owner
+        database,
+        strategy,
+        grantee=owner_and_viewer.viewer.user,
+        granted_by=owner_and_viewer.owner.user,
     )
 
-    assert strategy.id in await _list_visible_strategy_ids(client, viewer_token)
-    assert await _read_strategy_status_code(client, viewer_token, strategy.id) == 200
+    viewer_token = owner_and_viewer.viewer.token
+
+    assert strategy.id in await list_visible_strategy_ids(client, viewer_token)
+    assert await read_strategy_status_code(client, viewer_token, strategy.id) == 200
 
 
 async def test_shared_strategy_without_grant_is_hidden(
     client: AsyncClient,
     database: PlatformDatabase,
-    owner_and_viewer: tuple[UserModel, str, UserModel, str],
+    owner_and_viewer: AccountPair,
 ) -> None:
-    owner, _, _, viewer_token = owner_and_viewer
     strategy = await create_strategy_record(
-        database, owner, "shared-grid", visibility_type=StrategyVisibility.SHARED
+        database,
+        owner_and_viewer.owner.user,
+        "shared-grid",
+        visibility_type=StrategyVisibility.SHARED,
     )
 
-    assert strategy.id not in await _list_visible_strategy_ids(client, viewer_token)
-    assert await _read_strategy_status_code(client, viewer_token, strategy.id) == 404
+    viewer_token = owner_and_viewer.viewer.token
+
+    assert strategy.id not in await list_visible_strategy_ids(client, viewer_token)
+    assert await read_strategy_status_code(client, viewer_token, strategy.id) == 404
 
 
 async def test_private_strategy_stays_hidden_even_when_granted(
     client: AsyncClient,
     database: PlatformDatabase,
-    owner_and_viewer: tuple[UserModel, str, UserModel, str],
+    owner_and_viewer: AccountPair,
 ) -> None:
-    owner, _, viewer, viewer_token = owner_and_viewer
-    strategy = await create_strategy_record(database, owner, "private-grid")
+    strategy = await create_strategy_record(
+        database, owner_and_viewer.owner.user, "private-grid"
+    )
     await create_strategy_grant_record(
-        database, strategy, grantee=viewer, granted_by=owner
+        database,
+        strategy,
+        grantee=owner_and_viewer.viewer.user,
+        granted_by=owner_and_viewer.owner.user,
     )
 
-    assert strategy.id not in await _list_visible_strategy_ids(client, viewer_token)
-    assert await _read_strategy_status_code(client, viewer_token, strategy.id) == 404
+    viewer_token = owner_and_viewer.viewer.token
+
+    assert strategy.id not in await list_visible_strategy_ids(client, viewer_token)
+    assert await read_strategy_status_code(client, viewer_token, strategy.id) == 404
 
 
 async def test_owner_always_sees_own_strategy_regardless_of_visibility(
     client: AsyncClient,
     database: PlatformDatabase,
-    owner_and_viewer: tuple[UserModel, str, UserModel, str],
+    owner_and_viewer: AccountPair,
 ) -> None:
-    owner, owner_token, _, _ = owner_and_viewer
+    owner = owner_and_viewer.owner.user
     private_strategy = await create_strategy_record(database, owner, "private-grid")
     shared_strategy = await create_strategy_record(
         database, owner, "shared-grid", visibility_type=StrategyVisibility.SHARED
     )
 
-    visible_ids = await _list_visible_strategy_ids(client, owner_token)
+    visible_ids = await list_visible_strategy_ids(client, owner_and_viewer.owner.token)
 
     assert private_strategy.id in visible_ids
     assert shared_strategy.id in visible_ids
@@ -145,27 +164,31 @@ async def test_owner_always_sees_own_strategy_regardless_of_visibility(
 async def test_grant_list_is_returned_only_to_the_owner(
     client: AsyncClient,
     database: PlatformDatabase,
-    owner_and_viewer: tuple[UserModel, str, UserModel, str],
+    owner_and_viewer: AccountPair,
 ) -> None:
-    owner, owner_token, viewer, viewer_token = owner_and_viewer
     strategy = await create_strategy_record(
-        database, owner, "shared-grid", visibility_type=StrategyVisibility.SHARED
+        database,
+        owner_and_viewer.owner.user,
+        "shared-grid",
+        visibility_type=StrategyVisibility.SHARED,
     )
     await create_strategy_grant_record(
-        database, strategy, grantee=viewer, granted_by=owner
+        database,
+        strategy,
+        grantee=owner_and_viewer.viewer.user,
+        granted_by=owner_and_viewer.owner.user,
     )
 
-    owner_detail = await client.get(
-        f"{STRATEGIES_PATH}/{strategy.id}", headers=bearer_headers(owner_token)
-    )
-    viewer_detail = await client.get(
-        f"{STRATEGIES_PATH}/{strategy.id}", headers=bearer_headers(viewer_token)
-    )
+    owner_grants = (
+        await read_strategy_detail(client, owner_and_viewer.owner.token, strategy.id)
+    ).grants
+    viewer_grants = (
+        await read_strategy_detail(client, owner_and_viewer.viewer.token, strategy.id)
+    ).grants
 
-    owner_grants = StrategyDetailResponse.model_validate(owner_detail.json()).grants
-    viewer_grants = StrategyDetailResponse.model_validate(viewer_detail.json()).grants
-
-    assert [grant.grantee_user_id for grant in owner_grants] == [viewer.id]
+    assert [grant.grantee_user_id for grant in owner_grants] == [
+        owner_and_viewer.viewer.user_id
+    ]
     assert owner_grants[0].permission_type is GrantPermission.READ
     assert viewer_grants == []
 
@@ -173,22 +196,30 @@ async def test_grant_list_is_returned_only_to_the_owner(
 async def test_grantee_learning_one_grant_does_not_reveal_other_grantees(
     client: AsyncClient,
     database: PlatformDatabase,
-    owner_and_viewer: tuple[UserModel, str, UserModel, str],
+    owner_and_viewer: AccountPair,
 ) -> None:
-    owner, _, viewer, viewer_token = owner_and_viewer
     third_user = await create_user_record(database, "visibility-third")
     strategy = await create_strategy_record(
-        database, owner, "shared-grid", visibility_type=StrategyVisibility.SHARED
+        database,
+        owner_and_viewer.owner.user,
+        "shared-grid",
+        visibility_type=StrategyVisibility.SHARED,
     )
     await create_strategy_grant_record(
-        database, strategy, grantee=viewer, granted_by=owner
+        database,
+        strategy,
+        grantee=owner_and_viewer.viewer.user,
+        granted_by=owner_and_viewer.owner.user,
     )
     await create_strategy_grant_record(
-        database, strategy, grantee=third_user, granted_by=owner
+        database,
+        strategy,
+        grantee=third_user,
+        granted_by=owner_and_viewer.owner.user,
     )
 
-    response = await client.get(
-        f"{STRATEGIES_PATH}/{strategy.id}", headers=bearer_headers(viewer_token)
+    response = await get_strategy_response(
+        client, owner_and_viewer.viewer.token, strategy.id
     )
 
     assert response.status_code == 200
@@ -199,37 +230,40 @@ async def test_grantee_learning_one_grant_does_not_reveal_other_grantees(
 async def test_soft_deleted_strategy_disappears_for_owner_and_others(
     client: AsyncClient,
     database: PlatformDatabase,
-    owner_and_viewer: tuple[UserModel, str, UserModel, str],
+    owner_and_viewer: AccountPair,
 ) -> None:
-    owner, owner_token, _, viewer_token = owner_and_viewer
     strategy = await create_strategy_record(
-        database, owner, "public-grid", visibility_type=StrategyVisibility.PUBLIC
+        database,
+        owner_and_viewer.owner.user,
+        "public-grid",
+        visibility_type=StrategyVisibility.PUBLIC,
     )
 
     await soft_delete_strategy_record(database, strategy.id)
 
-    assert strategy.id not in await _list_visible_strategy_ids(client, owner_token)
-    assert strategy.id not in await _list_visible_strategy_ids(client, viewer_token)
-    assert await _read_strategy_status_code(client, owner_token, strategy.id) == 404
+    owner_token = owner_and_viewer.owner.token
+    viewer_token = owner_and_viewer.viewer.token
+
+    assert strategy.id not in await list_visible_strategy_ids(client, owner_token)
+    assert strategy.id not in await list_visible_strategy_ids(client, viewer_token)
+    assert await read_strategy_status_code(client, owner_token, strategy.id) == 404
 
 
 async def test_deleted_strategy_reports_the_same_message_as_an_absent_one(
     client: AsyncClient,
     database: PlatformDatabase,
-    owner_and_viewer: tuple[UserModel, str, UserModel, str],
+    owner_and_viewer: AccountPair,
 ) -> None:
-    owner, owner_token, _, _ = owner_and_viewer
-    strategy = await create_strategy_record(database, owner, "public-grid")
+    strategy = await create_strategy_record(
+        database, owner_and_viewer.owner.user, "public-grid"
+    )
 
     await soft_delete_strategy_record(database, strategy.id)
 
-    deleted_response = await client.get(
-        f"{STRATEGIES_PATH}/{strategy.id}", headers=bearer_headers(owner_token)
-    )
-    absent_response = await client.get(
-        f"{STRATEGIES_PATH}/no-such-strategy-identifier",
-        headers=bearer_headers(owner_token),
-    )
+    owner_token = owner_and_viewer.owner.token
+
+    deleted_response = await get_strategy_response(client, owner_token, strategy.id)
+    absent_response = await get_strategy_response(client, owner_token, ABSENT_STRATEGY_ID)
 
     assert deleted_response.status_code == absent_response.status_code == 404
     assert deleted_response.json()["detail"] == STRATEGY_NOT_FOUND_MESSAGE
@@ -243,19 +277,19 @@ async def test_deleted_strategy_reports_the_same_message_as_an_absent_one(
 async def test_strategy_visibility_survives_a_round_trip(
     client: AsyncClient,
     database: PlatformDatabase,
-    owner_and_viewer: tuple[UserModel, str, UserModel, str],
+    owner_and_viewer: AccountPair,
     visibility_type: StrategyVisibility,
 ) -> None:
-    owner, owner_token, _, _ = owner_and_viewer
     strategy = await create_strategy_record(
-        database, owner, "round-trip-grid", visibility_type=visibility_type
+        database,
+        owner_and_viewer.owner.user,
+        "round-trip-grid",
+        visibility_type=visibility_type,
     )
 
-    response = await client.get(
-        f"{STRATEGIES_PATH}/{strategy.id}", headers=bearer_headers(owner_token)
+    detail = await read_strategy_detail(
+        client, owner_and_viewer.owner.token, strategy.id
     )
-
-    detail = StrategyDetailResponse.model_validate(response.json())
 
     assert detail.strategy.visibility_type is visibility_type
     assert detail.strategy.id == strategy.id

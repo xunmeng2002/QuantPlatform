@@ -131,6 +131,23 @@ class StrategyGrantResponse(BaseModel):
     granted_at: datetime
 
 
+class StrategyGrantRequest(BaseModel):
+    """一条待写入的授权: 被授权人与权限粒度."""
+
+    grantee_user_id: str = Field(min_length=1, max_length=32)
+    permission_type: GrantPermission = GrantPermission.READ
+
+
+class StrategyGrantReplaceRequest(BaseModel):
+    """整体替换某策略的授权集合. 空列表即撤销全部授权.
+
+    整体替换而非增量: 增量下"撤销谁"要另设一条删除路径, 而调用方手上的本来就是一份完整
+    名单. 传全集只表达一个意图, 且重复提交同一份名单结果不变.
+    """
+
+    grants: list[StrategyGrantRequest] = Field(default_factory=list)
+
+
 class StrategyDetailResponse(BaseModel):
     """策略详情: 本体 + 版本列表 + 授权列表."""
 

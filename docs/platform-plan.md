@@ -172,7 +172,7 @@ Users(
 -- 策略：逻辑实体（一个名字、一个归属）
 Strategies(
   Id PK, OwnerUserId FK->Users, Name, Description,
-  VisibilityType,  -- private / shared / public
+  VisibilityType,  -- private 仅归属人且授权表不生效 / shared 授权表内可见 / public 全员
   CreatedAt, UpdatedAt,
   DeletedAt,       -- 软删除；硬删会撞上历史运行的外键
   -- 名字只在未删行之间唯一（部分唯一索引），见 §6 修订 ③
@@ -238,8 +238,10 @@ Runs(
 
 **P2 实施中的三处修订**（上文 DDL 已按修订后的形态书写）：
 
-① **`StrategyGrants` 的 `PK(StrategyId, GranteeUserId)` 不在 P2 落地**，
-   授权接口推迟到 P2b。表已建，但 P2 不暴露写入路径。
+① **`StrategyGrants` 的 `PK(StrategyId, GranteeUserId)` 已随 P2b 落地**，
+   授权写入路径为 `PUT /api/strategies/{id}/grants`。P2 只建表不暴露写入路径，
+   授权推迟到 P2b——它会牵出"被授权人能对该策略做什么"的一整串判定，
+   与上传落盘是两件事，混在一批里改，出问题时分不清是哪半边。
 
 ② **`UNIQUE(StrategyId, SourceHash)` 撤销**。版本判重的键改为
    `(SourceHash, ManifestJson)` 这一对：同一份源码配不同 manifest（改了入口
@@ -313,6 +315,43 @@ users/<user_id>/strategies/<strategy_id>/<version_no>/
 运行时把 `entry.py` 复制进 `runs/<RunId>/`，以裸文件名启动（见第 3 节），
 并按 manifest 渲染参数写出 `<config_filename>`。
 
+### 7.5 授权共享
+
+`PUT /api/strategies/{id}/grants`，只对归属人开放，非归属人与不存在的策略
+一律 404。请求体是**替换后的全集**（`{"grants": [{"grantee_user_id", "permission_type"}]}`），
+空列表即撤销全部授权。整体替换而非增量：增量下"撤销谁"要另设一条删除路径，
+而调用方手上的本来就是一份完整名单。
+
+**授权驱动可见性**（2026-09-25 用户拍板）。这一条是本接口的语义核心：
+`private` 下授权表**不生效**（见 §6 `Strategies.VisibilityType` 一行的注释），
+而整个接口清单里**没有第二处**能把可见性改成 `shared`——建策略时的
+`visibility_type` 表单字段是唯一的入口，建完就改不了。于是若授权与可见性各自为政，
+在 `private` 策略上授权会**回 200 而无人获得访问权**：调用方看到的成败与事实相反，
+且用户无从自救。故：
+
+| 策略当前可见性 | 授权非空 | 授权清空 |
+| ---- | ---- | ---- |
+| `private` | 转 `shared` | 保持 `private` |
+| `shared` | 保持 `shared` | 转 `private` |
+| `public` | 保持 `public` | 保持 `public` |
+
+`public` 一概不动：那份授权本就多余（全体登录用户已然可见），
+而 `public` 转 `shared` 会把**没被逐一点名的用户静默挡在外面**——
+收窄既有访问不是这条接口该做的事。
+
+**错误文案只说明字段名与原因，不把调用方提交的被授权人 id 抄回响应体**
+（同 §7.2 的既有规则：值会随响应体进接入层日志，而定问题靠字段名与原因）。
+
+**`GrantedAt` 的语义**：整体替换会连未变动的条目一并删掉重建，
+故它记的是"最近一次整体写入的时间"，不是"首次授权的时间"。要保留后者得改成
+逐条增删改，那是另一套语义。
+
+**被授权人按 `user_id` 指定，不按用户名**：按用户名的话，
+"这个用户名不存在"与"授权成功"会构成一个**用户名存在性探针**，
+而登录接口已经专门为此付过代价（账号不存在时也照跑一遍口令校验，
+见 `auth.py`）。剩余的产品问题——归属人从哪儿得知同事的 `user_id`
+——留待 P4 前端定，见 `PROGRESS.md` 的 ❓。
+
 ---
 
 ## 8. 目录结构
@@ -376,12 +415,13 @@ QuantPlatform/
 > 若日后多机部署确需匿名探活，应另开一个只回 `{"ready": true}` 的端点，
 > 而不是放宽这一个。
 
-> **P2 落地范围**：本节中 `POST /api/strategies`、`POST /api/strategies/{id}/versions`、
-> `GET /api/strategies`、`GET /api/strategies/{id}`、`DELETE /api/strategies/{id}`
-> 已实现。`PUT /api/strategies/{id}/grants` 推迟到 **P2b**——授权会牵出"被授权人
-> 能对该策略做什么"的一整串判定，与上传落盘是两件事，混在一批里改，出问题时
-> 分不清是哪半边。写操作（传新版本、删除）只对归属人开放，非归属人一律 404，
-> 不区分"无权"与"不存在"——区分了等于确认该 id 存在。
+> **P2 落地范围**：本节中策略相关的六个端点已全部实现——`POST /api/strategies`、
+> `POST /api/strategies/{id}/versions`、`GET /api/strategies`、
+> `GET /api/strategies/{id}`、`PUT /api/strategies/{id}/grants`、
+> `DELETE /api/strategies/{id}`。`/api/runs` 与 `/api/health` 之外的其余端点
+> 属 P3 及以后。三个写操作（传新版本、删除、改授权）只对归属人开放，
+> 非归属人一律 404，不区分"无权"与"不存在"——区分了等于确认该 id 存在。
+> 改授权的语义见 §7.5。
 
 **三条安全硬约束**（Harness §6）：
 
@@ -422,7 +462,7 @@ QuantPlatform/
 | **P1 后端骨架 + 多用户** ✅ | 五张表 / 登录 / JWT / 查询统一收口加 `user_id` | **2026-09-25 通过**：两账号互不可见；越权返回 404（175 项测试） |
 | P2 策略上传 | 上传 `.py` + manifest / 校验 / 版本留档 / 落盘 | 上传后能跑通；manifest 缺模式或参数越界被拒 |
 | **P2 上传核心** 🔄 | 建策略+首版 / 传新版本 / 列表详情 / 软删 | **2026-09-25 部分通过**：manifest 缺模式、文件名非法、参数 key 重复均被拒（261 项测试）。**「上传后能跑通」待 P3** |
-| P2b 策略授权 | `PUT /{id}/grants`，`StrategyGrants` 写入路径 | 被授权人可见可跑；非授权人一律 404 |
+| **P2b 策略授权** ✅ | `PUT /{id}/grants`，`StrategyGrants` 写入路径 | **2026-09-25 部分通过**：「被授权人可见、非授权人 404」通过（287 项测试）。**「可跑」待 P3**——`run` 权限此刻只是落库的一个取值，判定它要等 `POST /api/runs` |
 | P3 runner 本体 | 队列 / subprocess / 结果回收 / 启动恢复 / 作业目录构造 | 轮询至 `succeeded`；重启后端须标 `interrupted` |
 | P4 前端骨架 | Vue 3 + TS + Vite + Tailwind + Pinia | 完成「登录 → 上传策略 → 提交 → 看指标 → 下载」闭环 |
 | P5 可视化 | 权益曲线 + 回撤、明细分页表 | 曲线与实测数据点吻合（`1000000.0 → 999549.73`） |
@@ -435,6 +475,11 @@ P0 的验收里 `TradeCount>0` 是关键判据：`QuantTrading` 记载过 Python
 
 P1 的越权验收用 **404 而非 403**：403 会泄漏"该 id 存在"这一事实，
 多租户下应一律表现为"不存在"。
+
+P2b 的「可跑」在 P3 开工前要先把 `permission_type` 的判定定下来：`read` / `run`
+两档此刻只是落库的取值，没有任何一处读它；无 `run` 授权者提交回测该回 403 还是
+404，以及 `public` 是否隐含可跑（若隐含即是一次权限放宽），都须先拍板。
+未决项记在 `PROGRESS.md` 的 ❓ 区。
 
 ---
 
@@ -471,5 +516,6 @@ P1 的越权验收用 **404 而非 403**：403 会泄漏"该 id 存在"这一事
 | 鉴权 | 做 | **修正**：原"不做，仅本机单用户"已废弃 |
 | 隔离档位 | 目录级起步 | 系统级为上云前置门槛 |
 | 可见性 | `private` / `shared` / `public` | |
+| 授权与可见性的衔接 | **授权驱动可见性** | 2026-09-25 P2b 开工前拍板；见 §7.5 |
 | 上云节奏 | 本机跑通再迁 | |
 | 上传形态 | `.py` 必需 + manifest 表单或文件 | 不收 zip |

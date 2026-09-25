@@ -1,10 +1,10 @@
-"""策略的上传、查询与删除.
+"""策略的上传、查询、删除与授权共享.
 
 上传形态: `.py` 必需, manifest 以 multipart 的一个**文本字段**传入. 前端可以填表单、也可以
 读入一份 `manifest.json` 再填进同一个字段——两条路落到同一字段, 故服务端只有一条路径.
 
-写操作一律经 visibility 的归属收口 (`load_owned_strategy`): 传新版本与删除都只对归属人开放,
-非归属人一律 404, 不区分"无权"与"不存在".
+写操作一律经 visibility 的归属收口 (`load_owned_strategy`): 传新版本、删除与改授权都只对
+归属人开放, 非归属人一律 404, 不区分"无权"与"不存在".
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import ast
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, Query, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +32,7 @@ from ..catalog.schemas import (
     MessageResponse,
     PageResponse,
     StrategyDetailResponse,
+    StrategyGrantReplaceRequest,
     StrategyGrantResponse,
     StrategyResponse,
     StrategyVersionResponse,
@@ -53,12 +54,18 @@ router = APIRouter()
 
 MAXIMUM_SOURCE_BYTES = 1024 * 1024
 UPLOAD_READ_CHUNK_BYTES = 64 * 1024
+MAXIMUM_GRANTS_PER_STRATEGY = 1000
 
 STRATEGY_NAME_TAKEN_MESSAGE = "同名策略已存在"
 STRATEGY_DELETED_MESSAGE = "策略已删除"
 BLANK_STRATEGY_NAME_MESSAGE = "策略名不能为空白"
 EMPTY_SOURCE_MESSAGE = "策略源码不能为空"
 SOURCE_TOO_LARGE_MESSAGE = f"策略源码不得超过 {MAXIMUM_SOURCE_BYTES} 字节"
+TOO_MANY_GRANTS_MESSAGE = f"单次授权的用户数不得超过 {MAXIMUM_GRANTS_PER_STRATEGY}"
+REPEATED_GRANTEE_MESSAGE = "同一被授权人不得重复出现"
+UNKNOWN_GRANTEE_MESSAGE = "被授权人不存在"
+GRANT_TO_OWNER_MESSAGE = "不能授权给策略归属人"
+GRANTS_CONFLICTED_MESSAGE = "授权正被其他请求修改, 请重试"
 
 
 async def _read_uploaded_source(source_file: UploadFile) -> bytes:
@@ -163,6 +170,71 @@ async def _build_strategy_detail(
     )
 
 
+async def _ensure_each_grantee_exists(
+    session: AsyncSession, grantee_user_ids: set[str]
+) -> None:
+    """确认这些被授权人都在册, 缺一个即整批拒.
+
+    一条 `IN` 查完, 不逐个查: 逐个查的话往返次数由请求体里的列表长度决定, 等于把"发多少个
+    查询"交给调用方.
+
+    比对的是集合而非计数: 传进来的 id 可能重复 (另一处已拒), 计数相等说明不了一切.
+
+    在册校验是一条 `IN`, 参数个数受 SQLite 的 `SQLITE_MAX_VARIABLE_NUMBER` 约束
+    (3.32 起默认 32766, 本机 3.39.4 实测 32766 通过、32767 起报
+    `too many SQL variables`). **上限正是挡在这道坎前面的东西**, 不只是业务尺寸:
+    不设上限的话, 列表长度就只剩请求体上限这一个约束, 而那道闸 (约 1.2 MB) 挡不住
+    ——被授权人 id 的 schema 下限是 1 个字符, 且名单不许重复, 于是一份 3 个字符的
+    互异 id 凑满 32767 条的请求体只有约 85 万字节, 过得了体量闸. 这样的请求会走到
+    这里, 在参数绑定时抛出 `OperationalError`, 而本端点只捕获 `IntegrityError`,
+    于是客户端拿到的是 500 而不是干净的 400. 上限既是业务答案, 也是这道底线的闸.
+
+    同一条也解释了为何按"32 位主键"估算体量是不够的: 那种读法算得约 2.14 万条,
+    看着离 32766 还远, 但 schema 允许更短的 id, 估算的前提就不成立.
+
+    被授权人不存在时明说, 不并入"无权"一类含糊文案: 这里泄漏的只是"某个 32 位随机主键
+    在不在册", 而调用方要么已经知道这个 id (那它本来就是已知的人), 要么是在猜——猜中
+    128 位随机串的概率不值得为它牺牲可用性.
+    """
+
+    found_user_ids = set(
+        (
+            await session.execute(
+                select(UserModel.id).where(UserModel.id.in_(grantee_user_ids))
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    if found_user_ids != grantee_user_ids:
+        raise InvalidRequestError(UNKNOWN_GRANTEE_MESSAGE)
+
+
+def _apply_visibility_for_grants(strategy: StrategyModel, has_grants: bool) -> None:
+    """按授权集合调整可见性.
+
+    `private` 下授权表不生效, 于是"授权写成功"与"对方能看见"必须绑成一件事: 授权非空即转
+    `shared`, 授权清空即转回 `private`. 不绑的话, 在 private 策略上授权会回 200 而无人获得
+    访问权——调用方看到的成败与真实结果相反, 且整条接口清单里没有第二处能把可见性改成
+    `shared`, 用户无从自救.
+
+    `public` 一概不动: 那份授权本就多余 (全体登录用户已然可见), 而 `public` 转 `shared` 会
+    把"没被逐一点名的用户"静默挡在外面——收窄既有访问不是这条接口该做的事, 真要做也该由
+    调用方明说.
+    """
+
+    if strategy.visibility_type == StrategyVisibility.PUBLIC.value:
+        return
+
+    desired_visibility = (
+        StrategyVisibility.SHARED.value if has_grants else StrategyVisibility.PRIVATE.value
+    )
+
+    if strategy.visibility_type != desired_visibility:
+        strategy.visibility_type = desired_visibility
+
+
 @router.get("", response_model=PageResponse[StrategyResponse])
 async def list_strategies_handler(
     session: SessionDependency,
@@ -258,6 +330,65 @@ async def upload_strategy_version_handler(
     return await store_strategy_version(
         session, settings, strategy, current_user, source_bytes, parsed_manifest
     )
+
+
+@router.put("/{strategy_id}/grants", response_model=StrategyDetailResponse)
+async def replace_strategy_grants_handler(
+    strategy_id: str,
+    request_body: StrategyGrantReplaceRequest,
+    session: SessionDependency,
+    current_user: CurrentUserDependency,
+) -> StrategyDetailResponse:
+    """整体替换策略的授权集合, 只对归属人开放.
+
+    `PUT` 是整体替换: 请求体就是替换后的全集, 空列表即撤销全部授权.
+
+    未经校验的请求一条都不落库: 删旧插新与改可见性全在同一事务里, 任一项不合法即整批拒.
+    否则"部分替换成功"会留下一个既非旧名单也非新名单的授权集合, 而调用方从响应上看不出
+    自己拿到的是哪一份.
+
+    `GrantedAt` 因此记的是"最近一次整体写入的时间", 不是"首次授权的时间"——未被改动的条目
+    也一并删掉重建. 要保留首次授权时间得改成逐条增删改, 那是另一套语义.
+    """
+
+    strategy = await load_owned_strategy(session, current_user, strategy_id)
+
+    grantee_user_ids = [grant.grantee_user_id for grant in request_body.grants]
+
+    if len(grantee_user_ids) > MAXIMUM_GRANTS_PER_STRATEGY:
+        raise InvalidRequestError(TOO_MANY_GRANTS_MESSAGE)
+
+    if len(set(grantee_user_ids)) != len(grantee_user_ids):
+        raise InvalidRequestError(REPEATED_GRANTEE_MESSAGE)
+
+    if current_user.id in grantee_user_ids:
+        raise InvalidRequestError(GRANT_TO_OWNER_MESSAGE)
+
+    if grantee_user_ids:
+        await _ensure_each_grantee_exists(session, set(grantee_user_ids))
+
+    await session.execute(
+        delete(StrategyGrantModel).where(StrategyGrantModel.strategy_id == strategy.id)
+    )
+
+    session.add_all(
+        StrategyGrantModel(
+            strategy_id=strategy.id,
+            grantee_user_id=grant.grantee_user_id,
+            permission_type=grant.permission_type.value,
+            granted_by_user_id=current_user.id,
+        )
+        for grant in request_body.grants
+    )
+
+    _apply_visibility_for_grants(strategy, bool(grantee_user_ids))
+
+    try:
+        await session.commit()
+    except IntegrityError as error:
+        raise ConflictError(GRANTS_CONFLICTED_MESSAGE) from error
+
+    return await _build_strategy_detail(session, strategy, current_user)
 
 
 @router.get("/{strategy_id}", response_model=StrategyDetailResponse)

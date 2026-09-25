@@ -24,18 +24,19 @@ from app.catalog.visibility import RUN_NOT_FOUND_MESSAGE, STRATEGY_NOT_FOUND_MES
 
 from .helpers import (
     DEFAULT_MEMBER_PASSWORD,
+    STRATEGIES_PATH,
     bearer_headers,
     create_run_record,
     create_strategy_record,
     create_strategy_version_record,
     create_user_record,
     fetch_page,
+    get_strategy_response,
     login,
     record_ids,
 )
 
 
-STRATEGIES_PATH = "/api/strategies"
 RUNS_PATH = "/api/runs"
 FIRST_MEMBER_USERNAME = "tenant-first"
 SECOND_MEMBER_USERNAME = "tenant-second"
@@ -120,8 +121,8 @@ async def test_owner_reads_own_strategy_and_run(
 ) -> None:
     first, _ = tenants
 
-    strategy_response = await client.get(
-        f"{STRATEGIES_PATH}/{first.strategy.id}", headers=bearer_headers(first.token)
+    strategy_response = await get_strategy_response(
+        client, first.token, first.strategy.id
     )
     run_response = await client.get(
         f"{RUNS_PATH}/{first.run.id}", headers=bearer_headers(first.token)
@@ -141,9 +142,7 @@ async def test_reading_another_tenants_strategy_is_not_found_not_forbidden(
 ) -> None:
     first, second = tenants
 
-    response = await client.get(
-        f"{STRATEGIES_PATH}/{second.strategy.id}", headers=bearer_headers(first.token)
-    )
+    response = await get_strategy_response(client, first.token, second.strategy.id)
 
     assert response.status_code == 404
     assert response.json()["detail"] == STRATEGY_NOT_FOUND_MESSAGE
@@ -169,12 +168,9 @@ async def test_another_tenants_strategy_exposes_no_existence_hint(
 
     first, second = tenants
 
-    foreign_response = await client.get(
-        f"{STRATEGIES_PATH}/{second.strategy.id}", headers=bearer_headers(first.token)
-    )
-    absent_response = await client.get(
-        f"{STRATEGIES_PATH}/no-such-strategy-identifier",
-        headers=bearer_headers(first.token),
+    foreign_response = await get_strategy_response(client, first.token, second.strategy.id)
+    absent_response = await get_strategy_response(
+        client, first.token, "no-such-strategy-identifier"
     )
 
     assert foreign_response.status_code == absent_response.status_code == 404
@@ -229,9 +225,7 @@ async def test_strategy_detail_of_another_tenant_leaks_no_versions(
 ) -> None:
     first, second = tenants
 
-    response = await client.get(
-        f"{STRATEGIES_PATH}/{second.strategy.id}", headers=bearer_headers(first.token)
-    )
+    response = await get_strategy_response(client, first.token, second.strategy.id)
 
     assert second.version.id not in response.text
     assert second.run.id not in response.text

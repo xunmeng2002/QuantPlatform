@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -51,15 +50,15 @@ from app.routers.strategies import (
 )
 
 from .helpers import (
-    DEFAULT_MEMBER_PASSWORD,
+    STRATEGIES_PATH,
+    SignedInAccount,
     bearer_headers,
-    create_user_record,
+    create_signed_in_account,
     fetch_page,
-    login,
+    read_strategy_detail,
+    read_strategy_status_code,
 )
 
-
-STRATEGIES_PATH = "/api/strategies"
 
 OWNER_USERNAME = "strategy-owner"
 OTHER_USERNAME = "strategy-other-owner"
@@ -94,14 +93,6 @@ REMOVED = object()
 VALUE_MARKER = "marker-that-must-not-be-echoed"
 
 
-@dataclass(frozen=True)
-class SignedInAccount:
-    """一个已登录账号. 留下 user_id 是为了直接核对盘上的归属目录."""
-
-    user_id: str
-    token: str
-
-
 def manifest_payload(**overrides: object) -> str:
     """一份合法 manifest 的 JSON 文本, 按 overrides 逐键覆盖.
 
@@ -128,24 +119,14 @@ def manifest_payload(**overrides: object) -> str:
 async def owner_account(
     client: AsyncClient, database: PlatformDatabase
 ) -> SignedInAccount:
-    user = await create_user_record(database, OWNER_USERNAME)
-
-    return SignedInAccount(
-        user_id=user.id,
-        token=await login(client, OWNER_USERNAME, DEFAULT_MEMBER_PASSWORD),
-    )
+    return await create_signed_in_account(database, client, OWNER_USERNAME)
 
 
 @pytest_asyncio.fixture
 async def other_account(
     client: AsyncClient, database: PlatformDatabase
 ) -> SignedInAccount:
-    user = await create_user_record(database, OTHER_USERNAME)
-
-    return SignedInAccount(
-        user_id=user.id,
-        token=await login(client, OTHER_USERNAME, DEFAULT_MEMBER_PASSWORD),
-    )
+    return await create_signed_in_account(database, client, OTHER_USERNAME)
 
 
 async def post_strategy(
@@ -197,18 +178,6 @@ async def create_strategy(client: AsyncClient, token: str) -> StrategyDetailResp
     response = await post_strategy(client, token)
 
     assert response.status_code == 201, response.text
-
-    return StrategyDetailResponse.model_validate(response.json())
-
-
-async def reread_strategy(
-    client: AsyncClient, token: str, strategy_id: str
-) -> StrategyDetailResponse:
-    response = await client.get(
-        f"{STRATEGIES_PATH}/{strategy_id}", headers=bearer_headers(token)
-    )
-
-    assert response.status_code == 200, response.text
 
     return StrategyDetailResponse.model_validate(response.json())
 
@@ -347,9 +316,9 @@ async def test_identical_content_reuses_the_version_instead_of_minting_a_new_one
     assert response.status_code == 201, response.text
     assert StrategyVersionResponse.model_validate(response.json()).version_no == 1
 
-    assert len((await reread_strategy(
-        client, owner_account.token, detail.strategy.id
-    )).versions) == 1
+    assert len(
+        (await read_strategy_detail(client, owner_account.token, detail.strategy.id)).versions
+    ) == 1
 
 
 async def test_changing_only_the_manifest_mints_a_new_version(
@@ -408,7 +377,7 @@ async def test_rotating_the_strategy_marks_it_as_updated(
         source_bytes=SECOND_STRATEGY_SOURCE,
     )
 
-    reread = await reread_strategy(client, owner_account.token, detail.strategy.id)
+    reread = await read_strategy_detail(client, owner_account.token, detail.strategy.id)
 
     assert reread.strategy.updated_at > detail.strategy.updated_at
 
@@ -422,7 +391,7 @@ async def test_reusing_a_version_does_not_claim_the_strategy_was_updated(
 
     await post_strategy_version(client, owner_account.token, detail.strategy.id)
 
-    reread = await reread_strategy(client, owner_account.token, detail.strategy.id)
+    reread = await read_strategy_detail(client, owner_account.token, detail.strategy.id)
 
     assert reread.strategy.updated_at == detail.strategy.updated_at
 
@@ -952,11 +921,9 @@ async def test_the_owner_can_delete_a_strategy(
     assert response.json()["message"] == STRATEGY_DELETED_MESSAGE
 
     assert (
-        await client.get(
-            f"{STRATEGIES_PATH}/{detail.strategy.id}",
-            headers=bearer_headers(owner_account.token),
-        )
-    ).status_code == 404
+        await read_strategy_status_code(client, owner_account.token, detail.strategy.id)
+        == 404
+    )
 
     page = await fetch_page(
         client, STRATEGIES_PATH, owner_account.token, StrategyResponse
