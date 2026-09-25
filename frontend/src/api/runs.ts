@@ -5,7 +5,10 @@ import { request, requestBlob } from './client';
 import type {
   JobArtifactList,
   PageResponse,
+  ResultTableName,
+  ResultTableResponse,
   RunDetail,
+  RunEquity,
   RunStatus,
   RunSubmitPayload,
   RunSummary,
@@ -78,5 +81,32 @@ export function fetchRunArtifactBlob(
 ): Promise<Blob> {
   return requestBlob(
     `/runs/${encodeURIComponent(runId)}/files/${encodeArtifactPath(relativePath)}`,
+  );
+}
+
+/**
+ * 逐日权益序列.
+ *
+ * 只有**终态**的轮能取: 引擎写库时没有 `busy_timeout`, 边写边读会拿到半份文件, 故后端对未结束的
+ * 轮回 409 (`RESULT_NOT_READY_MESSAGE`); 没有结果库的轮 (失败/取消/超时) 回 404.
+ */
+export function fetchRunEquity(runId: string): Promise<RunEquity> {
+  return request<RunEquity>(`/runs/${encodeURIComponent(runId)}/equity`);
+}
+
+/**
+ * 结果表的一页.
+ *
+ * `table` 只取 `RESULT_TABLE_NAMES` 里的名字 (后端白名单的镜像), 其余一律 404. 页大小同样受
+ * `MAXIMUM_PAGE_SIZE` 约束, 故界面只给 `PAGE_SIZE_OPTIONS` 那几档.
+ */
+export function fetchRunResultTable(
+  runId: string,
+  table: ResultTableName,
+  page: { offset: number; limit: number },
+): Promise<ResultTableResponse> {
+  return request<ResultTableResponse>(
+    `/runs/${encodeURIComponent(runId)}/tables/${encodeURIComponent(table)}`,
+    { query: { offset: page.offset, limit: page.limit } },
   );
 }

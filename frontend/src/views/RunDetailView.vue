@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 运行详情: 指标、参数、引擎输出与产物下载, 以及取消.
+ * 运行详情: 指标、权益曲线与明细表、参数、引擎输出与产物下载, 以及取消.
  *
  * 未结束时每 2 秒刷新一次. 「引擎判定」与「状态」分开显示: 前者是引擎在自己那份 result.json 里
  * 写的结论, 后者是宿主对进程的观察 (退出码、有没有被杀), 两者不一致时正是最该看见的信息.
@@ -18,8 +18,10 @@ import type { JobArtifact, RunDetail } from '../api/types';
 import ArtifactList from '../components/ArtifactList.vue';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import EmptyNotice from '../components/EmptyNotice.vue';
+import EquityChartPanel from '../components/EquityChartPanel.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
 import LoadingNotice from '../components/LoadingNotice.vue';
+import ResultTablePanel from '../components/ResultTablePanel.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import { usePolling } from '../composables/usePolling';
 import { artifactFilename, saveBlobAsFile } from '../domain/download';
@@ -327,6 +329,27 @@ onMounted(async () => {
           </div>
         </dl>
       </section>
+
+      <!-- 结果库那两节只在轮结束之后挂载: 引擎写库时读会拿到半份文件, 故后端对未结束的轮回
+           409, 这里干脆不请求. 挂载时机由既有的 `watch(isTerminal)` 负责——轮一翻成终态, 组件
+           挂载即取数, 不必再等一次 2 秒轮询. -->
+      <template v-if="isTerminal">
+        <EquityChartPanel
+          :run-id="props.id"
+          class="mb-6"
+        />
+        <ResultTablePanel
+          :run-id="props.id"
+          class="mb-6"
+        />
+      </template>
+
+      <p
+        v-else
+        class="mb-6 rounded-md border border-line bg-surface px-4 py-3 text-sm text-slate-500"
+      >
+        运行结束后可查看权益曲线与明细表
+      </p>
 
       <section class="mb-6">
         <h2 class="mb-2 text-sm font-semibold text-slate-700">

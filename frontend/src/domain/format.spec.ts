@@ -17,6 +17,7 @@ import {
   formatDuration,
   formatFlag,
   formatJsonText,
+  formatPercentRatio,
   formatTradingDay,
   parseUtcTimestamp,
 } from './format';
@@ -103,6 +104,19 @@ describe('formatAmount 与 formatCount', () => {
 
   it('不用 toLocaleString: 分组符与环境无关', () => {
     expect(formatAmount(1234567.891)).toContain(',');
+  });
+});
+
+describe('formatPercentRatio', () => {
+  it('比例乘 100 后带百分号, 回撤那一路的负号保留', () => {
+    expect(formatPercentRatio(0.02)).toBe('2.00%');
+    expect(formatPercentRatio(-0.0182)).toBe('-1.82%');
+    expect(formatPercentRatio(0)).toBe('0.00%');
+  });
+
+  it('拿不到值就显示占位符, 不显示 NaN%', () => {
+    expect(formatPercentRatio(null)).toBe(ABSENT_PLACEHOLDER);
+    expect(formatPercentRatio(Number.NaN)).toBe(ABSENT_PLACEHOLDER);
   });
 });
 

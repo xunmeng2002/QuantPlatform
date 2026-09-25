@@ -447,7 +447,8 @@ QuantPlatform/
 │   │   ├── routers/           # auth / users / strategies / runs / health
 │   │   ├── scheduler/         # engine_config / result / output / workspace
 │   │   │                      # registry / runner / recovery / scheduler (常驻循环)
-│   │   └── services/          # run_submission / strategy_store / engine_probe
+│   │   └── services/          # run_submission / strategy_store / engine_probe /
+│   │                          # result_database（P5：只读结果库与表名白名单）
 │   ├── requirements.txt
 │   └── data/catalog.db        # catalog（gitignore）
 ├── frontend/                  # 见下
@@ -469,13 +470,15 @@ frontend/
     ├── main.ts  App.vue  style.css    # style.css 内是 Tailwind 的 @theme 令牌
     ├── api/         client.ts（唯一出入口）/ types.ts（手写契约）/
     │                auth.ts / strategies.ts / runs.ts / users.ts
-    ├── domain/      纯逻辑: manifest / run-form / run-status / format / labels / download
+    ├── domain/      纯逻辑: manifest / run-form / run-status / format / labels /
+    │                download / equity（P5：权益序列与回撤，纯函数）
     ├── stores/      session / strategy-catalog / user-directory
     ├── router/      index.ts（路由表 + 登录守卫 + 逐页懒加载）
     ├── components/  AppLayout / ParameterForm / ParameterField / DirectoryPicker /
     │                StrategyUploadForm / StrategyVersionUploadForm / ArtifactList /
     │                ConfirmDialog / PaginationBar / StatusBadge / ErrorBanner /
-    │                EmptyNotice / LoadingNotice / FilePicker
+    │                EmptyNotice / LoadingNotice / FilePicker /
+    │                EquityChartPanel / ResultTablePanel（P5）
     ├── composables/ usePolling.ts / useManifestTextSource.ts
     └── views/       LoginView / RunListView / RunSubmitView / RunDetailView /
                      StrategyListView / StrategyDetailView / UserAdminView /
@@ -539,6 +542,25 @@ npm run dev     # http://localhost:5173/
 7. 在详情页下载 `result.json` 与一个 `t_*.csv`，**内容与磁盘上的原件一致**。
 8. 另提交一轮 → 在它跑动时点「取消运行」→ 状态变 `interrupted`。
 9. 回「新建回测」确认**表单里没有 Tick 选项**。
+
+### 8.3 手工验收：权益曲线与明细表（P5 的验收项，走界面）
+
+前置同上，且**手上要有一个 `succeeded` 的轮**（§8.2 第 5 步那个即可）。
+
+1. 打开该轮的详情页，在「引擎数据镜像」下方应出现**权益曲线**与**回撤**两张图。
+2. 概要四项核对：**初始权益 `1,000,000.00`**、**期末权益与该轮「绩效指标」里的
+   「余额」逐位一致**（这是 P5 验收的自洽判据，见 §11 的订正）、最大回撤那一行
+   带出发生日期、累计收益率与两者的比例对得上。
+3. 权益曲线的**首点**应对着 `StartTradingDay`（即 `2024-10-01` 一类），
+   末点对着「最后交易日」；拖动缩放条（或滚轮）能放大到单日。
+4. 回撤曲线**恒在 0 及以下**，最大值那一点可在图上指认，且与概要里的
+   「最大回撤」日期一致。
+5. 「明细表」5 个页签逐个点开：**成交（84 行）/ 委托（654 行）/ 持仓（116 行）/
+   持仓明细（290 行）** 与资金（62 行）都能翻页；`TradingDay` 列显示成
+   `2024-10-01` 形态；换页签时页码回到第 1 页。
+6. **未结束的轮**：提交一轮并在它跑动时打开详情页，应看到一句
+   「运行结束后可查看权益曲线与明细表」，**两张图不出现**（后端对未结束的轮回
+   409，前端干脆不请求）。
 
 ---
 
@@ -612,6 +634,41 @@ npm run dev     # http://localhost:5173/
 > **一律 `attachment` 下发**（策略是任意 Python，可以往自己目录里写
 > `.html`，同源内联渲染等于在平台域上执行它写的脚本）。
 
+> **P5 落地范围**：`GET /api/runs/{id}/equity` 与 `GET /api/runs/{id}/tables/{table}`
+> 已实现（`backend/app/services/result_database.py` + `routers/runs.py`）。
+> 六条要点：
+>
+> 1. **表名白名单只有 5 张**：`Capital` / `Trade` / `Order` / `Position` /
+>    `PositionDetail`，其余 12 张（含 2928 行的 `BarMarketData`）在界面上不可见。
+>    校验与 `SELECT` 拼接**同处一个模块**，为的是让「先白名单、后拼接」在代码上
+>    无法被绕过；表名一律加**双引号**——`Order` 是 SQLite 保留字，不加引号直接
+>    `near "Order": syntax error`。列名不参与拼接（`SELECT *` + `PRAGMA table_info`）。
+> 2. **只读连接**：`sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True)`。
+>    `as_uri()` 要求**绝对**路径，故先 `resolve()`,否则
+>    `ValueError: relative paths can't be expressed as file URIs`。这一条被钉成
+>    断言（对 contextmanager 出来的连接执行 `CREATE TABLE` → `OperationalError`），
+>    而不是靠注释。
+> 3. **运行中一律 409**（`TERMINAL_RUN_STATUSES` 之外），文案「运行尚未结束,
+>    结果库正在被引擎写入」。这不是风格而是硬约束的落点：`SqliteWrapper` 没有
+>    `busy_timeout`，运行中读会拿到 `SQLITE_BUSY` 或半份文件。
+> 4. **`db_path` 视为不可信输入**：它是引擎侧写进 `result.json` 再由调度侧镜像入库的
+>    值，而策略是任意 Python，**它同样可以被伪造**。故与产物路径同等对待——
+>    `removeprefix("./")` → `(job_directory / rel).resolve()` → 必须
+>    `is_relative_to(job_directory)` 且 `is_file()`，否则 404。失败的轮 `db_path`
+>    是空串，同样 404「该运行没有结果库」。
+> 5. **`asyncio.to_thread` 首例**：sqlite3 是阻塞 API 且连接不能跨线程，故把
+>    「开连接 → 查询 → 关连接」整个放进同一个 worker。与 P4 直接内联文件 IO 的做法
+>    **有意分叉**：一条 `COUNT(*)` + 一页 `SELECT` 的耗时随库长大，目标是云上多用户，
+>    不该占着事件循环。
+> 6. **回撤不在后端算**：端点只回 `Capital` 的原样逐日序列（`trading_day` /
+>    `balance` / `available`），回撤与收益率由**前端纯函数**派生
+>    （`frontend/src/domain/equity.ts`，进 vitest 单测）。理由：它是派生数据，
+>    后端一旦算了，前端要点另一条曲线就再加一个字段，接口会随着图表变化。
+>
+> 排序恒为 `ORDER BY TradingDay, rowid`：前者在 5 张表里都存在（引擎契约），
+> 后者破平局使翻页不重不漏；两者都是代码里的字面量，不是入参。分页用
+> `LIMIT ? OFFSET ?` 参数绑定，`total` 由同表 `COUNT(*)` 取。
+
 **三条安全硬约束**（Harness §6）：
 
 - `tables/{table}` 的表名走**白名单**，不得直接拼进 SQL。
@@ -627,7 +684,7 @@ npm run dev     # http://localhost:5173/
 
 ## 10. 前端页面
 
-**实况（P4 收尾时按落地改，标 ✅ 的已可访问）**：
+**实况（P5 收尾时按落地改，标 ✅ 的已可访问）**：
 
 | 路由 | 页面 | 内容 | 状态 |
 | ---- | ---- | ---- | ---- |
@@ -635,7 +692,7 @@ npm run dev     # http://localhost:5173/
 | `/` | —— | 重定向到 `/runs` | ✅ P4 |
 | `/runs` | 运行列表 | 状态徽章 / 引擎判定 / 交易日区间 / 耗时 / 交易笔数 / 余额；按状态与策略筛选、按指标排序、分页；**存在非终态轮时 2 s 轮询** | ✅ P4 |
 | `/runs/new` | 新建回测 | 选策略 → 选版本（缺省最新）→ **按 manifest 动态生成参数表单** → 提交；`match_mode` 固定 `Bar` | ✅ P4 |
-| `/runs/:id` | 运行详情 | 概览 / 绩效指标 / 引擎数据镜像 / 提交参数与引擎配置 / stdout·stderr 尾巴 / **产物清单与下载** / 取消；未结束时 2 s 轮询 | ✅ P4（**权益曲线与明细分页表缺，属 P5**） |
+| `/runs/:id` | 运行详情 | 概览 / 绩效指标 / 引擎数据镜像 / **权益曲线与回撤曲线** / **5 张结果表的明细分页表** / 提交参数与引擎配置 / stdout·stderr 尾巴 / 产物清单与下载 / 取消；未结束时 2 s 轮询 | ✅ P5（**结果库两节只在终态挂载**：未结束时后端回 409，前端干脆不请求，翻成终态由既有的 `watch(isTerminal)` 自动接上） |
 | `/strategies` | 策略管理 | 列表 + 上传面板 + 可见性 + 归属（经用户目录映显示名） | ✅ P4 |
 | `/strategies/:id` | 策略详情 | 版本列表（含该版本 manifest 的参数预览）+ 传新版本 + **授权编辑器（目录选人）** + 软删 | ✅ P4 |
 | `/users` | 用户管理（admin） | 列表 / 建号（显示名必填）/ 启用停用 | ✅ P4 |
@@ -644,9 +701,15 @@ npm run dev     # http://localhost:5173/
 | `/settings` | 设置 | 引擎根、并发上限、超时、数据根，带 health 自检 | P8（该端点目前是 **admin 专属**，普通用户的这一页看不到引擎自检） |
 
 图表库选用 **ECharts + vue-echarts**（量化领域事实标准：K 线、缩放、
-大数据量折线开箱即用），按需引入以控制体积——**P5 才装**，P4 的依赖只有
-`vue` / `vue-router` / `pinia` 三个（**无 UI 组件库**：表格、分页、模态框、
-提示条、表单控件都是自己用 Tailwind 写的，见 §13 的 P4 拍板表）。
+大数据量折线开箱即用），**P5 已装**，落地版本是 `echarts ^6.1.0` +
+`vue-echarts ^8.3.0`（这是 npm 上唯一自洽的 peer 组合：vue-echarts 8 的 peer
+写死 `echarts ^6.0.0`）。**按需引入**控制体积：`echarts/core` 的 `use([...])`
+只注册折线 / 直角坐标系 / 浮层 / 缩放 / Canvas 渲染器，不用
+`import * as echarts from 'echarts'` 的全量包；打包结果是 ECharts 只进
+应用详情那一块 chunk（559 kB / gzip 190 kB），**按路由懒加载**，首屏不付这份钱。
+P4 的依赖当时只有 `vue` / `vue-router` / `pinia` 三个（**无 UI 组件库**：
+表格、分页、模态框、提示条、表单控件都是自己用 Tailwind 写的，见 §13 的
+P4 拍板表）。
 
 ---
 
@@ -661,7 +724,7 @@ npm run dev     # http://localhost:5173/
 | **P2b 策略授权** ✅ | `PUT /{id}/grants`，`StrategyGrants` 写入路径 | **2026-09-25 通过**：「被授权人可见、非授权人 404」通过（287 项测试）。**「可跑」已于 P3 结清**：提交权限判定与可见性判定**逐字重合**，"授权即可跑"（含被授权人提交的用例） |
 | **P3 runner 本体** ✅ | 队列 / subprocess / 结果回收 / 启动恢复 / 作业目录构造 / cancel | **2026-09-25 通过**：`POST /api/runs` 提交后轮询至 `succeeded`；重启后端把在跑的轮标 `interrupted`；并发上限、超时、取消、输出捕获、结果镜像齐备（**380 项测试**，其中 4 项真引擎验收默认不跑，见 `backend/tests/test_real_engine_acceptance.py`）。真引擎实测：`Success=true`、`TradeCount == 84`、`BarMarketDataCount == 2928`，与 P0 基线同口径（前提差异见 [`job-workspace.md`](job-workspace.md) §6） |
 | **P4 前端骨架** ✅ | Vue 3 + TS + Vite + Tailwind + Pinia，`frontend/` 从零到闭环 | **2026-09-25 代码与链路通过**：闭环六步全部落地（47 个源文件 / 约 6850 行），后端 **406 项测试**（新增 26 项：目录 / 显示名必填 / manifest 透传 / 产物清单与下载），前端 `type-check` 无错 + `vitest` **58 项全绿** + `build` 成功（按路由分包）；代理链路冒烟 13 项（含 422 的数组信封、目录不泄漏 `username`、目录排除自己）。**「真引擎一轮真回测、全程走界面」的手工验收见 §8.2，须由用户在浏览器里走一遍** |
-| P5 可视化 | 权益曲线 + 回撤、明细分页表 | 曲线与实测数据点吻合（`1000000.0 → 999549.73`） |
+| **P5 可视化** ✅ | 权益曲线 + 回撤、明细分页表（后端两条读端点 + 前端两个面板 + `domain/equity` 纯函数） | **2026-09-26 代码与链路通过**：后端 **432 项测试**（新增 26 项：正向 / 越权 / 运行中 409 / 目录穿越 / 白名单 / 保留字 / 分页 / 只读），真引擎验收 4 项全过；前端 `type-check` 无错 + `vitest` **75 项全绿**（新增 `equity.spec.ts` 15 项）+ `build` 成功；代理链路冒烟 12 项。**曲线与实测数据点吻合的判据已订正**（原文的 `999549.73` 见下）：权益首点 `== 1000000.0`（`Capital` 种子行）、末点与该轮 `result.json.Balance` **逐位相等**（本机现存那轮是 `999377.0899999999`，62 点），`Trade` / `Order` / `Position` / `PositionDetail` 的 `total` 各为 84 / 654 / 116 / 290。**手工验收（打开一个 succeeded 的轮看曲线与 5 个页签）须由用户在浏览器里走一遍** |
 | P6 对比与模板 | 多轮对比、配置模板保存复用 | 同参不同 `GridStep` 的两轮指标并列且曲线叠加 |
 | P7 加固 | 并发上限、超时、磁盘清理、日志轮转 | 并发上限内排队正确；超时轮标 `timeout` |
 | P8 上云 | 迁 Windows 云主机 + 传行情数据 + 系统级隔离评估 | 系统级隔离到位后方可对不可信用户开放 |
@@ -678,6 +741,12 @@ P2b 的「可跑」所需的判定已于 P3 开工前（2026-09-25）**拍板**�
 既不新增 403 分支（D.02 起的"跨租户一律 404"原样保住），也不必为两档粒度另编
 一套语义。`GrantPermission` 字段与 P2b 的端点契约**原样保留**，只是它不再被任何
 判定读取——`enums.py` 的 docstring 已写明"已拍板不判定"，免得后人当缺陷去修。
+
+P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`1000000.0 → 999549.73`）」里的
+`999549.73` 是 **P0 有种子库那轮的基线，而那批产物已不在盘上**（`runs/` 已被清掉），
+钉死它等于钉死一个取不到的数。改为**自洽形式**：首点恒为 `1000000.0`（`Capital`
+的种子行 = 初始资金），末点与该轮 `result.json.Balance` 逐位相等——这条不依赖
+种子库在不在，比一个常数更强，本轮实测即 `999377.0899999999`（无种子库变体）。
 
 ---
 
@@ -742,6 +811,24 @@ P2b 的「可跑」所需的判定已于 P3 开工前（2026-09-25）**拍板**�
     主题令牌写在 `src/style.css` 的 `@theme` 块里，**没有 `tailwind.config.js`**
     （照 v3 的教程去找那个文件会找不到）。
 
+**P5 起新记的已知缺口**：
+
+19. **另 12 张表在界面上看不到**（含 2928 行的 `BarMarketData` 等行情与统计表）：
+    本轮只开 5 张交易与资金表。要看别表，要么同时改白名单与页签两处，
+    要么日后补一个 `GET /runs/{id}/tables` 列表端点。
+20. **表名清单是两处真相**：后端 `services/result_database.py:RESULT_TABLE_NAMES`
+    是正本，前端 `api/types.ts:RESULT_TABLE_NAMES` 是**镜像**（照 `RUN_SORT_COLUMNS`
+    的先例）。这是"不加列表端点"的直接代价——漏改一处不会报错，只会让某个页签
+    点开是 404。
+21. **盘中回撤不可得**：`Capital` 只有**逐日结算权益**（`Margin` / `MarketValue`
+    在本样本里恒为 0），库里根本不存在日内曲线。图上画的是逐日权益与**逐日**回撤，
+    不是"日内最高点之后回落多少"。
+22. **失败的轮看不到部分结果**：`db_path` 只在引擎写 `result.json` **成功之后**
+    才被镜像入库，取消 / 超时 / 启动失败的轮一律空串 → 404。要能看到"跑到一半
+    写下的那些行"，得让调度侧在启动前就把 `DbPath` 镜像下来（留后续）。
+    另：**明细表没有导出**（下载已有的产物即可）；K 线图、多轮曲线叠加（P6）、
+    图表导出图片、大表虚拟滚动（一页最多 100 行）**明确不做**。
+
 ---
 
 ## 13. 已锁定的实现选择
@@ -791,3 +878,14 @@ P2b 的「可跑」所需的判定已于 P3 开工前（2026-09-25）**拍板**�
 | 版本号 | **照抄同族项目的已验证组合**，不追最新 | router 5 / pinia 4 / vitest 5 / TS 7 都是主版本跳跃，日后单独评估 |
 | 前端参照物 | 本机同族项目 `ShopKit/frontend-platform` 与 `RMS/frontend-admin` | `defect_tools`（`amies`）**不在本机**；且参照物的样式是 **SCSS + Element Plus**，不是纯 CSS + `variables.css` |
 | 前端目录命名 | `domain/`（纯逻辑）、扁平的 `views/RunListView.vue` | 避开仓根 `.gitignore` 的无锚点模式（`lib/` `runs/` `users/` …），见 §8 |
+
+**P5 开工前新增的拍板**（2026-09-26）：
+
+| 决策点 | 选择 | 备注 |
+| ---- | ---- | ---- |
+| 图表库版本 | **`echarts ^6.1.0` + `vue-echarts ^8.3.0`** | 当前最新且**唯一自洽**的一对：vue-echarts 8 的 peer 写死 `echarts ^6.0.0`；已按需注册控制体积 |
+| 明细表范围 | **精选 5 张**：`Capital` / `Trade` / `Order` / `Position` / `PositionDetail` | **不加列表端点**，表名清单在前端镜像一份；见 §12.19 / §12.20 |
+| 回撤在哪算 | **前端纯函数派生**（`domain/equity.ts`），后端只回原样序列 | 端点不该随图表变化；前端这份是纯逻辑，正好进 vitest |
+| 阻塞调用 | **`asyncio.to_thread`**（本仓首例） | sqlite3 阻塞且连接不能跨线程，"开→查→关"整个进同一 worker；与 P4 内联文件 IO 有意分叉 |
+| 未结束的轮 | **409 + 前端不请求** | `SqliteWrapper` 无 `busy_timeout`，运行中读会拿到 `SQLITE_BUSY` 或半份文件 |
+| 结果库两节的挂载 | **只在 `isTerminal` 时挂载** | 复用既有 `watch(isTerminal)`，翻成终态即取数，不必再等一次 2 s 轮询 |

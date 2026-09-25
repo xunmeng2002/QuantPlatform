@@ -289,3 +289,70 @@ export interface JobArtifactList {
   run_id: string;
   artifacts: JobArtifact[];
 }
+
+/* ── 结果库 (引擎写的 BackTest_<RunId>.db) ─────────────────── */
+
+/**
+ * 界面上开放的结果表, 与 `backend/app/services/result_database.py:RESULT_TABLE_NAMES` 逐字对应.
+ *
+ * 这是那份白名单的**镜像**. 引擎的结果库有 17 张表, 平台只开这 5 张, 其余表名一律 404; 而清单
+ * 在前端又抄了一份, 是因为没有列表端点 (表名不是从后端拉的). 于是**两边必须一起改**——界面上
+ * 根本不给不合法的选项, 是避免「请求 404、用户只看到一句报错」那种无声失败的唯一可靠办法
+ * (同 `RUN_SORT_COLUMNS` 的先例).
+ */
+export const RESULT_TABLE_NAMES = [
+  'Capital',
+  'Trade',
+  'Order',
+  'Position',
+  'PositionDetail',
+] as const;
+export type ResultTableName = (typeof RESULT_TABLE_NAMES)[number];
+
+/** 页签文案. 引擎的表名是英文的, 中文只出现在这一处, 不散到模板里. */
+export const RESULT_TABLE_LABELS: Record<ResultTableName, string> = {
+  Capital: '资金',
+  Trade: '成交',
+  Order: '委托',
+  Position: '持仓',
+  PositionDetail: '持仓明细',
+};
+
+export interface EquityPoint {
+  /** 8 字符 `YYYYMMDD` 交易日; 展示前过 `formatTradingDay`. */
+  trading_day: string;
+  balance: number;
+  available: number;
+}
+
+export interface RunEquity {
+  run_id: string;
+  /**
+   * 逐日升序, 一天一点.
+   *
+   * **首点是引擎的种子行** (`Deposit` = 初始资金, `Balance` = 初始权益), 故序列起点就是初始
+   * 权益而不是第一个交易日结束时的权益; 末点与运行详情里的 `balance` 同值.
+   */
+  points: EquityPoint[];
+}
+
+/** 结果表的单元格值. 引擎的列只有 str / int / float 三种标量 (无 BLOB), `null` 是防御性允许. */
+export type ResultTableValue = string | number | boolean | null;
+
+export type ResultTableRecord = Record<string, ResultTableValue>;
+
+/**
+ * 结果表的一页.
+ *
+ * `total` / `offset` / `limit` 与 `PageResponse` 逐字同形 (`PaginationBar` 只认这三个数, 原样
+ * 复用), 但它**不是** `PageResponse`: 结果表的行没有固定形状, 表头由响应里的 `columns` 给出
+ * (顺序即权威顺序), 故列名不在前端写死——`Order` 有 33 列, 写死就是 33 处会漂移的真相.
+ */
+export interface ResultTableResponse {
+  table: string;
+  columns: string[];
+  total: number;
+  offset: number;
+  limit: number;
+  records: ResultTableRecord[];
+}

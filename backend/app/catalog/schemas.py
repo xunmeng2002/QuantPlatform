@@ -287,3 +287,43 @@ class JobArtifactListResponse(BaseModel):
 
     run_id: str
     artifacts: list[JobArtifactResponse]
+
+
+class EquityPointResponse(BaseModel):
+    """权益曲线上的一个点, 即 `Capital` 表某个交易日的结算权益.
+
+    引擎的 `Capital` 首行是种子行 (`Deposit` = 初始资金), 故序列起点就是初始权益; 一天一点,
+    `TradingDay` 是 8 字符 `YYYYMMDD` 串. **回撤不在后端算**: 它是派生数据, 由前端从这条
+    序列推出来 (见 `frontend/src/domain/equity.ts`), 后端多加一列就等于把图表形状钉进接口.
+    """
+
+    trading_day: str
+    balance: float
+    available: float
+
+
+class RunEquityResponse(BaseModel):
+    """一次运行的逐日权益序列.
+
+    不分页: 点数就是交易日数 (实测一轮 62 点, 15 年日线约 3600 点), 比一页明细表还小.
+    """
+
+    run_id: str
+    points: list[EquityPointResponse]
+
+
+class ResultTableResponse(BaseModel):
+    """引擎结果表的一页.
+
+    `total` / `offset` / `limit` / `records` 逐字沿用 `PageResponse` 的字段名 (前端的分页条
+    只认这三个数, 原样复用), 但**不继承它**: 那个信封要求一个固定的记录模型, 而结果表的行
+    没有固定形状——`columns` 由 `PRAGMA table_info` 给出, 顺序即权威顺序, 表头因此不必在
+    界面上写死 (`Order` 有 33 列).
+    """
+
+    table: str
+    columns: list[str]
+    total: int
+    offset: int
+    limit: int
+    records: list[dict[str, str | int | float | bool | None]]

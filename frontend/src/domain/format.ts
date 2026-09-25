@@ -152,6 +152,23 @@ export function formatCount(value: number | null | undefined): string {
   return groupThousands(String(Math.trunc(value)));
 }
 
+/**
+ * 比例 → 百分数文本 (`0.0123` → `'1.23%'`).
+ *
+ * 收**比例**而不是已经乘过 100 的数: 乘 100 只在这里发生一次, 免得每处调用各乘一遍, 而其中一处
+ * 忘了乘就是「回撤 0.18%」这种差一百倍的数字.
+ */
+export function formatPercentRatio(
+  value: number | null | undefined,
+  fractionDigits = 2,
+): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return ABSENT_PLACEHOLDER;
+  }
+
+  return `${(value * 100).toFixed(fractionDigits)}%`;
+}
+
 export function formatByteSize(sizeBytes: number | null | undefined): string {
   if (
     typeof sizeBytes !== 'number' ||

@@ -23,10 +23,13 @@ from ..catalog.enums import TERMINAL_RUN_STATUSES, RunStatus
 from ..catalog.models import RunModel
 from ..catalog.pagination import DEFAULT_PAGE_SIZE, MAXIMUM_PAGE_SIZE, fetch_page
 from ..catalog.schemas import (
+    EquityPointResponse,
     JobArtifactListResponse,
     JobArtifactResponse,
     PageResponse,
+    ResultTableResponse,
     RunDetailResponse,
+    RunEquityResponse,
     RunSubmitRequest,
     RunSummaryResponse,
 )
@@ -37,6 +40,7 @@ from ..dependencies import SchedulerDependency, SessionDependency, SettingsDepen
 from ..errors import ConflictError, ResourceNotFoundError
 from ..scheduler.registry import JobHandle
 from ..scheduler.runner import CANCEL_MESSAGE
+from ..services.result_database import read_capital_series, read_result_table_page
 from ..services.run_submission import submit_run
 
 
@@ -51,6 +55,9 @@ RUN_ALREADY_FINISHED_MESSAGE = "运行已结束, 无法取消"
 
 JOB_DIRECTORY_MISSING_MESSAGE = "该运行的作业目录不存在"
 ARTIFACT_NOT_FOUND_MESSAGE = "产物不存在"
+
+RESULT_NOT_READY_MESSAGE = "运行尚未结束, 结果库还在被引擎写入"
+RESULT_DATABASE_MISSING_MESSAGE = "该运行没有结果库"
 
 ARTIFACT_MEDIA_TYPE = "application/octet-stream"
 
@@ -301,6 +308,117 @@ async def download_run_artifact_handler(
         media_type=ARTIFACT_MEDIA_TYPE,
         filename=artifact_path.name,
     )
+
+
+@router.get("/{run_id}/equity", response_model=RunEquityResponse)
+async def read_run_equity_handler(
+    run_id: str,
+    session: SessionDependency,
+    settings: SettingsDependency,
+    current_user: CurrentUserDependency,
+) -> RunEquityResponse:
+    """逐日权益序列 (读结果库的 `Capital` 表). 非本人提交即 404, 运行未结束即 409.
+
+    只有轮结束之后才读: 引擎写库用的 `SqliteWrapper` 没设 `busy_timeout`, 边写边读会拿到
+    SQLITE_BUSY 或半份数据, 而"结束"的信号就是进程退出 (状态进终态).
+
+    **回撤不在这里算**: 它是从这条序列派生出来的量, 由前端算 (见 `domain/equity.ts`),
+    后端多回一列就等于把图表的形状钉进接口.
+    """
+
+    run = await load_owned_run(session, current_user, run_id)
+    _require_finished_run(run)
+    database_file = _resolve_result_database_path(settings, run)
+
+    capital_points = await asyncio.to_thread(read_capital_series, database_file)
+
+    return RunEquityResponse(
+        run_id=run.id,
+        points=[
+            EquityPointResponse(
+                trading_day=point.trading_day,
+                balance=point.balance,
+                available=point.available,
+            )
+            for point in capital_points
+        ],
+    )
+
+
+@router.get("/{run_id}/tables/{table_name}", response_model=ResultTableResponse)
+async def read_run_result_table_handler(
+    run_id: str,
+    table_name: str,
+    session: SessionDependency,
+    settings: SettingsDependency,
+    current_user: CurrentUserDependency,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE),
+) -> ResultTableResponse:
+    """引擎结果表的一页. 非本人提交即 404, 未收录的表名即 404, 运行未结束即 409.
+
+    表名白名单与它的 SQL 拼接同处一层 (`services/result_database`), 这里不重复判定:
+    界面上给的页签本来就出自同一份清单, 只有手敲 URL 才会走到 404 那一条.
+    """
+
+    run = await load_owned_run(session, current_user, run_id)
+    _require_finished_run(run)
+    database_file = _resolve_result_database_path(settings, run)
+
+    result_page = await asyncio.to_thread(
+        read_result_table_page, database_file, table_name, offset, limit
+    )
+
+    return ResultTableResponse(
+        table=result_page.table_name,
+        columns=result_page.column_names,
+        total=result_page.total,
+        offset=offset,
+        limit=limit,
+        records=result_page.records,
+    )
+
+
+def _require_finished_run(run: RunModel) -> None:
+    """结果库的读操作只在轮结束之后放行, 否则 409.
+
+    这不是风格问题而是硬约束 (见 `read_run_equity_handler` 的说明). 取消/超时/失败的轮也
+    放行: 它们的库是完好的 (进程已退出), 只是多半没有 `result.json`, 于是在下一步 404.
+    """
+
+    if run.status not in TERMINAL_RUN_STATUSES:
+        raise ConflictError(RESULT_NOT_READY_MESSAGE)
+
+
+def _resolve_result_database_path(settings: PlatformSettings, run: RunModel) -> Path:
+    """由运行行还原结果库文件, 并确认它确实落在作业目录之内.
+
+    `DbPath` 列的值来自引擎写的 `result.json` (`./BackTest_<RunId>.db`), 而策略是任意
+    Python 且与引擎同进程 —— 这个值**同样可以被伪造**, 故与产物路径同等对待: 解析后必须
+    仍在作业目录内、且真的是个文件. 文件名**不自己拼**: `scheduler/engine_config` 已写明
+    平台拼一次会得到 `BackTest_<RunId>_<RunId>.db`.
+
+    未结束的轮与失败的轮其 `DbPath` 是空串 (列缺省即空串, `result.json` 没写成功), 而空串
+    拼出来的路径**就是作业目录本身**, 故直接当作"没有结果库", 不去解析.
+    """
+
+    job_directory = _resolve_job_directory(settings, run)
+    relative_database_path = run.db_path.removeprefix("./")
+
+    if not relative_database_path:
+        raise ResourceNotFoundError(RESULT_DATABASE_MISSING_MESSAGE)
+
+    try:
+        database_file = (job_directory / relative_database_path).resolve()
+    except (OSError, ValueError) as error:
+        logger.warning("结果库路径不合法 run_id=%s: %s", run.id, error)
+        raise ResourceNotFoundError(RESULT_DATABASE_MISSING_MESSAGE) from error
+
+    if not database_file.is_relative_to(job_directory) or not database_file.is_file():
+        logger.warning("结果库越出作业目录 run_id=%s", run.id)
+        raise ResourceNotFoundError(RESULT_DATABASE_MISSING_MESSAGE)
+
+    return database_file
 
 
 def _resolve_job_directory(settings: PlatformSettings, run: RunModel) -> Path:

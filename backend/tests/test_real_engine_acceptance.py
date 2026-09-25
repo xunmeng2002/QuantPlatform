@@ -149,6 +149,11 @@ BASELINE_BALANCE_WITHOUT_SEED_DATABASE = 999377.0899999999
 MISSING_SEED_COMMISSION = 0.0
 MISSING_SEED_COMMISSION_MISSING_COUNT = 84
 
+# 结果表那一页故意取一个**小于**行数的页大小: 取 100 (上界) 时 `total` 与 `len(records)` 恰好
+# 相等, 于是"`LIMIT` 到底有没有生效"这件事在响应里看不出来——一页装得下全表时, 少绑一个参数
+# 也一样是对的.
+RESULT_PAGE_PROBE_LIMIT = 5
+
 pytestmark = pytest.mark.real_engine
 
 
@@ -371,6 +376,23 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
             database, submitted.id, TERMINAL_TIMEOUT_SECONDS
         )
 
+        # 结果库那两条端点在真产物上的样子 (P5): 引擎写的表名/列名/条数, 只有真库才检得出.
+        # 请求必须在 `async with` 块内发——客户端与后台任务都随块退出而收摊.
+        equity_response = await client.get(
+            f"{RUNS_PATH}/{submitted.id}/equity", headers=bearer_headers(owner.token)
+        )
+        trade_table_response = await client.get(
+            f"{RUNS_PATH}/{submitted.id}/tables/Trade",
+            params={"limit": RESULT_PAGE_PROBE_LIMIT},
+            headers=bearer_headers(owner.token),
+        )
+        # `Order` 是 SQLite 保留字: 这条请求走通了才说明表名真的被引号包住 (裸拼会 500).
+        order_table_response = await client.get(
+            f"{RUNS_PATH}/{submitted.id}/tables/Order",
+            params={"limit": RESULT_PAGE_PROBE_LIMIT},
+            headers=bearer_headers(owner.token),
+        )
+
     assert finished.status == RunStatus.SUCCEEDED.value, finished.error_msg
     assert finished.exit_code == 0
     assert finished.is_success is True
@@ -414,6 +436,35 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
     # 三个运行级字段经 `run_field_keys` 落到了策略配置里 (引擎不认识它们, 只有策略订阅用).
     assert strategy_configuration["ExchangeId"] == EXCHANGE_ID
     assert strategy_configuration["InstrumentId"] == INSTRUMENT_ID
+
+    # 结果库的两条读端点 (P5). 判据是"图上的曲线"与"列表里的指标"互相对得上, 而不是钉一个常数:
+    # 首点 = 引擎的种子行 (初始资金), 末点 = 最后一个交易日的结算权益, 后者与收尾镜像进库的
+    # `Balance` 同值; 首末两个交易日又与 `result.json` 的起止日一致.
+    assert equity_response.status_code == 200, equity_response.text
+
+    equity_points = equity_response.json()["points"]
+
+    assert equity_points[0]["balance"] == INITIAL_CAPITAL
+    assert equity_points[0]["trading_day"] == finished.start_trading_day
+    assert equity_points[-1]["balance"] == finished.balance
+    assert equity_points[-1]["trading_day"] == finished.last_trading_day
+    assert equity_points[0]["trading_day"] < equity_points[-1]["trading_day"]
+
+    assert trade_table_response.status_code == 200, trade_table_response.text
+
+    trade_page = trade_table_response.json()
+
+    assert trade_page["table"] == "Trade"
+    assert trade_page["total"] == BASELINE_TRADE_COUNT
+    assert trade_page["offset"] == 0
+    assert trade_page["limit"] == RESULT_PAGE_PROBE_LIMIT
+    # 页大小小于总行数, 故"这一页装了几行"本身就在证明 `LIMIT` 真的绑上了 (取满 100 时看不出).
+    assert len(trade_page["records"]) == RESULT_PAGE_PROBE_LIMIT
+    assert "TradingDay" in trade_page["columns"]
+
+    # `Order` 是 SQLite 保留字: 这条能回数据才说明表名真的被引号包住 (裸拼会 500).
+    assert order_table_response.status_code == 200, order_table_response.text
+    assert order_table_response.json()["total"] == BASELINE_ORDER_COUNT
 
 
 async def test_two_real_runs_at_once_keep_their_databases_apart(
