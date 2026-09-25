@@ -28,6 +28,47 @@ Python 策略**。
 
 ## ✅ 已完成
 
+### D.02 · 2026-09-25 （第二批） P1 后端骨架与多用户隔离
+
+- **交付**：五张表、登录与 JWT、**查询统一收口加 `user_id`**。
+- **列名与属性名分离**：库列一律 PascalCase，Python 属性 snake_case，
+  由 `mapped_column` 的列名参数映射（`database-style.md` §8）；
+  约束名由 `MetaData` 命名约定统一生成，不逐个手写。
+- **多租户过滤只有一处**：`app/catalog/visibility.py`。路由层不得自行拼
+  `where`——条件散落时漏一处即越权，且无处审计。跨租户一律 **404**，不返回 403。
+- **验收**（`platform-plan.md` §11 P1）：**通过**，175 项测试全绿（约 60 秒）。
+- **验收非空的证法**（两次变异检查，改完即原样恢复）：
+  ① 摘掉策略可见性条件 → 10 条转红；② 摘掉运行归属条件 → 4 条转红
+  （`test_user_isolation.py`）。空断言会全绿，故这步不能省。
+- **修掉一个会把平台锁死的缺陷**：`bootstrap.ensure_initial_admin` 统计管理员时
+  **不区分状态**，所以最后一个启用中的管理员一旦被停用，重启也不会重建，
+  平台就此失去全部管理入口且无接口可恢复。现于 `PATCH /users/{id}/status`
+  加守门：管理员由启用改停用前，须还有其他启用中的管理员，否则 409。
+  判据是"至少留一个启用中的管理员"而非"禁止自停用"——后者会连带禁掉
+  一个正当动作（有同僚在场的管理员卸任）。
+- **422 回执不再回显口令**：默认的校验失败回执会把出错输入整个抄回响应体，
+  而这类响应常被接入层日志落盘。现只对 `password` 一类字段抹值（`***`），
+  其余字段的值照旧回显，以免报错失去可读性。
+- **金额列用 `Float` 而非 `Numeric`**：引擎报 float64
+  （`Balance=998951.45064649964`），存 `Numeric(18,6)` 会被舍入成
+  `...450646`，**直接破坏 P0 逐位一致的验收判据**。
+- **`session_scope()` 不隐式提交**：依赖拆解在响应生成之后运行，
+  在那里提交失败已无法转成正常错误响应；显式提交还让"哪里写了库"一眼可见。
+- **健康检查改为需认证**（**偏离计划 §9**，待回写）：单机部署无匿名消费者，
+  而响应携带绝对路径与缺失 DLL 名。
+- **修掉的三个缺陷**：① PRAGMA 监听器用 `with cursor` 开游标——aiosqlite
+  的适配游标不支持上下文管理协议，**应用启动即崩**，改为显式 `close()`；
+  ② `DISABLED_ACCOUNT_DETAIL` 在两个模块各定义一份，收敛为一处；
+  ③ `StrategyGrants` 有两条外键都指向 `Users`，自动命名把二者取成同一个
+  `FkStrategyGrantsUsers`，按角色显式区分。
+- **代码审查（`code-reviewer`）后的收敛**：分页骨架与页长常量在三个列表端点
+  各写一份 → 收进 `catalog/pagination.py`；可见性三个取件函数结构逐行相同 →
+  收进 `_load_one_or_raise`；测试侧的造数样板与列表取件同样收口。
+  审查另指出 `/api/health` 与 `config.py` 无任何测试，已补齐
+  （含兜底 500 只回固定文案的脱敏契约）。
+
+---
+
 ### D.01 · 2026-09-25 （第一批） P0 地基探针：硬钉子 ② 已解
 
 - **目标**：验证「每 job 独立工作目录 + Python 策略宿主」能否跑通——
@@ -65,15 +106,14 @@ Python 策略**。
 
 - **计划全文**：[`docs/platform-plan.md`](docs/platform-plan.md)。分期与验收见其 §11。
 - **P0 ✅ 已完成**（见上 D.01）。
-- **P1 后端骨架 + 多用户**（待开工）：五张表（`users` / `strategies` /
-  `strategy_versions` / `strategy_grants` / `runs`）、登录与 JWT、
-  **查询入口统一收口加 `user_id`**。
-  验收：两个账号互相看不到对方的策略与运行；越权访问返回 **404 而非 403**。
+- **P1 ✅ 已完成**（见上 D.02）。实际表名为 PascalCase：
+  `Users` / `Strategies` / `StrategyVersions` / `StrategyGrants` / `Runs`。
+- **P2 策略上传**（下一步）：上传 `.py` + manifest（表单或文件）→ 校验 →
+  版本留档 → 落盘。开工前先把 `platform-plan.md` 的下列过时处回写，见 ❓。
 - **P1 起须落实的机制**（P0 已定，勿再改动）：
   - 把策略入口**原样复制**到 `<job>/`，以 `cwd=<job>`、**裸文件名** `argv[0]` 启动。
   - `PYTHONPATH` 必须置为引擎根 `../QuantTrading/bin/Release`。
   - `BackTest.json` 的 `DbHost` / `DumpPath` 只写相对路径。
-- **P2 策略上传**：上传 `.py` + manifest（表单或文件）→ 校验 → 版本留档 → 落盘。
 - **P3 runner 本体**：队列 / subprocess / 结果回收 / 启动恢复。验收含
   **强杀后端再启，跑动中的 run 被标 `interrupted`**。
 - **P4–P8**：前端骨架 → 可视化 → 对比与模板 → 加固 → 上云。
@@ -108,6 +148,27 @@ Python 策略**。
 - **配置模板的存储位置未定**（2026-09-25）：P6 的「配置模板保存复用」既可进
   catalog（加一张表），也可落策略目录下。倾向前者（要按用户维度筛选），
   待 P6 前定。
+- **`platform-plan.md` 有三处已过时，待回写**（2026-09-25）：
+  ① §6 数据模型草图仍是 snake_case 表列名，与实际实现（PascalCase 列 +
+  软删除 `DeletedAt` + `Runs` 的 25 个结果镜像列）不符；
+  ② §9 把健康检查列为匿名端点，实际**已改为需认证**（见 D.02）；
+  ③ §11 P4 写的是「Vue 3 + TS + Vite + **Tailwind** + Pinia」，
+  而参考项目 `defect_tools` **没有 Tailwind**（纯 CSS + `variables.css`）。
+  前两处属实现已定、文档滞后，回写即可；**第 ③ 处需用户拍板**，
+  因为它是 P4 的技术选型变更，不只是记错。
+- **`/api/health` 是否收窄为仅管理员**（2026-09-25 审查提出）：现为**任意登录用户**
+  可见，响应含引擎根与运行根的绝对路径、缺失 DLL 名与解释器版本。要求认证的
+  理由（不泄漏内部布局）对普通用户同样成立，而设置页本就是管理员场景，
+  故倾向收窄；但这是可见的接口变更，等用户定。
+- **6 处无调用点的导出符号，删还是留**（2026-09-25 审查提出）：
+  `build_owned_strategy_query` / `load_owned_strategy`（P2 授权与上传要用）、
+  `get_database` + `DatabaseDependency`、`PlatformDatabase.engine` /
+  `session_factory`、`TERMINAL_RUN_STATUSES`、`InvalidRequestError`（已注册
+  处理器但无处抛出）。其中前两项像 P2 预留，后四项更像重构残留。
+  按 Harness §3，删公开符号须用户确认，故**未动**。
+- **登录失败无节流**（2026-09-25 审查提出）：同一用户名可无限次快速尝试。
+  PBKDF2 的 260k 迭代只起减速作用。若要加，需定阈值与锁定时长
+  （单机部署，进程内计数即可，不必上 Redis）。
 
 ---
 
@@ -132,6 +193,6 @@ Python 策略**。
   `probe-runC`，各约 3 MB），是被 gitignore 的探针残渣，可随时删。
   **AI 未自行删除**——按 Harness §1，git 之外的路径不得递归删除。
   正式产物 `runs/probe/` 建议保留作 P0 证据。
-- **`.gitignore` 已加**：`runs/`、`backend/data/`、`node_modules/`、`.vs/`
-  （2026-09-25）。多用户后还需加 `users/`。
+- **`.gitignore` 已覆盖全部运行数据**：`runs/`、`users/`、`backend/data/`
+  （含 catalog 库与 JWT 密钥）、`node_modules/`、`.vs/`。
 - **AI 不推送**（按既有约定）：提交由 AI 做，推送由用户执行。

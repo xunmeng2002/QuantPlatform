@@ -156,60 +156,69 @@
 五张表。`runs` 的 `result.json` 镜像列的完整清单见
 `QuantTrading/docs/backtest-run-contract.md` §2。
 
+命名：表名与列名一律 PascalCase，Python 属性名 snake_case，两者由映射层对应
+（`database-style.md` §8）。约束名不逐个手写，由命名约定统一生成：主键
+`Pk<表>`、外键 `Fk<表><目标表>`、唯一 `Uq<表><列>`、索引 `Idx<表><列>`。
+
 ```sql
 -- 用户
-users(
-  user_id PK, username UNIQUE, password_hash, display_name,
-  role,           -- admin / user
-  status,         -- active / disabled
-  created_at
+Users(
+  Id PK, Username UNIQUE, PasswordHash, DisplayName,
+  UserType,        -- admin / user
+  Status,          -- active / disabled
+  CreatedAt
 )
 
 -- 策略：逻辑实体（一个名字、一个归属）
-strategies(
-  strategy_id PK, owner_user_id FK->users, name, description,
-  visibility,     -- private / shared / public
-  created_at, updated_at,
-  UNIQUE(owner_user_id, name)
+Strategies(
+  Id PK, OwnerUserId FK->Users, Name, Description,
+  VisibilityType,  -- private / shared / public
+  CreatedAt, UpdatedAt,
+  DeletedAt,       -- 软删除；硬删会撞上历史运行的外键
+  UNIQUE(OwnerUserId, Name)
 )
 
 -- 策略版本：留档，append-only，永不改写
-strategy_versions(
-  version_id PK, strategy_id FK, version_no,
-  entry_filename,      -- 入口文件名，如 grid_strategy.py
-  config_filename,     -- 策略配置文件名，如 TestStrategyGrid.json
-  manifest_json,       -- 参数 schema + 支持的行情模式
-  source_hash,         -- sha256，兼作内容寻址
-  storage_path, uploaded_at, uploaded_by FK->users,
-  UNIQUE(strategy_id, version_no)
+StrategyVersions(
+  Id PK, StrategyId FK, VersionNo,
+  EntryFilename,   -- 入口文件名，如 grid_strategy.py
+  ConfigFilename,  -- 策略配置文件名，如 TestStrategyGrid.json
+  ManifestJson,    -- 参数 schema + 支持的行情模式
+  SourceHash,      -- sha256，兼作内容寻址
+  StoragePath, UploadedAt, UploadedByUserId FK->Users,
+  UNIQUE(StrategyId, VersionNo),
+  UNIQUE(StrategyId, SourceHash)  -- 内容未变则不产生新版本号
 )
 
 -- 策略授权：多对多（共享）
-strategy_grants(
-  strategy_id FK, grantee_user_id FK, permission,  -- run / read
-  granted_by FK->users, granted_at,
-  PK(strategy_id, grantee_user_id)
+StrategyGrants(
+  StrategyId FK, GranteeUserId FK,
+  PermissionType,  -- run / read
+  GrantedByUserId FK->Users, GrantedAt,
+  PK(StrategyId, GranteeUserId)
 )
 
 -- 运行：钉版本，不钉策略
-runs(
-  run_id PK, user_id FK->users,
-  strategy_id FK, strategy_version_id FK,   -- 前者供分组，后者供复现
-  status, submitted_at, started_at, finished_at, duration_ms,
-  runner_pid, hostname, exit_code,
-  params_json, backtest_config_json,
-  -- result.json 镜像列（列表页与对比页的排序/筛选取自此）
-  success, error_id, error_msg, schema_version, market_data_type,
-  start_trading_day, end_trading_day, last_trading_day, account_id,
-  balance, available, total_commission, total_stamp_tax,
-  total_transfer_fee, order_count, trade_count, md_subscribe_count,
-  bar_market_data_count, depth_market_data_count, instrument_count,
-  commission_missing_count, volume_multiple_fallback_product_count,
-  workspace_path, db_path, dump_path, stdout_tail, stderr_tail
+Runs(
+  Id PK, UserId FK->Users,
+  StrategyId FK, StrategyVersionId FK,  -- 前者供分组，后者供复现
+  Status, SubmittedAt, StartedAt, FinishedAt, DurationMs,
+  RunnerPid, Hostname, ExitCode,
+  ParamsJson, BacktestConfigJson,
+  -- result.json 的 25 个镜像列，列表页与对比页的排序/筛选取自此
+  IsSuccess, ErrorId, ErrorMsg, SchemaVersion, MarketDataType,
+  StartTradingDay, EndTradingDay, LastTradingDay, AccountId,
+  Balance, Available, TotalCommission, TotalStampTax,
+  TotalTransferFee, OrderCount, TradeCount, MdSubscribeCount,
+  BarMarketDataCount, DepthMarketDataCount, InstrumentCount,
+  CommissionMissingCount, CommissionZeroRateKeyCount,
+  VolumeMultipleFallbackProductCount, BasicDataLoaded, HasCapital,
+  -- 作业与输出
+  WorkspacePath, DbPath, DumpPath, StdoutTail, StderrTail
 )
 ```
 
-**三条设计要点**：
+**四条设计要点**：
 
 1. **归属不是表**。策略属于谁由 `strategies.owner_user_id` 一列表达，
    一对一，建表即冗余。真正需要表的只有**共享**（多对多）。
@@ -219,6 +228,12 @@ runs(
 3. **镜像成列是必需的**。列表页与对比页要**按指标排序与筛序**，
    逐行去解数百个 `result.json` 不可行。`MissingRateKeys` 等长尾键
    留在文件里按需读。
+4. **金额与指标列用 `Float`，不用 `Numeric`**。引擎报的是 float64
+   （`Balance` 实测 `998951.45064649964`），存 `Numeric(18,6)` 会被舍入成
+   `...450646`，**直接破坏 P0「与引擎逐位一致」的验收判据**。精度可议，
+   但可复现性优先——这是本平台唯一不能退让的指标。
+5. **策略软删除**（`Strategies.DeletedAt`）。计划原稿未提，实现时补入：
+   硬删会与历史运行的外键冲突，而"删策略不影响历史运行"是既定要求。
 
 **artifact 不建表**：它是 `runs/<RunId>/` 下的文件，路径可由约定推出，建表即重复。
 
@@ -294,15 +309,22 @@ QuantPlatform/
 
 ## 9. API 设计
 
-除 `/api/health` 与登录外，**全部端点要求已认证，且按当前用户过滤**。
+除登录外，**全部端点要求已认证，且按当前用户过滤**。
 
 | 方法 | 路径 | 说明 |
 | ---- | ---- | ---- |
 | `GET` | `/api/health` | 引擎自检：引擎根、`.pyd`、Python 版本、runs 根可写 |
+
+> **修订（2026-09-25，P1 实施时）**：`/api/health` **由匿名改为要求认证**，
+> 偏离了本节原稿。理由是响应体携带引擎根绝对路径与缺失 DLL 的文件名，
+> 而单机部署下不存在负载均衡这类匿名消费者——没有人为它买单，
+> 它就只有泄漏面。多机部署后若确需匿名探活，应另开一个只回
+> `{"ready": true}` 的精简端点，而不是放宽这一个。
 | `POST` | `/api/auth/login` | 登录换取 JWT |
 | `GET` | `/api/auth/me` | 当前用户 |
 | `GET` | `/api/users` | 用户列表（admin） |
 | `POST` | `/api/users` | 建用户（admin） |
+| `PATCH` | `/api/users/{id}/status` | 启用/停用（admin） |
 | `GET` | `/api/strategies` | 可见策略：本人 + 授权共享 + public |
 | `POST` | `/api/strategies` | 上传策略（`.py` + manifest） |
 | `GET` | `/api/strategies/{id}` | 详情与版本列表 |
@@ -356,7 +378,7 @@ QuantPlatform/
 | 阶段 | 内容 | 验收 |
 | ---- | ---- | ---- |
 | **P0 地基探针** ✅ | 已按第 4 节契约跑通 | **2026-09-25 通过**：退出码 0，7 项指标与基准逐位一致 |
-| P1 后端骨架 + 多用户 | 五张表 / 登录 / JWT / 查询统一收口加 `user_id` | 两个账号互相看不到对方的策略与运行；越权访问返回 404 而非 403 |
+| **P1 后端骨架 + 多用户** ✅ | 五张表 / 登录 / JWT / 查询统一收口加 `user_id` | **2026-09-25 通过**：两账号互不可见；越权返回 404（94 项测试） |
 | P2 策略上传 | 上传 `.py` + manifest / 校验 / 版本留档 / 落盘 | 上传后能跑通；manifest 缺模式或参数越界被拒 |
 | P3 runner 本体 | 队列 / subprocess / 结果回收 / 启动恢复 / 作业目录构造 | 轮询至 `succeeded`；重启后端须标 `interrupted` |
 | P4 前端骨架 | Vue 3 + TS + Vite + Tailwind + Pinia | 完成「登录 → 上传策略 → 提交 → 看指标 → 下载」闭环 |
