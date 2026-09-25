@@ -90,13 +90,17 @@ class RunSubmitRequest(BaseModel):
 
 
 class UserCreateRequest(BaseModel):
-    """由管理员建号."""
+    """由管理员建号.
+
+    `display_name` 必填: 受限用户目录 (`GET /api/users/directory`) 只列显示名非空的账号,
+    建号时留空等于建出一个**别人在授权表单里选不到**的账号.
+    """
 
     username: str = Field(min_length=3, max_length=64, pattern=USERNAME_PATTERN)
     password: str = Field(
         min_length=MINIMUM_PASSWORD_LENGTH, max_length=MAXIMUM_PASSWORD_LENGTH
     )
-    display_name: str = Field(default="", max_length=128)
+    display_name: str = Field(min_length=1, max_length=128)
     user_type: UserType = UserType.USER
 
 
@@ -119,6 +123,19 @@ class UserResponse(BaseModel):
     created_at: datetime
 
 
+class UserDirectoryEntryResponse(BaseModel):
+    """受限用户目录的一条: 只够用来在授权表单里认出一个人.
+
+    只有 `id` 与 `display_name` 两个字段, 是**有意**的收窄, 详见
+    `routers/users.py::list_user_directory_handler` 的泄漏面说明.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    display_name: str
+
+
 class StrategyResponse(BaseModel):
     """策略对外视图."""
 
@@ -134,7 +151,12 @@ class StrategyResponse(BaseModel):
 
 
 class StrategyVersionResponse(BaseModel):
-    """策略版本对外视图."""
+    """策略版本对外视图.
+
+    `manifest_json` 是上传时那份文本的**原样透传** (字符串, 不在这里解析): 提交页要按它的
+    `params` 生成参数控件, 故它必须能到前端; 而在读接口里解析会给存量行新增一条失败路径
+    (一份坏 manifest 会让整个策略详情 500), 前端本来也要自己 `JSON.parse`.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -144,6 +166,7 @@ class StrategyVersionResponse(BaseModel):
     entry_filename: str
     config_filename: str
     source_hash: str
+    manifest_json: str
     uploaded_at: datetime
 
 
@@ -242,3 +265,25 @@ class RunDetailResponse(RunSummaryResponse):
     has_capital: bool | None
     total_stamp_tax: float | None
     total_transfer_fee: float | None
+
+
+class JobArtifactResponse(BaseModel):
+    """作业目录里的一个文件.
+
+    `relative_path` 恒为 POSIX 形式且相对于作业目录 (`Dump/<RunId>/t_trade.csv` 这种嵌套也要
+    能表达), 下载接口按原样接回路径参数——故它既是展示用的路径, 也是那条 URL 的构造依据.
+    """
+
+    relative_path: str
+    size_bytes: int
+
+
+class JobArtifactListResponse(BaseModel):
+    """一次运行的产物清单.
+
+    不分页: 作业目录的文件数由引擎决定 (实测一轮 20 余个), 且这里读的是文件系统而不是库,
+    没有可加的 `offset`/`limit` 语义.
+    """
+
+    run_id: str
+    artifacts: list[JobArtifactResponse]

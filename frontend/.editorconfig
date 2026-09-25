@@ -1,0 +1,6 @@
+# 前端子树的覆盖. 仓库根 .editorconfig 的 indent_size = 4 是给 Python 定的, 对 JS/Vue 生态
+# 不适用: 四空格缩进的 .vue 文件与所有示例和格式化工具都对不上. 最近的 .editorconfig 逐属性
+# 生效, 故这里只覆盖缩进; charset / end_of_line / trim_trailing_whitespace 沿用根的取值.
+
+[*.{ts,tsx,js,mjs,cjs,vue,css,html}]
+indent_size = 2

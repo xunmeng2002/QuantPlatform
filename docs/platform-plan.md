@@ -49,7 +49,8 @@
 本轮在开发机上实测所得，是后续所有设计的依据：
 
 - 工具链：**Python 3.14.5**（正是 `.pyd` 的 ABI 标签 `cp314`；**2026-09-25 订正**，
-  原记 3.11.1 / `cp311` 系早期误记）、**Node 24.15 / npm 11.12**。
+  原记 3.11.1 / `cp311` 系早期误记）、**Node 24.16.0 / npm 11.13.0**
+  （P4 实测订正，原记 24.15 / 11.12）。
 - 引擎产物：`result.json`、`BackTest_<RunId>.db`（17 张表）、
   `Dump/<RunId>/t_*.csv`（17 个）、`log/<名>.<时间戳>.log`。
 - 权益曲线数据源现成：`Capital` 表含 `TradingDay, Balance, Available`，
@@ -69,8 +70,11 @@
 - 引擎单轮耗时（2026-09-25 P3 实测，`bin/Release` 下、5m 周期、单标的）：
   三个月 **约 1.7 秒**，2010–2024（58176 根 bar，678 笔成交）**约 3.8 秒**——
   比原估快得多，故"作业级超时"在真引擎上要靠**压时限**触发（见 §11 的 P3 行）。
-- 既有栈惯例（`amies-data-platform`）：
-  **FastAPI + SQLAlchemy + aiosqlite** / **Vue 3.5 + TS + Vite + Tailwind + Pinia**。
+- 既有栈惯例：**FastAPI + SQLAlchemy + aiosqlite** /
+  **Vue 3.5 + TS + Vite + Tailwind + Pinia**。原文写的是"（`amies-data-platform`）
+  的惯例"，但**该仓不在本机**（见 §8 的注）——P4 实际参照的是
+  `ShopKit/frontend-platform` 与 `RMS/frontend-admin`，它们**不用 Tailwind**
+  （SCSS + Element Plus），Tailwind 是本文档定的、不是照抄来的。
 
 ---
 
@@ -395,9 +399,35 @@ users/<user_id>/strategies/<strategy_id>/<version_no>/
 **归属人怎么拿到同事的 `user_id`**（2026-09-25 用户拍板）：开放一条**受限
 用户目录**端点，只回 `id` 与 `display_name`，供共享表单选人。
 `GET /api/users` 是管理员专属，其理由是"用户清单本身即租户列表"——
-受限目录**放宽了这一档**，故它必须自带边界面（单页还是可搜索、
-`display_name` 为空时回退什么、要不要只列与自己有共享关系的用户），
-**该评审与端点一起做，不另行挂账**。见 `PROGRESS.md` 的 ❓ 与归档 `Q.03`。
+受限目录**放宽了这一档**，故它必须自带边界面。原文见归档 `Q.03`。
+
+**落地（P4，2026-09-25）**：`GET /api/users/directory`，鉴权用
+`CurrentUserDependency`（**不是**管理员依赖），响应是房规分页信封，
+每项只有 `id` 与 `display_name`。边界逐条定为：
+
+| 项 | 定案 | 理由 |
+| ---- | ---- | ---- |
+| 谁可见 | 全体**已认证**用户 | 授权表单就在普通用户手上 |
+| 列哪些账号 | 只列 `active` 且**显示名非空** | 停用账号登录不了，授权给他没有意义；显示名为空的号（P4 起已不可能新建）在表单上是一行空白 |
+| 是否列自己 | **排除自己** | 授权给自己会被 `PUT /grants` 用 400 挡住，能选中一个必然失败的选项是白造死路 |
+| 过滤 | 可选 `query` 子串（`contains(..., autoescape=True)`），**不按可见性过滤** | 全量枚举的代价已由下面的收口承担 |
+| 排序 | `display_name ASC, id ASC` | 次序键 `id` 不能省：`display_name` 无唯一约束，并列行的顺序未定义，翻页会重复出条 |
+
+**泄漏面（随端点一起评审，不另行挂账）**：
+
+| 放宽了什么 | 收口到什么 |
+| ---- | ---- |
+| 全体登录用户可枚举"平台上有谁"——这正是 `GET /api/users` 限管理员的理由 | 只回**启用中**的账号，且只有 `id` 与 `display_name` 两个字段 |
+| 显示名（真人可辨认的名字）对全体登录用户可见 | `username` **绝不出现**：登录接口专门为未知用户名跑一遍假校验（`DUMMY_PASSWORD_HASH`）防的就是用户名枚举，目录里回退 `username` 等于把那笔代价还回去 |
+| —— | `user_type` 不出现：谁是管理员不该由目录暴露 |
+| —— | `status` 不出现：只见启用中的账号，故"某人被停用了"也不可见 |
+
+配套改动：`POST /api/users` 的 `display_name` **收紧为必填**
+（空白回 400「显示名不能为空白」）——目录只列显示名非空的账号，
+若建号时可以留空，管理员随手建的账号就会从目录里消失，而表单选不到人
+正是本项目最忌讳的"点了没反应"。**已知缺口**：`display_name`
+**没有唯一约束**，重名时表单分不清两个人（选错人 = 把策略授权给错的人）；
+修法是加唯一约束，但那会新增一条 409 路径，见 §12.15。
 
 ---
 
@@ -409,20 +439,106 @@ QuantPlatform/
 │   ├── app/
 │   │   ├── main.py            # FastAPI 装配 + 启动恢复
 │   │   ├── config.py          # 引擎根、runs 根、并发上限、超时
-│   │   ├── auth/              # 登录、JWT、当前用户依赖
-│   │   ├── catalog/           # db / models（五张表）/ schemas
+│   │   ├── clock.py / ids.py / errors.py / dependencies.py / manifest.py
+│   │   ├── bootstrap.py       # 首个管理员播种（无口令环境变量则启动即抛）
+│   │   ├── auth/              # dependencies / passwords / tokens
+│   │   ├── catalog/           # database / models（五张表）/ schemas /
+│   │   │                      # enums / pagination / visibility（多租户唯一收口）
 │   │   ├── routers/           # auth / users / strategies / runs / health
 │   │   ├── scheduler/         # engine_config / result / output / workspace
 │   │   │                      # registry / runner / recovery / scheduler (常驻循环)
-│   │   └── services/          # results_db / artifacts / strategy_store / engine_probe
+│   │   └── services/          # run_submission / strategy_store / engine_probe
 │   ├── requirements.txt
 │   └── data/catalog.db        # catalog（gitignore）
-├── frontend/                  # 复刻 amies 的 api/views/stores/components
+├── frontend/                  # 见下
 ├── users/<user_id>/strategies/<strategy_id>/<version_no>/   # 策略库（gitignore）
 ├── runs/<RunId>/              # 每 job 独立工作目录（gitignore）
 ├── docs/{platform-plan.md, job-workspace.md}
 └── PROGRESS.md / PROGRESS-archive.md
 ```
+
+**`frontend/`（P4 落地）**——纯逻辑与渲染分开，前者才是单测的对象：
+
+```text
+frontend/
+├── index.html                # lang="zh-CN"
+├── package.json / package-lock.json   # 锁文件入库
+├── vite.config.ts            # vue + tailwind 插件；/api 代理与 vitest 配置同文件
+├── tsconfig.json / tsconfig.app.json / tsconfig.node.json
+└── src/
+    ├── main.ts  App.vue  style.css    # style.css 内是 Tailwind 的 @theme 令牌
+    ├── api/         client.ts（唯一出入口）/ types.ts（手写契约）/
+    │                auth.ts / strategies.ts / runs.ts / users.ts
+    ├── domain/      纯逻辑: manifest / run-form / run-status / format / labels / download
+    ├── stores/      session / strategy-catalog / user-directory
+    ├── router/      index.ts（路由表 + 登录守卫 + 逐页懒加载）
+    ├── components/  AppLayout / ParameterForm / ParameterField / DirectoryPicker /
+    │                StrategyUploadForm / StrategyVersionUploadForm / ArtifactList /
+    │                ConfirmDialog / PaginationBar / StatusBadge / ErrorBanner /
+    │                EmptyNotice / LoadingNotice / FilePicker
+    ├── composables/ usePolling.ts / useManifestTextSource.ts
+    └── views/       LoginView / RunListView / RunSubmitView / RunDetailView /
+                     StrategyListView / StrategyDetailView / UserAdminView /
+                     NotFoundView
+```
+
+> **注意**：这里的纯逻辑目录叫 `domain/`（不叫 `lib/` 或 `utils/`）、运行页面是
+> 扁平的 `views/RunListView.vue`（不在 `views/runs/` 下），**是仓库根
+> `.gitignore` 逼出来的**：它从 Python 模板来，`lib/` `runs/` `users/`
+> `build/` `target/` 等模式**不带 `/` 锚点、匹配任意层级**，用那些名字会让
+> 源码写出来了却**静默不入库**（`git status` 里什么都没有）。拿不准时用
+> `git check-ignore -v --no-index frontend/src/<路径>` 自查。
+> 原计划的"复刻 `amies`"一句已删：**`amies`/`defect_tools` 不在本机**
+> （全盘搜过，只有旧文档提到它且不给路径），实际参照的是本机的同族项目
+> `D:/Gitee/ShopKit/frontend-platform` 与 `D:/Gitee/RMS/frontend-admin`
+> （同作者、同栈；**它们的样式是 SCSS + Element Plus，且没有
+> `variables.css`**——与本文档此前的描述不同）。
+
+### 8.1 本地开发（两个终端）
+
+```shell
+# 终端 1：后端。空库首启必须给初始管理员口令，否则启动即 RuntimeError
+cd backend
+QUANT_INITIAL_ADMIN_PASSWORD=<口令> python -m app.main    # 127.0.0.1:8000
+
+# 终端 2：前端
+cd frontend
+npm install     # 首次
+npm run dev     # http://localhost:5173/
+```
+
+- 后端**没有 CORS 中间件**（`add_middleware` 全仓只出现在上传体积闸上），
+  故 dev 期必须靠 Vite 的 `server.proxy` 把 `/api` 转发到
+  `http://127.0.0.1:8000`，且**不重写路径**——后端路由无尾斜杠，
+  `/api/strategies/` 会 307。
+- **Vite 只绑 `[::1]:5173`**（IPv6 回环）：浏览器用 `http://localhost:5173/`
+  正常，但 `http://127.0.0.1:5173` **连不上**——拿 `curl` 探活的人会以为服务
+  没起。代理目标写的是显式的 `127.0.0.1`，故它打后端走 IPv4，两边不冲突。
+- 手工验收想用**一次性库**（不碰项目自带的 `backend/data/` 与 `runs/`）：
+  把 `QUANT_DATABASE_URL` / `QUANT_RUNS_ROOT` / `QUANT_USER_LIBRARY_ROOT`
+  指到临时目录即可。
+- 前端脚本：`dev` / `build`（`vue-tsc -b && vite build`）/ `preview` /
+  `test`（`vitest run`，只跑 `src/**/*.spec.ts`、`environment: node`）/
+  `type-check`。
+
+### 8.2 手工验收闭环（P4 的验收项，走界面）
+
+前置：两个终端都在跑（见 §8.1），且引擎与行情数据在位
+（`../QuantTrading/bin/Release`、`D:/MdBaoStock/Bar`）。
+
+1. 以管理员登录 → 「用户管理」建**两个**账号，**显示名都填**（建号页已强制）。
+2. 甲登录 → 「策略管理」上传策略（`.py` + manifest 表单）→ 详情页确认版本与
+   参数预览、确认可见性。
+3. 甲在同页授权给**乙**：授权编辑器里按**显示名**从目录中选到乙（选不到自己，
+   这是有意的）。
+4. 乙登录 → 「新建回测」应能看到该策略；参数表单**按 manifest 生成**
+   （类型/范围/选项/分组），且**没有行情模式选择**（Tick 不出现）。
+5. 填运行范围后提交 → 运行列表自动轮询至 `succeeded`。
+6. 运行详情：`TradeCount == 84`、`BarMarketDataCount == 2928`（与 P0 基线同
+   口径，前提差异见 [`job-workspace.md`](job-workspace.md) §6）。
+7. 在详情页下载 `result.json` 与一个 `t_*.csv`，**内容与磁盘上的原件一致**。
+8. 另提交一轮 → 在它跑动时点「取消运行」→ 状态变 `interrupted`。
+9. 回「新建回测」确认**表单里没有 Tick 选项**。
 
 ---
 
@@ -436,7 +552,8 @@ QuantPlatform/
 | `POST` | `/api/auth/login` | 登录换取 JWT |
 | `GET` | `/api/auth/me` | 当前用户 |
 | `GET` | `/api/users` | 用户列表（admin） |
-| `POST` | `/api/users` | 建用户（admin） |
+| `GET` | `/api/users/directory` | 受限用户目录（**已认证即可**）：只回 `id` + `display_name`，见 §7.5 |
+| `POST` | `/api/users` | 建用户（admin；`display_name` 必填，空白回 400） |
 | `PATCH` | `/api/users/{id}/status` | 启用/停用（admin） |
 | `GET` | `/api/strategies` | 可见策略：本人 + 授权共享 + public |
 | `POST` | `/api/strategies` | 上传策略（`.py` + manifest） |
@@ -470,12 +587,30 @@ QuantPlatform/
 > 开放，非归属人一律 404，不区分"无权"与"不存在"——区分了等于确认该 id 存在。
 > 改授权的语义见 §7.5。
 
-> **P3 落地范围**：`POST /api/runs` 与 `POST /api/runs/{id}/cancel` 已实现。
-> **提交端点不碰文件系统**：它在 `commit()` 之后 `wake()` 调度器就返回 201，
-> 作业目录构造属调度侧——把长 IO 塞进请求路径会让调用方拿到一个"目录还没建好
-> 的运行"，而目录构造失败要由调度侧把该轮标 `failed`。
-> `/api/runs` 的其余 **读**端点（列表 / 详情 / 权益曲线 / 结果表 / 产物 / 对比）
-> 与 `DELETE` **不属 P3**：前者是 P5 的前置，后者要连工作目录一起删，留 P7。
+> **P3 落地范围**：`POST /api/runs`、`POST /api/runs/{id}/cancel`，
+> 以及 **`GET /api/runs`（列表）与 `GET /api/runs/{id}`（详情）** 三项读端点
+> 均已实现。**提交端点不碰文件系统**：它在 `commit()` 之后 `wake()` 调度器
+> 就返回 201，作业目录构造属调度侧——把长 IO 塞进请求路径会让调用方拿到一个
+> "目录还没建好"的运行，而目录构造失败要由调度侧把该轮标 `failed`。
+>
+> **订正（2026-09-25，P4 回写）**：本节原写"`/api/runs` 的其余读端点
+> **不属 P3**、前者是 P5 的前置"，**这句是错的**——列表与详情在 P3 就已随
+> 结果镜像一起落地并已测试（`test_run_queries.py`），P4 的"看指标"正因此
+> 没有新端点。真正留给后面的是：权益曲线（`/equity`）与明细分页表
+> （`/tables/{table}`）**属 P5**，`/compare` 属 P6，`DELETE /api/runs/{id}`
+> 要连工作目录一起删、**留 P7**。
+>
+> **P4 落地范围**（前端前置的三处，都不新增依赖）：`GET /api/users/directory`
+> （§7.5）、`POST /api/users` 的 `display_name` 必填、
+> `StrategyVersionResponse` 增 `manifest_json`（**纯透传、不在读路径解析**：
+> 解析要在读接口里多一条失败路径，存量行万一坏掉会让整个策略详情 500，
+> 而前端本来就要 `JSON.parse`）、`GET /api/runs/{id}/files` 与
+> `/files/{file_path:path}`。后两条的要点：作业目录**由运行行确定性重建**
+> （`settings.runs_root / run.run_id`，不持久化新列、不翻调度器内存）、
+> 目录不存在回 **404 而非 500**、路径 `resolve()` 后必须仍在作业目录内
+> （防目录穿越，字符串判 `..` 挡不住符号链接与 Windows 大小写）、
+> **一律 `attachment` 下发**（策略是任意 Python，可以往自己目录里写
+> `.html`，同源内联渲染等于在平台域上执行它写的脚本）。
 
 **三条安全硬约束**（Harness §6）：
 
@@ -492,19 +627,26 @@ QuantPlatform/
 
 ## 10. 前端页面
 
-| 路由 | 页面 | 内容 |
-| ---- | ---- | ---- |
-| `/login` | 登录 | 换取 JWT |
-| `/runs` | 运行列表 | 状态徽章、耗时、RunId、关键指标列 |
-| `/runs/new` | 新建回测 | 选策略 → 由 manifest 动态生成参数表单 → 引擎配置 |
-| `/runs/:id` | 运行详情 | 概览 / 权益曲线 / 委托 / 成交 / 持仓 / 日志 / 产物 |
-| `/compare` | 对比 | 多轮指标表 + 权益曲线叠加 |
-| `/strategies` | 策略管理 | 列表、上传、版本历史、授权共享 |
-| `/users` | 用户管理 | admin |
-| `/settings` | 设置 | 引擎根、并发上限、超时、数据根，带 health 自检 |
+**实况（P4 收尾时按落地改，标 ✅ 的已可访问）**：
+
+| 路由 | 页面 | 内容 | 状态 |
+| ---- | ---- | ---- | ---- |
+| `/login` | 登录 | 换取 JWT 存 localStorage；失败文案用后端原文 | ✅ P4 |
+| `/` | —— | 重定向到 `/runs` | ✅ P4 |
+| `/runs` | 运行列表 | 状态徽章 / 引擎判定 / 交易日区间 / 耗时 / 交易笔数 / 余额；按状态与策略筛选、按指标排序、分页；**存在非终态轮时 2 s 轮询** | ✅ P4 |
+| `/runs/new` | 新建回测 | 选策略 → 选版本（缺省最新）→ **按 manifest 动态生成参数表单** → 提交；`match_mode` 固定 `Bar` | ✅ P4 |
+| `/runs/:id` | 运行详情 | 概览 / 绩效指标 / 引擎数据镜像 / 提交参数与引擎配置 / stdout·stderr 尾巴 / **产物清单与下载** / 取消；未结束时 2 s 轮询 | ✅ P4（**权益曲线与明细分页表缺，属 P5**） |
+| `/strategies` | 策略管理 | 列表 + 上传面板 + 可见性 + 归属（经用户目录映显示名） | ✅ P4 |
+| `/strategies/:id` | 策略详情 | 版本列表（含该版本 manifest 的参数预览）+ 传新版本 + **授权编辑器（目录选人）** + 软删 | ✅ P4 |
+| `/users` | 用户管理（admin） | 列表 / 建号（显示名必填）/ 启用停用 | ✅ P4 |
+| `/:pathMatch(.*)*` | 404 | 未知路径不白屏；**不需要登录**（登录前的错地址也该看得见它） | ✅ P4 |
+| `/compare` | 对比 | 多轮指标表 + 权益曲线叠加 | P6 |
+| `/settings` | 设置 | 引擎根、并发上限、超时、数据根，带 health 自检 | P8（该端点目前是 **admin 专属**，普通用户的这一页看不到引擎自检） |
 
 图表库选用 **ECharts + vue-echarts**（量化领域事实标准：K 线、缩放、
-大数据量折线开箱即用）。按需引入以控制体积。
+大数据量折线开箱即用），按需引入以控制体积——**P5 才装**，P4 的依赖只有
+`vue` / `vue-router` / `pinia` 三个（**无 UI 组件库**：表格、分页、模态框、
+提示条、表单控件都是自己用 Tailwind 写的，见 §13 的 P4 拍板表）。
 
 ---
 
@@ -518,7 +660,7 @@ QuantPlatform/
 | **P2 上传核心** ✅ | 建策略+首版 / 传新版本 / 列表详情 / 软删 | **2026-09-25 通过**：manifest 缺模式、文件名非法、参数 key 重复均被拒（261 项测试）。**「上传后能跑通」已于 P3 结清**（真引擎一轮 Bar 成功，见下） |
 | **P2b 策略授权** ✅ | `PUT /{id}/grants`，`StrategyGrants` 写入路径 | **2026-09-25 通过**：「被授权人可见、非授权人 404」通过（287 项测试）。**「可跑」已于 P3 结清**：提交权限判定与可见性判定**逐字重合**，"授权即可跑"（含被授权人提交的用例） |
 | **P3 runner 本体** ✅ | 队列 / subprocess / 结果回收 / 启动恢复 / 作业目录构造 / cancel | **2026-09-25 通过**：`POST /api/runs` 提交后轮询至 `succeeded`；重启后端把在跑的轮标 `interrupted`；并发上限、超时、取消、输出捕获、结果镜像齐备（**380 项测试**，其中 4 项真引擎验收默认不跑，见 `backend/tests/test_real_engine_acceptance.py`）。真引擎实测：`Success=true`、`TradeCount == 84`、`BarMarketDataCount == 2928`，与 P0 基线同口径（前提差异见 [`job-workspace.md`](job-workspace.md) §6） |
-| P4 前端骨架 | Vue 3 + TS + Vite + Tailwind + Pinia | 完成「登录 → 上传策略 → 提交 → 看指标 → 下载」闭环 |
+| **P4 前端骨架** ✅ | Vue 3 + TS + Vite + Tailwind + Pinia，`frontend/` 从零到闭环 | **2026-09-25 代码与链路通过**：闭环六步全部落地（47 个源文件 / 约 6850 行），后端 **406 项测试**（新增 26 项：目录 / 显示名必填 / manifest 透传 / 产物清单与下载），前端 `type-check` 无错 + `vitest` **58 项全绿** + `build` 成功（按路由分包）；代理链路冒烟 13 项（含 422 的数组信封、目录不泄漏 `username`、目录排除自己）。**「真引擎一轮真回测、全程走界面」的手工验收见 §8.2，须由用户在浏览器里走一遍** |
 | P5 可视化 | 权益曲线 + 回撤、明细分页表 | 曲线与实测数据点吻合（`1000000.0 → 999549.73`） |
 | P6 对比与模板 | 多轮对比、配置模板保存复用 | 同参不同 `GridStep` 的两轮指标并列且曲线叠加 |
 | P7 加固 | 并发上限、超时、磁盘清理、日志轮转 | 并发上限内排队正确；超时轮标 `timeout` |
@@ -582,6 +724,24 @@ P2b 的「可跑」所需的判定已于 P3 开工前（2026-09-25）**拍板**�
     费用三项恒为 0、`CommissionMissingCount` 恒 84、`BasicDataLoaded` 恒 `false`。
     这是**输入缺失**而非缺陷，验收里已把这四条**钉成断言**（重建时会一起转红）。
 
+**P4 起新记的已知缺口**：
+
+15. **`display_name` 没有唯一约束**：重名时授权表单分不清两个人，
+    **选错人就是授权给错人**。修法是加唯一约束，但那会新增一条 409 路径
+    与"建号撞名怎么办"的界面语义（改名？加后缀？），超出 P4 的范围。
+16. **授权被撤销后，运行列表与详情里的策略名回落成显示 id**：名字来自
+    可见策略列表（`GET /api/strategies`），授权一撤该策略就不再可见，
+    而运行行里只有 `strategy_id`。不另开"按 id 取名字"的端点——那等于
+    给所有策略开一个存在性探针，与"跨租户一律 404"相冲。
+17. **生产部署仍靠 Vite 代理**（两个终端），FastAPI 托管 `dist/` 或反向代理
+    留 P8。**同一条里还有：前端没有 e2e**，闭环靠 §8.2 的手动验收——
+    这本就是计划原本的验收方式，不是临时降级。
+18. **不引 UI 组件库的代价**：表格、分页、模态框、提示条、表单控件都是自写的
+    （14 个 `components/`）。这是"最小集"的直接后果；若日后要换
+    Element Plus，那批里只有布局件需要留。另：Tailwind v4 是 **CSS 优先**，
+    主题令牌写在 `src/style.css` 的 `@theme` 块里，**没有 `tailwind.config.js`**
+    （照 v3 的教程去找那个文件会找不到）。
+
 ---
 
 ## 13. 已锁定的实现选择
@@ -618,5 +778,16 @@ P2b 的「可跑」所需的判定已于 P3 开工前（2026-09-25）**拍板**�
 | 决策点 | 选择 | 备注 |
 | ---- | ---- | ---- |
 | 前端样式 | **Tailwind**（按 §11 原文） | 参考项目 `defect_tools` 用纯 CSS，此处**有意分叉**；见归档 `Q.04` |
-| 授权选人 | **受限用户目录**，只回 `id` + `display_name` | **要写端点**，是 P4 的前置件；泄漏面随端点评审，见 §7.5 |
+| 授权选人 | **受限用户目录**，只回 `id` + `display_name` | 端点已随 P4 落地，边界与泄漏面已在 §7.5 逐条收口 |
 | Tick 显示 | **表单不显示**，提交侧继续 400 | 三档撮合语义仍未定，不阻塞 P4；见 §12.13 |
+
+**P4 交付时的实现选择**（2026-09-25）：
+
+| 决策点 | 选择 | 备注 |
+| ---- | ---- | ---- |
+| 前端依赖 | **最小集**：原生 `fetch`，不引 axios / UI 库 / sass | 表格、分页、模态框、提示条自写；见 §12.18 |
+| 前端测试 | **vitest 只测纯逻辑**（`environment: node`） | 不装 `@vue/test-utils` 与 jsdom——没有组件测试时它们就是无调用点的依赖；要测组件时连 jsdom 一起加 |
+| 页面范围 | **闭环 + 最小 admin 用户页** | 不含 `/compare`、`/settings`、权益曲线与明细分页表 |
+| 版本号 | **照抄同族项目的已验证组合**，不追最新 | router 5 / pinia 4 / vitest 5 / TS 7 都是主版本跳跃，日后单独评估 |
+| 前端参照物 | 本机同族项目 `ShopKit/frontend-platform` 与 `RMS/frontend-admin` | `defect_tools`（`amies`）**不在本机**；且参照物的样式是 **SCSS + Element Plus**，不是纯 CSS + `variables.css` |
+| 前端目录命名 | `domain/`（纯逻辑）、扁平的 `views/RunListView.vue` | 避开仓根 `.gitignore` 的无锚点模式（`lib/` `runs/` `users/` …），见 §8 |

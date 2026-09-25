@@ -1,0 +1,21 @@
+/**
+ * 全局样式.
+ *
+ * Tailwind v4 是 **CSS 优先**的: 没有 `tailwind.config.js`, 设计令牌就写在这里的 `@theme` 块里.
+ * `--color-*` 命名空间下的每一项都会生成对应的工具类 (`--color-brand` → `bg-brand` /
+ * `text-brand` / `border-brand`), 故模板里出现的每个颜色名在这里都有一个出处.
+ */
+
+@import "tailwindcss";
+
+@theme {
+  --color-page: #f8fafc;
+  --color-surface: #ffffff;
+  --color-line: #e2e8f0;
+  --color-brand: #1d4ed8;
+  --color-brand-strong: #1e40af;
+}
+
+body {
+  background-color: var(--color-page);
+}

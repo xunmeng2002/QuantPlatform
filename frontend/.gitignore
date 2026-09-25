@@ -1,0 +1,24 @@
+# 依赖与构建产物由仓库根 .gitignore 覆盖 (node_modules/ 与 dist/ 都是无锚点模式, 各层都匹配).
+# 这里只列根文件没覆盖到的.
+
+# Vite 的依赖预打包缓存
+.vite/
+
+# vue-tsc -b 的增量信息. 当前 tsconfig 把它放在 node_modules/.tmp 下, 本行是给改路径留的兜底.
+*.tsbuildinfo
+
+# 覆盖率报告 (根 .gitignore 只有 .coverage / coverage.xml / htmlcov, 没有 coverage/ 目录)
+coverage/
+
+# Vite 的本地环境覆盖约定
+*.local
+
+# ── 给后来人的警告: 这些目录名在本仓里是**不可用**的 ──────────────────
+# 仓库根的 .gitignore 是从 Python 模板来的, 里面的 `lib/` `runs/` `users/` `build/`
+# `target/` `env/` `var/` 等是**无锚点**模式, 会匹配到任意层级. 于是
+# `frontend/src/lib/x.ts` 与 `frontend/src/views/runs/x.vue` 会被静默忽略:
+# 文件写出来了, `git status` 里什么都没有, 提交时也不会进库——且没有任何提示.
+# 所以前端的纯逻辑目录叫 `domain/`, 运行相关的页面是扁平的 `views/RunListView.vue`.
+# 拿不准某个路径时:
+#     git check-ignore -v --no-index frontend/src/<待查路径>
+# 未被忽略时不输出且退出码为 1.

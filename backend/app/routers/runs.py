@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, Query, status
+from fastapi.responses import FileResponse
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +23,8 @@ from ..catalog.enums import TERMINAL_RUN_STATUSES, RunStatus
 from ..catalog.models import RunModel
 from ..catalog.pagination import DEFAULT_PAGE_SIZE, MAXIMUM_PAGE_SIZE, fetch_page
 from ..catalog.schemas import (
+    JobArtifactListResponse,
+    JobArtifactResponse,
     PageResponse,
     RunDetailResponse,
     RunSubmitRequest,
@@ -28,8 +32,9 @@ from ..catalog.schemas import (
 )
 from ..catalog.visibility import build_owned_run_query, load_owned_run
 from ..clock import utc_now
+from ..config import PlatformSettings
 from ..dependencies import SchedulerDependency, SessionDependency, SettingsDependency
-from ..errors import ConflictError
+from ..errors import ConflictError, ResourceNotFoundError
 from ..scheduler.registry import JobHandle
 from ..scheduler.runner import CANCEL_MESSAGE
 from ..services.run_submission import submit_run
@@ -43,6 +48,11 @@ CANCEL_CONFIRMATION_SECONDS = 2
 CANCEL_ATTEMPT_LIMIT = 3
 
 RUN_ALREADY_FINISHED_MESSAGE = "运行已结束, 无法取消"
+
+JOB_DIRECTORY_MISSING_MESSAGE = "该运行的作业目录不存在"
+ARTIFACT_NOT_FOUND_MESSAGE = "产物不存在"
+
+ARTIFACT_MEDIA_TYPE = "application/octet-stream"
 
 RUN_SORT_COLUMNS = {
     "balance": RunModel.balance,
@@ -218,3 +228,128 @@ async def read_run_handler(
     """运行详情. 非本人提交即 404."""
 
     return await load_owned_run(session, current_user, run_id)
+
+
+@router.get("/{run_id}/files", response_model=JobArtifactListResponse)
+async def list_run_artifacts_handler(
+    run_id: str,
+    session: SessionDependency,
+    settings: SettingsDependency,
+    current_user: CurrentUserDependency,
+) -> JobArtifactListResponse:
+    """列出一次运行的作业目录里的全部文件. 非本人提交即 404.
+
+    运行中的轮也能列: 这里读的是文件系统, 不碰库里的状态, 故没有"还没收尾"的限制.
+    目录不存在时 404 而不是 500——目录的构造在调度侧, 一轮可能在构造之前就失败了
+    (`services/run_submission` 已先落行), 那种轮本来就没有目录.
+    """
+
+    run = await load_owned_run(session, current_user, run_id)
+    job_directory = _resolve_job_directory(settings, run)
+
+    artifacts: list[JobArtifactResponse] = []
+
+    try:
+        for artifact_path in sorted(job_directory.rglob("*")):
+            if artifact_path.is_file():
+                artifacts.append(
+                    JobArtifactResponse(
+                        relative_path=artifact_path.relative_to(job_directory).as_posix(),
+                        size_bytes=artifact_path.stat().st_size,
+                    )
+                )
+    except OSError as error:
+        # 权限、文件被独占、遍历中途目录消失: 一律当作"这份目录读不出来". 具体原因只进日志,
+        # 响应里不带路径与系统错误原文.
+        logger.warning("作业目录读取失败 run_id=%s: %s", run_id, error)
+        raise ResourceNotFoundError(JOB_DIRECTORY_MISSING_MESSAGE) from error
+
+    return JobArtifactListResponse(run_id=run.id, artifacts=artifacts)
+
+
+@router.get("/{run_id}/files/{file_path:path}", response_class=FileResponse)
+async def download_run_artifact_handler(
+    run_id: str,
+    file_path: str,
+    session: SessionDependency,
+    settings: SettingsDependency,
+    current_user: CurrentUserDependency,
+) -> FileResponse:
+    """按相对路径下载作业目录里的一个文件. 非本人提交即 404.
+
+    路径参数写作 `{file_path:path}`: FastAPI 的普通路径参数**不匹配 `/`**,
+    嵌套产物 (`Dump/<RunId>/t_trade.csv`) 那样写会取不到.
+
+    **越界一律当"不存在"**, 与越权同一处理: 判据是把结果 `resolve()` 后必须仍在作业目录内,
+    不能只查字符串里的 `..`——符号链接与 Windows 的大小写不敏感都能绕过字符串判断.
+
+    **一律按附件下发**: `Content-Disposition: attachment` + 通用二进制类型, 绝不内联渲染.
+    策略是用户上传的任意 Python, 它可以往自己的作业目录里写一个 `.html`, 同源内联渲染
+    等于让它在平台域上执行脚本.
+
+    已知行为: 运行中的轮下载 `.db` 可能拿到半份文件 (引擎还在写), 这是取字节的必然结果,
+    不在这里拦——拦了就得先判状态, 而那会把"取文件"和调度器状态机绑在一起.
+    """
+
+    run = await load_owned_run(session, current_user, run_id)
+    job_directory = _resolve_job_directory(settings, run)
+
+    artifact_path = _resolve_artifact_path(job_directory, file_path)
+
+    return FileResponse(
+        artifact_path,
+        media_type=ARTIFACT_MEDIA_TYPE,
+        filename=artifact_path.name,
+    )
+
+
+def _resolve_job_directory(settings: PlatformSettings, run: RunModel) -> Path:
+    """由运行行还原它的作业目录, 并确认它确实落在运行根之内.
+
+    目录名就是 `RunId` (`scheduler/workspace.py` 的 `runs_root / job_files.run_id`), 而
+    `WorkspacePath` 列记的正是这个值 (`services/run_submission` 落行时写入), 故**从库里重建
+    即可**, 不必去翻调度器的内存 (那个 `job_directory` 只是运行期属性, 重启后就没了).
+
+    两道校验都不能省: `WorkspacePath` 的列缺省是空串, 空串拼出来的路径**就是运行根本身**,
+    于是 `../../<别人的 RunId>/result.json` 这类请求会一路通过"在运行根之内"的判断, 变成
+    跨租户读产物. 空值与非严格子路径一律当作"这份运行没有目录".
+    """
+
+    runs_root = settings.runs_root.resolve()
+
+    if not run.workspace_path:
+        raise ResourceNotFoundError(JOB_DIRECTORY_MISSING_MESSAGE)
+
+    try:
+        job_directory = (runs_root / run.workspace_path).resolve()
+    except (OSError, ValueError) as error:
+        logger.warning("作业目录名不合法 run_id=%s: %s", run.id, error)
+        raise ResourceNotFoundError(JOB_DIRECTORY_MISSING_MESSAGE) from error
+
+    if job_directory == runs_root or not job_directory.is_relative_to(runs_root):
+        logger.warning("作业目录越出运行根 run_id=%s", run.id)
+        raise ResourceNotFoundError(JOB_DIRECTORY_MISSING_MESSAGE)
+
+    if not job_directory.is_dir():
+        raise ResourceNotFoundError(JOB_DIRECTORY_MISSING_MESSAGE)
+
+    return job_directory
+
+
+def _resolve_artifact_path(job_directory: Path, file_path: str) -> Path:
+    """把相对路径解析成作业目录内的真实文件, 越界或不是文件即当"不存在".
+
+    绝对路径 (`C:/Windows/win.ini`) 由 pathlib 的规则直接顶掉左侧的作业目录, 故它走的是
+    与 `..` 同一条判断, 不需要另立分支.
+    """
+
+    try:
+        artifact_path = (job_directory / file_path).resolve()
+    except (OSError, ValueError) as error:
+        logger.warning("产物路径不合法 %s: %s", file_path, error)
+        raise ResourceNotFoundError(ARTIFACT_NOT_FOUND_MESSAGE) from error
+
+    if not artifact_path.is_relative_to(job_directory) or not artifact_path.is_file():
+        raise ResourceNotFoundError(ARTIFACT_NOT_FOUND_MESSAGE)
+
+    return artifact_path

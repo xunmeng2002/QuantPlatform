@@ -433,6 +433,42 @@ async def test_stored_manifest_keeps_the_declared_parameter_fields_unchanged(
     assert stored_parameters[0]["options"] == []
 
 
+async def test_the_detail_endpoint_exposes_the_stored_manifest(
+    client: AsyncClient,
+    owner_account: SignedInAccount,
+    platform_settings: PlatformSettings,
+) -> None:
+    """版本视图里带着 manifest 全文: 提交页要按它的 `params` 生成参数控件, 按
+    `run_field_keys` 决定哪几个运行级字段是必填.
+
+    期望值取**盘上那份**而不是请求体: 入库的是归一化后的快照 (缺省字段已补), 请求体与快照的
+    一致性由上面那条管; 这一条只管"接口把库里的快照原样交出去了", 两条各查一件事.
+    """
+
+    detail = await create_strategy(client, owner_account.token)
+    version = detail.versions[0]
+
+    directory = version_directory(
+        platform_settings,
+        owner_account.user_id,
+        detail.strategy.id,
+        version.version_no,
+    )
+    stored_on_disk = json.loads(
+        (directory / MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+    exposed = json.loads(version.manifest_json)
+
+    assert exposed == stored_on_disk
+    assert [entry["key"] for entry in exposed["params"]] == [
+        parameter["key"] for parameter in PARAMETER_LIST
+    ]
+
+    # 前端按这两个键渲染, 故它们必须**恒在**: 缺一个键会让表单静默少一整块内容.
+    assert isinstance(exposed["run_field_keys"], dict)
+    assert isinstance(exposed["supported_match_modes"], list)
+
+
 async def test_undeclared_parameter_fields_survive_verbatim(
     client: AsyncClient,
     owner_account: SignedInAccount,
