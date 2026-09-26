@@ -91,9 +91,13 @@ GRID_COUNT_PARAMETER_KEY = "GridCount"
 VOLUME_PER_GRID_PARAMETER_KEY = "VolumePerGrid"
 
 DEFAULT_LOG_LEVEL = 2
-DEFAULT_GRID_STEP = 10.0
+# 步长是**比例**（0.01 = 1%），不是绝对价格：档位与平仓价都按乘算（见 `grid_strategy.py`
+# 的 `GridParams`）。旧口径的 10.0 在新口径下是越界值（10 × GridCount ≥ 1），策略构造期即拒启。
+DEFAULT_GRID_STEP = 0.01
 DEFAULT_GRID_COUNT = 5
 DEFAULT_VOLUME_PER_GRID = 1
+# 比例的下界取一个严格大于 0 的正数：0 会被策略构造期拒启，故不让它在表单里可选.
+GRID_STEP_MINIMUM = 0.0001
 
 BAR_PERIOD = "5m"
 EXCHANGE_ID = "SSE"
@@ -126,28 +130,32 @@ STDERR_FILENAME = "stderr.txt"
 ENGINE_FINISHED_MARKER = "RunResult Written"
 
 # 引擎在**同一批输入**下的量: 成交/委托/行情条数与"种子库在不在"无关, 故这两份基线共用它们.
-# P0 基线取自 `QuantTrading/bin/Release/result.json` (docs/job-workspace.md §6), 本轮基线取自
-# 同一目录下、同一策略的另一次实测 (见下 `BASELINE_BALANCE_*` 的分工). 相等说明作业目录构造与
-# 配置渲染没有改变回测结果.
-BASELINE_TRADE_COUNT = 84
-BASELINE_ORDER_COUNT = 654
+# 本轮的三个数取自 2026-09-26 步长改比例 (GridStep 10.0 → 0.01) 后的实测; 改比例会改变成交
+# 密度, 故它们随步长走——`BarMarketDataCount` 只由行情范围决定, 不随步长动 (2928 未变).
+# 相等说明作业目录构造与配置渲染没有改变回测结果.
+BASELINE_TRADE_COUNT = 34
+BASELINE_ORDER_COUNT = 629
 BASELINE_BAR_MARKET_DATA_COUNT = 2928
 
 # **两份基线并存, 各自注明前提**——不要用新的盖掉旧的: 差值恰好是费用三项, 是"引擎行为未变、
 # 只是缺了费率表"这个判断的依据.
 #
 # 种子库 `BackTestInit.db` 在盘上时 (P0): 引擎按它带的费率表收费, 费用三项非 0, 余额是扣费后的.
+# ⚠️ 这份现值 998951.4506464996 是**旧口径 (绝对步长 10.0, 84 笔成交)**下量的, 与上面那份按比例
+# 步长量出来的余额**不再是同一批输入**, 不可相减; 它留在这里只为记住"费用三项 = 两份基线的差"
+# 这个判据 (旧口径下差 425.6393535003 = 420.0 + 4.297395 + 1.3419585). 本机种子库不在盘上,
+# 故带种子库的那一份无法重取——重建种子库后必须连同下面的余额一起按比例步长重测.
 BASELINE_BALANCE_WITH_SEED_DATABASE = 998951.4506464996
 # 种子库不在盘上时 (本轮): 引擎对它的缺失是优雅降级 (`SimExchange.cpp` 只做 `exists` 检查,
-# 缺失仅 Warning + `BasicDataLoaded=false`, 继续跑完), 费用三项退化成 0, 余额因此**高出**
-# 费用的总和 420.0 + 4.297395 + 1.3419585 = 425.6393535——与两份基线的差 425.6393535003 相符
-# (末位差异来自浮点求和次序, 不是行为差异).
-BASELINE_BALANCE_WITHOUT_SEED_DATABASE = 999377.0899999999
+# 缺失仅 Warning + `BasicDataLoaded=false`, 继续跑完), 费用三项退化成 0, 余额因此**高出**费用
+# 的总和 (旧口径下是 425.6393535; 末位差异来自浮点求和次序, 不是行为差异).
+BASELINE_BALANCE_WITHOUT_SEED_DATABASE = 999257.8562340003
 
 # 故费用三项与"缺费率"的条数是**输入缺失**的证据, 钉成断言: 日后重建种子库时, 这四条会一起
-# 转红, 正好提醒把 `BASELINE_BALANCE_*` 换回带种子库的那一份.
+# 转红, 正好提醒把 `BASELINE_BALANCE_*` 换回带种子库的那一份. "缺费率的条数"等于成交笔数
+# (每笔成交都要查一次费率), 故它与 `BASELINE_TRADE_COUNT` 同值.
 MISSING_SEED_COMMISSION = 0.0
-MISSING_SEED_COMMISSION_MISSING_COUNT = 84
+MISSING_SEED_COMMISSION_MISSING_COUNT = 34
 
 # 结果表那一页故意取一个**小于**行数的页大小: 取 100 (上界) 时 `total` 与 `len(records)` 恰好
 # 相等, 于是"`LIMIT` 到底有没有生效"这件事在响应里看不出来——一页装得下全表时, 少绑一个参数
@@ -252,10 +260,10 @@ def build_real_manifest() -> StrategyManifest:
                 },
                 {
                     "key": GRID_STEP_PARAMETER_KEY,
-                    "label": "网格步长",
+                    "label": "网格步长(比例, 0.01=1%)",
                     "type": "number",
                     "default": DEFAULT_GRID_STEP,
-                    "minimum": 0,
+                    "minimum": GRID_STEP_MINIMUM,
                 },
                 {
                     "key": GRID_COUNT_PARAMETER_KEY,

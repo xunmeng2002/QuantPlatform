@@ -341,6 +341,90 @@
 
 ---
 
+## D.06 · 2026-09-25 （第六批） P3 runner 本体 + `params` schema 定案
+
+> 归档于 2026-09-26（主文件再次逼近 50 KB 上限时从 ✅ 区移出）。**下列原文一字未改。**
+
+- **交付**：`POST /api/runs`、`POST /api/runs/{id}/cancel`、
+  `app/scheduler/` 八个模块（`engine_config` / `result` / `output` /
+  `workspace` / `registry` / `runner` / `recovery` / `scheduler`）、
+  启动恢复、`PlatformSettings` 三项新配置、`engine_probe.py` 搬移、
+  health 三个存在性字段，以及 manifest 的 `params` schema 定案 +
+  新增 `run_field_keys`（见 §7.2）。**P2 的「上传后能跑通」与 P2b 的
+  「被授权人可跑」两项挂账至此结清。**
+- **开工前拍板五项**（后果见 `platform-plan.md` §13 的第二张表）：
+  授权粒度**不区分 `read`/`run`**（跑权限 == 可见性，`GrantPermission`
+  原样保留、只改 docstring）；`public` **隐含可跑**；`params` schema
+  本轮定案；P3 范围含 **cancel**（只读端点留 P5、`DELETE` 留 P7）；
+  **Tick 本轮不开**（提交侧 400，判据是具名常量 `SUBMITTABLE_MATCH_MODES`）。
+- **验收**：**380 项测试**（376 项默认全绿 112 秒 + **4 项真引擎验收**
+  默认不跑，标 `real_engine`，见 `backend/tests/test_real_engine_acceptance.py`）。
+  真引擎四项全通过：① 一轮 Bar 成功且指标与基线同口径（并回读渲染出的
+  `BackTest.json` / 策略配置，确认 `run_field_keys` 真的写进了策略侧）；
+  ② 两轮并发各写自己的库（区间相交 + 库文件名各嵌自己的 RunId）；
+  ③ 超时真把引擎杀掉（1 秒时限 + 十五年区间，静默期后仍是 `timeout`、
+  无 `result.json`、stdout 里无收尾标记）；④ 取消运行中的真作业
+  （等它真在跑再取消），同样验静默期与产物缺席。
+  「重启后端把在跑的轮标 `interrupted`」在桩侧另有 3 条用例
+  （`test_run_recovery.py`，经**停止态**的库门面播种，第二次启动时验恢复）。
+- **真引擎实测出的四条新事实**（**其中第一条推翻 P0 的记载**）：
+  - **`argv[0]` 不必是裸文件名**：`./grid_strategy.py`（正斜杠相对）与
+    `C:\...\Temp\<job>\grid_strategy.py`（反斜杠绝对）各跑一轮，**都是
+    退出码 0、整轮回测跑完**。故 D.01 记的"正斜杠路径会在启动期终止进程
+    （退出码 1）"**在现行构建上复现不出来**。差别的来源无法判别（当时是**由
+    日志器的 `strrchr` 行为推出的**推论、还是旧构建确实如此），但**就现行
+    `cp314` 构建而言，"裸文件名"不是启动的必要条件**。平台仍固定传它，
+    理由是它与其余契约自洽（入口、配置、产物同落 CWD），不是"否则起不来"。
+    D.01 原文已入归档，订正写进 `job-workspace.md` §3.1 与
+    `platform-plan.md` §3/§4/§12.6。
+  - **引擎比预期快得多**：三个月 5m 回测约 **1.7 秒**，2010–2024
+    （58176 根 bar）约 **3.8 秒**。故真引擎的超时验收只能靠**压时限**
+    （1 秒必杀），不能靠拉长时间范围。
+  - **种子库缺失时的余额**：本轮基线 `Balance=999377.0899999999`，
+    与 P0 的 `998951.4506464996` 差 **425.6393535003**，恰好等于 P0 那轮
+    费用三项之和 `420.0 + 4.297395 + 1.3419585 = 425.6393535`。
+    **引擎行为未变，变的只是输入**——两份基线在 `job-workspace.md` §6.1/§6.2
+    并存，各自注明前提，**没有用新数字覆盖旧基线**。
+  - **`Dump/` 不必预建**：目录里只有四个输入文件时，引擎自己建出 `Dump/`
+    与 `Dump/<RunId>/`。
+- **变异检查（§7.3）**：① 写路径改绝对 → 转红；② 串行读两路输出 → 转红
+  （65 秒，管道死锁）；③ 去掉尾部对齐 → 被纯函数用例杀掉（集成侧的 flood
+  用例全是 ASCII，**杀不掉它**——这正是纯函数用例存在的理由）；④ 去掉尾部
+  截断 → tracemalloc 实测 9.18 MB vs 1 MB 阈值，转红；⑤ 去掉"只对跑完的
+  终态镜像"那道守卫 → 转红；⑥ "退出码 0 即成功" → 转红；⑦ 退出码 3 只看码
+  不看文件 → **初版杀不掉**，把 `build_unexpected_exit_message` 提成公开
+  函数并断言 `error_msg` 后才转红。
+- **两处 CAS 现有用例杀不掉（覆盖缺口，记在这里免得被当"测过了"）**：
+  `_claim_next_run` 的 `WHERE Status='queued'` 与 `_interrupt_unstarted_run`
+  的同名条件，都只在"读到的状态"与"更新时的状态"之间那个 `await` 宽的窗口里
+  才起作用，而该窗口**无法从 HTTP 侧确定性抵达**（取消端点另有 409 守卫挡住
+  了另一条路径）。去掉任一条，现有 380 项全绿。代码注释已写明两处条件不能省；
+  要真杀掉得给 runner 插一个可注入的暂停点。**这是已知缺口，不是已知缺陷。**
+- **产品代码偏差清单**（相对计划原文，均已落地并写进注释）：
+  `sys.executable` + 裸文件名的启动形态（Windows `CreateProcess` 不认文件关联，
+  实测 `WinError 2`）；`cancel_signal` 用 `Event` 而非标志位；
+  `run_submission.py` 越过 200 行；收尾抢输时**不写任何指标列**，
+  只做一次不碰 `Status` 的窄 UPDATE 补 `StdoutTail`/`StderrTail`/`ExitCode`；
+  `interrupted` / `timeout` **不镜像**指标（`ErrorMsg` 保住自己的取消/超时文案）；
+  `ResultMirror` 27 列（计划 DDL 里数成 25，差的两列是 `DbPath`/`DumpPath`）；
+  `JobOutputCapture` 的句柄泄漏修掉（Windows 上 `unlink` 成功与否即"关没关"）；
+  超时路径也记 `exit_code`；`result.py` 的 GBK 兜底解码；取消路径用
+  `populate_existing` 而非 `expire_all`；`_finalize` 里删掉一个无行为的
+  `error_msg` 赋值块，其理由折进镜像注释；新增 `build_unexpected_exit_message`。
+- **P3 新增的已知缺口**（不做，写进 `platform-plan.md` §12.9–12.14）：
+  纯 FIFO 无配额、不做重启后续跑、不做多 worker（单实例是硬前提）、
+  孤儿进程不自动清理、Tick 不可提交、种子库不重建。
+- **文档回写**：`platform-plan.md`（§2 工具链订正、§3/§4 的 `argv[0]` 订正、
+  §5.1/§12.1 的 `cp314`、§6 的 27 列、§7.2 的 `params` 定案与
+  `run_field_keys`、§8 的调度器模块表、§9 的 P3 落地范围、§11 的 P2/P2b/P3
+  三行、§12 新增缺口、§13 新增拍板表）、`job-workspace.md`（§1 的 `Dump/`、
+  §2 的结构性约束与派生行为、§3.1 重写、§6 拆成两轮基线）、
+  `enums.py` 的 `GrantPermission` docstring、`strategy_store.py` 与
+  `test_health.py` 里的 `cp311` 残留。另启用 `PROGRESS-archive.md`
+  （D.01 与 Q.01/Q.02 入档）。
+
+---
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型
