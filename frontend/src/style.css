@@ -4,6 +4,9 @@
  * Tailwind v4 是 **CSS 优先**的: 没有 `tailwind.config.js`, 设计令牌就写在这里的 `@theme` 块里.
  * `--color-*` 命名空间下的每一项都会生成对应的工具类 (`--color-brand` → `bg-brand` /
  * `text-brand` / `border-brand`), 故模板里出现的每个颜色名在这里都有一个出处.
+ *
+ * 引入 Element Plus 之后本文件多了一层职责: 把 EP 的 `--el-*` 变量指回上面这套令牌 (见文末),
+ * 于是"一个 danger 标签是什么颜色"仍然只有一处答案.
  */
 
 @import "tailwindcss";
@@ -14,8 +17,72 @@
   --color-line: #e2e8f0;
   --color-brand: #1d4ed8;
   --color-brand-strong: #1e40af;
+  /* 语义色取 StatusBadge 一直在用的那几档文字色 (-700). 换用 el-tag 之后, 标签文字与底色
+     这一对的对比度与换库前大致相同 —— EP 出厂那种偏亮的中色配浅底只有 2.0-2.6:1. */
+  --color-success: #047857;
+  --color-warning: #b45309;
+  --color-danger: #be123c;
+  --color-info: #334155;
 }
 
 body {
   background-color: var(--color-page);
+}
+
+/**
+ * Element Plus 换肤: 把它的 `--el-*` 变量指回上面的令牌.
+ *
+ * 选择器写 `html:root` 而不是 `:root`. 我们的覆盖与 EP 自己的 `:root` 同为**无层 (unlayered)**
+ * 样式, 同权重下靠源序决胜 —— 而源序取决于打包器把两份 CSS 打进同一产物时的先后. 换成
+ * `html:root` 之后特异性是 (0,1,1), 压过 EP 的 (0,1,0), **与顺序无关**.
+ *
+ * 每族 7 档的口径与 EP 自己的 SCSS 一致: light-N = N 成白 + (10-N) 成本色, dark-2 = 两成黑.
+ * 这一整块是本项目**唯一**的换肤入口; 各模板里不再出现硬编码色值.
+ */
+html:root {
+  --el-color-primary: var(--color-brand);
+  --el-color-primary-light-3: color-mix(in srgb, var(--color-brand) 70%, white);
+  --el-color-primary-light-5: color-mix(in srgb, var(--color-brand) 50%, white);
+  --el-color-primary-light-7: color-mix(in srgb, var(--color-brand) 30%, white);
+  --el-color-primary-light-8: color-mix(in srgb, var(--color-brand) 20%, white);
+  --el-color-primary-light-9: color-mix(in srgb, var(--color-brand) 10%, white);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--color-brand) 80%, black);
+
+  --el-color-success: var(--color-success);
+  --el-color-success-light-3: color-mix(in srgb, var(--color-success) 70%, white);
+  --el-color-success-light-5: color-mix(in srgb, var(--color-success) 50%, white);
+  --el-color-success-light-7: color-mix(in srgb, var(--color-success) 30%, white);
+  --el-color-success-light-8: color-mix(in srgb, var(--color-success) 20%, white);
+  --el-color-success-light-9: color-mix(in srgb, var(--color-success) 10%, white);
+  --el-color-success-dark-2: color-mix(in srgb, var(--color-success) 80%, black);
+
+  --el-color-warning: var(--color-warning);
+  --el-color-warning-light-3: color-mix(in srgb, var(--color-warning) 70%, white);
+  --el-color-warning-light-5: color-mix(in srgb, var(--color-warning) 50%, white);
+  --el-color-warning-light-7: color-mix(in srgb, var(--color-warning) 30%, white);
+  --el-color-warning-light-8: color-mix(in srgb, var(--color-warning) 20%, white);
+  --el-color-warning-light-9: color-mix(in srgb, var(--color-warning) 10%, white);
+  --el-color-warning-dark-2: color-mix(in srgb, var(--color-warning) 80%, black);
+
+  --el-color-danger: var(--color-danger);
+  --el-color-danger-light-3: color-mix(in srgb, var(--color-danger) 70%, white);
+  --el-color-danger-light-5: color-mix(in srgb, var(--color-danger) 50%, white);
+  --el-color-danger-light-7: color-mix(in srgb, var(--color-danger) 30%, white);
+  --el-color-danger-light-8: color-mix(in srgb, var(--color-danger) 20%, white);
+  --el-color-danger-light-9: color-mix(in srgb, var(--color-danger) 10%, white);
+  --el-color-danger-dark-2: color-mix(in srgb, var(--color-danger) 80%, black);
+
+  --el-color-info: var(--color-info);
+  --el-color-info-light-3: color-mix(in srgb, var(--color-info) 70%, white);
+  --el-color-info-light-5: color-mix(in srgb, var(--color-info) 50%, white);
+  --el-color-info-light-7: color-mix(in srgb, var(--color-info) 30%, white);
+  --el-color-info-light-8: color-mix(in srgb, var(--color-info) 20%, white);
+  --el-color-info-light-9: color-mix(in srgb, var(--color-info) 10%, white);
+  --el-color-info-dark-2: color-mix(in srgb, var(--color-info) 80%, black);
+
+  --el-border-color: var(--color-line);
+  --el-border-color-light: var(--color-line);
+  --el-bg-color: var(--color-surface);
+  --el-border-radius-base: 6px;
+  --el-font-family: inherit;
 }

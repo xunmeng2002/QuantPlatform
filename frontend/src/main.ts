@@ -7,6 +7,9 @@
 
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
+// Element Plus 的全量样式表必须排在 ./style.css **之前**: 两份都是无层样式, 覆盖靠的就是这个先后.
+// (真正的保证是 style.css 里那个 html:root 的特异性, 这里只是深度防御.)
+import 'element-plus/dist/index.css';
 
 import App from './App.vue';
 import { configureUnauthorizedHandler } from './api/client';

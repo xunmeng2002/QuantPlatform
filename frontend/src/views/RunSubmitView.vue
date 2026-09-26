@@ -16,6 +16,7 @@
  */
 
 import { computed, onMounted, ref } from 'vue';
+import { ElAlert, ElButton, ElInput, ElOption, ElSelect } from 'element-plus';
 import { RouterLink, useRouter } from 'vue-router';
 
 import { ApiError } from '../api/client';
@@ -73,6 +74,16 @@ const selectedVersion = computed(
     strategyDetail.value?.versions.find(
       (version) => version.id === selectedVersionId.value,
     ) ?? null,
+);
+
+/**
+ * 版本下拉的占位文案.
+ *
+ * 原生 `<select>` 是用一个 `value=""` 的空选项承担这句话的; 换成 el-select 后那个位置归
+ * placeholder —— 而 EP 的 `<el-option value="">` 永远显示不出自己的标签 (空串被判为"未选中").
+ */
+const versionPlaceholder = computed(() =>
+  strategyDetail.value === null ? '请先选择策略' : '没有可用版本',
 );
 
 /** 版本里的 `manifest_json` 可能读不动 (存量坏行), 那时整张表单都生成不出来. */
@@ -323,18 +334,26 @@ onMounted(() => {
       class="space-y-6"
       @submit.prevent="submit"
     >
-      <div
-        v-if="appliedPrefill?.run_id"
-        class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-line bg-surface px-3 py-2 text-xs text-slate-500"
-      >
-        <span>已按你上次提交的参数填充 ({{ formatDateTime(appliedPrefill.submitted_at) }})</span>
-        <button
-          type="button"
-          class="text-brand hover:underline"
-          @click="resetToDefaults"
+      <!-- 外面这个 div 不是多余的: EP 的 `.el-alert{margin:0}` 是无层样式, 会压掉 `space-y-6`
+           给它的上边距, 所以纵向间距只能挂在我们自己的包裹层上. -->
+      <div v-if="appliedPrefill?.run_id">
+        <!-- closable 必须显式关掉: 关掉只翻组件内部的可见标志, appliedPrefill 还在, 于是
+             「提示被关掉了但表单里仍是记忆值」, 而且「重置为默认值」这个唯一入口也没了. -->
+        <ElAlert
+          type="info"
+          :closable="false"
         >
-          重置为默认值
-        </button>
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>已按你上次提交的参数填充 ({{ formatDateTime(appliedPrefill.submitted_at) }})</span>
+            <button
+              type="button"
+              class="text-brand hover:underline"
+              @click="resetToDefaults"
+            >
+              重置为默认值
+            </button>
+          </div>
+        </ElAlert>
       </div>
 
       <fieldset class="space-y-4 rounded-lg border border-line bg-surface p-4">
@@ -345,22 +364,18 @@ onMounted(() => {
         <div class="grid gap-4 sm:grid-cols-2">
           <label class="flex flex-col gap-1 text-sm text-slate-600">
             策略
-            <select
+            <ElSelect
               v-model="selectedStrategyId"
-              class="rounded border border-line bg-surface px-2 py-1.5 text-sm"
+              placeholder="请选择策略"
               @change="handleStrategyChange"
             >
-              <option value="">
-                请选择策略
-              </option>
-              <option
+              <ElOption
                 v-for="strategy in strategyCatalog.strategies"
                 :key="strategy.id"
+                :label="strategy.name"
                 :value="strategy.id"
-              >
-                {{ strategy.name }}
-              </option>
-            </select>
+              />
+            </ElSelect>
             <span
               v-if="visibleFieldErrors.strategy_id"
               class="text-xs text-rose-600"
@@ -369,23 +384,19 @@ onMounted(() => {
 
           <label class="flex flex-col gap-1 text-sm text-slate-600">
             版本
-            <select
+            <ElSelect
               v-model="selectedVersionId"
-              class="rounded border border-line bg-surface px-2 py-1.5 text-sm"
+              :placeholder="versionPlaceholder"
               :disabled="isLoadingVersions || strategyDetail === null"
               @change="handleVersionChange"
             >
-              <option value="">
-                {{ strategyDetail === null ? '请先选择策略' : '没有可用版本' }}
-              </option>
-              <option
+              <ElOption
                 v-for="version in strategyDetail?.versions ?? []"
                 :key="version.id"
+                :label="`v${version.version_no} · ${version.entry_filename}`"
                 :value="version.id"
-              >
-                v{{ version.version_no }} · {{ version.entry_filename }}
-              </option>
-            </select>
+              />
+            </ElSelect>
           </label>
         </div>
 
@@ -450,14 +461,13 @@ onMounted(() => {
         <div class="grid gap-4 sm:grid-cols-2">
           <label class="flex flex-col gap-1 text-sm text-slate-600">
             开始交易日
-            <input
+            <ElInput
               v-model="runFields.startTradingDay"
               type="text"
               inputmode="numeric"
               maxlength="8"
               placeholder="20240102"
-              class="rounded border border-line px-2 py-1.5 text-sm"
-            >
+            />
             <span
               v-if="visibleFieldErrors.start_trading_day"
               class="text-xs text-rose-600"
@@ -470,14 +480,13 @@ onMounted(() => {
 
           <label class="flex flex-col gap-1 text-sm text-slate-600">
             结束交易日
-            <input
+            <ElInput
               v-model="runFields.endTradingDay"
               type="text"
               inputmode="numeric"
               maxlength="8"
               placeholder="20241231"
-              class="rounded border border-line px-2 py-1.5 text-sm"
-            >
+            />
             <span
               v-if="visibleFieldErrors.end_trading_day"
               class="text-xs text-rose-600"
@@ -490,12 +499,14 @@ onMounted(() => {
 
           <label class="flex flex-col gap-1 text-sm text-slate-600">
             初始资金
-            <input
+            <!-- 仍是 type="text": `initialCapitalText` 是"以文本承载的数值", `domain/run-form.ts`
+                 按字符串读它. 改成 number 会让浏览器放行 `1e5` 一类并弹原生校验气泡, 与 domain 的
+                 判据打架. -->
+            <ElInput
               v-model="runFields.initialCapitalText"
               type="text"
               inputmode="decimal"
-              class="rounded border border-line px-2 py-1.5 text-sm"
-            >
+            />
             <span
               v-if="visibleFieldErrors.initial_capital"
               class="text-xs text-rose-600"
@@ -504,11 +515,10 @@ onMounted(() => {
 
           <label class="flex flex-col gap-1 text-sm text-slate-600">
             K 线周期 (bar_period)
-            <input
+            <ElInput
               v-model="runFields.barPeriod"
               type="text"
-              class="rounded border border-line px-2 py-1.5 text-sm"
-            >
+            />
             <span
               v-if="visibleFieldErrors.bar_period"
               class="text-xs text-rose-600"
@@ -524,11 +534,10 @@ onMounted(() => {
             class="flex flex-col gap-1 text-sm text-slate-600"
           >
             交易所 (exchange_id)
-            <input
+            <ElInput
               v-model="runFields.exchangeId"
               type="text"
-              class="rounded border border-line px-2 py-1.5 text-sm"
-            >
+            />
             <span
               v-if="visibleFieldErrors.exchange_id"
               class="text-xs text-rose-600"
@@ -544,11 +553,10 @@ onMounted(() => {
             class="flex flex-col gap-1 text-sm text-slate-600"
           >
             合约 (instrument_id)
-            <input
+            <ElInput
               v-model="runFields.instrumentId"
               type="text"
-              class="rounded border border-line px-2 py-1.5 text-sm"
-            >
+            />
             <span
               v-if="visibleFieldErrors.instrument_id"
               class="text-xs text-rose-600"
@@ -583,13 +591,16 @@ onMounted(() => {
       </p>
 
       <div class="flex items-center gap-3">
-        <button
-          type="submit"
-          class="rounded bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-50"
+        <!-- 文案里的「提交中…」不交给 EP 的 loading 转圈去表达: 转圈不进可访问名, 屏幕阅读器
+             只会念到「提交回测」. 两者一起给. -->
+        <ElButton
+          type="primary"
+          native-type="submit"
+          :loading="isSubmitting"
           :disabled="isSubmitDisabled"
         >
           {{ isSubmitting ? '提交中…' : '提交回测' }}
-        </button>
+        </ElButton>
         <RouterLink
           class="text-sm text-slate-500 hover:underline"
           :to="{ name: 'runs' }"

@@ -32,16 +32,123 @@ Python 策略**。
 | D.05 | P2b 审核修正与测试补强（上限判据 / 可见性回归 / 两处文案订正；**一条残余风险与一处行宽待办**见原文） |
 | D.06 | P3 runner 本体 + `params` schema 定案（`argv[0]` 结论订正 / 两处 CAS 覆盖缺口 / P3 六项已知缺口；短版见 ✅ 区） |
 | D.07 | P4 前端骨架 + 三处后端前置端点（受限用户目录 / 显示名必填 / `manifest_json` 透传 / 产物清单与下载；含 Vite 只绑 `[::1]`、仓根 `.gitignore` 静默吞源码等踩坑记录） |
+| D.08 | P5 可视化：权益曲线与回撤 + 5 张结果明细表（`vue-echarts` 按需注册 / 结果库两节只在终态挂载 / 5 张表的表名两处真相；**D.11 加 UI 库后主文件越过 50 KB，整条移出**） |
+| D.09 | 网格步长由绝对价格改为比例（档位价与平仓价公式 / `0 < GridStep × GridCount < 1` / 构造期拒启 / **重取后的真引擎基线**，旧新两套口径的数不可相减） |
 | Q.01 | manifest 的 `params` schema 细节未定（**已定案**，见 D.06） |
 | Q.02 | `permission_type` 判定语义未定（**已拍板不判定**，见 D.06） |
 | Q.03 | 归属人从哪儿得知同事的 `user_id`（**已拍板：受限用户目录**） |
 | Q.04 | P4 前端样式 Tailwind 还是纯 CSS（**已拍板 Tailwind**，与 `defect_tools` 有意分叉） |
 | Q.05 | 受限用户目录的泄漏面评审（**已随 P4 落地并收口**，见归档 D.07） |
 | Q.06 | Tick 三档撮合语义未定（**表单侧已定**＝不显示；引擎侧仍未定，短版见 ❓） |
+| Q.07 | 前端组件测试的 DOM 环境未定（**已定案**：装 `jsdom` + `@vue/test-utils`，全局仍 `node`、组件 spec 逐文件声明，见 D.11） |
 
 ---
 
 ## ✅ 已完成
+
+### D.11 · 2026-09-26 （第十一批） 引入 Element Plus：地基 4 件 + 两个最脏页
+
+- **起因（用户原话）**：「现在的 UI 太原始了，是不是应该考虑引入 UI 组件库了？」——前端 14 个
+  自写组件 + 8 个页面，全仓 `.vue` 里**一个 `<style>` 块都没有**、**零动画、零 toast 通道**，
+  表格 / 分页 / 模态框 / 提示条 / 表单控件全用 Tailwind 手写。功能齐了（89 项纯函数测试兜底），
+  但观感是「能用」而不是「像个平台」。
+- **开工前用户拍板七条**：库 = **Element Plus `^2.14.6`**；范围 = **地基 + 两个最脏页**
+  （`/runs` 列表、`/runs/new` 提交）；测试工具**一并装**；引入方式 = **显式 import + 全量 CSS**
+  （不入 `unplugin-vue-components` / `unplugin-auto-import`——与归档 D.07 有意拒绝隐式全局的取向
+  一致）；换肤 = **`--el-*` 变量，不引 sass**；主题 = **五族色阶全对齐**；地基只换**纯展示共用件
+  的内部实现**（对外 props/emits 一字不变）。完整表见 `platform-plan.md` §13。
+- **与既有记录的显式处理（不静默覆盖）**：① `platform-plan.md` §12.18 早就预判过这一步
+  （「若日后要换 Element Plus，那批里只有布局件需要留」），本批照此执行，布局件
+  （`AppLayout` / `FilePicker` / `DirectoryPicker` / `ResultTablePanel` / `EquityChartPanel`）**留下**；
+  ② 拍板表「前端依赖」「前端测试」两行**保留原文 + 注明取代日期**（见 🔄 区）；
+  ③ ❓「前端组件测试的 DOM 环境未定」**本批结清**，原文搬入归档 `Q.07`。
+- **地基四件**（对外契约逐字未变）：`StatusBadge` → `el-tag`（5 个 tone → `type` 全覆盖映射；
+  **文字色仍由我们自己的嵌套 `<span>` 给**——EP 浅色 tag 用它自己的基色，配出厂调色板对比度只有
+  2.0–2.6:1，今天是 5.3–6.8:1）；`EmptyNotice` → `el-empty`（`:image-size="72"`；
+  **两行都进 `#description` 插槽**——默认插槽渲染在描述**下方**的 `.el-empty__bottom`，是第三个
+  层级，主句与注解会被拆开）；`ErrorBanner` → 保留自有 flex 包裹层、把 `el-alert` 放进去
+  （el-alert 只有 `title` / default 两个插槽，**没有 action 位**）；`PaginationBar` → `el-pagination`
+  （**显式钉 `layout="prev, next"`**——默认值会多长出跳页框与**第二条**条数文案）。
+- **两条跨层契约原样存活**：① `ParameterField` 的选项下标仍是**字符串**（`''` = 未选）、
+  取值恒为 `string | boolean`，转换仍只在 `domain/manifest.coerceParameterInput` 一处；
+  ② `PaginationBar` 上报的仍是 **offset 不是页码**（`currentPage` 是 1 起、offset 是 0 起，
+  `(page - 1) * limit` 这处换算是全批唯一会静默算错的地方，已由新 spec 两个方向钉住）。
+  **参数校验的语义与文案仍全在 `domain/`**——本批**不引 `el-form` / `el-form-item`**，
+  不用它的 rules（那会造出与 `visibleFieldErrors` 并列的第二处真相），标签/错误/提示的接线仍手写。
+- **`/runs` 五处**：四个筛选/排序下拉 + 页大小换 `el-select`、倒序换 `el-checkbox`、
+  表格换 `el-table` + `el-table-column`（两列 `align="right"`、操作列省略 `label`、**不加
+  `row-key`**——本表不用选中/展开/树形）、主行动换 `el-button` 套在
+  `<RouterLink custom v-slot="{ navigate, href }">` 里**保住真锚点**（中键开新标签页是真实用法）。
+  **轮询 / `reloadFromFirstPage` / 六个查询参数 / `hasActiveFilter` 一行未动。**
+- **`/runs/new`**：**保留原生 `<form @submit.prevent>`**（回车提交与原生语义不动），只换控件——
+  策略/版本与六个运行级字段换 `el-input` / `el-select`（**六个字段仍全是 `type="text"`**，
+  「交易日」与「初始资金」靠 `inputmode` 给移动端键盘；改成 `type="number"` 会让浏览器接受 `1e5`
+  并弹原生校验气泡，与 `domain/` 的判据打架）、提示条换 `el-alert type="info"`、提交换
+  `el-button`。`ParameterForm.vue` **未改**（`updateParameter(descriptor.key, $event)` 那行本来就对）。
+- **主题换肤走 `html:root` 而不是 `:root`**：我们的覆盖与 EP 自己的 `:root` 同为**无层样式**、
+  同权重 (0,1,0)，同权重下靠源序决胜而源序取决于 Vite 打产物的先后（未实测，不该押）。
+  `html:root` 特异性 (0,1,1) 压过 EP 的，**与顺序无关**；`main.ts` 里的 import 顺序仍写对，
+  当深度防御。**换肤块是本批唯一新增的 `style.css` 内容**，五族 7 档色阶用 `color-mix()` 生成，
+  新写的模板里不再出现硬编码色值。
+- **两处与计划的偏差（有意为之，非疏漏）**：① §五原写排序与页大小两个下拉照抄「同上」（可清空），
+  但**清空会把排序或页大小的模型置空**（EP 默认回 `undefined`，写 `:value-on-clear="''"`
+  则送出一个后端不认的空 `sort_by` → 422），故这两个**不 `clearable`**、恒有值；
+  ② 策略/版本两个下拉**失去了「取消选择」这条路**（原生那个空 `<option>` 被 placeholder 取代，
+  且不加 `clearable`）——计划里已明确同意。
+- **一处可访问性净损失，已记在案**：`aria-describedby`（错误文案 `<p :id>` 的关联）在三分支里
+  **只有 `el-input` 那一支能保住**——`el-input` 把非 `class`/`style` 的属性透传落到内层原生
+  `<input>`；而 `el-select` 只声明了 `id` 与 `ariaLabel`（`aria-describedby` 落到根 `<div>` 上）、
+  `el-checkbox` 只声明了 `ariaControls`（落到根 `<label>` 上）。**同一件事曾是自写控件里天然成立的，
+  换库后对下拉与复选框不再成立。**
+- **两处计划断言被实物推翻（已按实物改）**：① 计划说「`el-alert` 根节点**没有** `role="alert"`」——
+  实测 2.14.6 的源码里是**硬编码**的，故包裹层上**不能**再加（嵌套两块 live region 会重复播报），
+  已删除并改用「恰好一处 `role="alert"`，且是 el-alert 自己那个」的断言钉住；
+  ② **`ErrorBanner` 的重试按钮此前从未渲染过**——`isRetryVisible?: boolean` 传参缺省时 Vue 会落成
+  `false` 而不是 `undefined`，于是「没传」与「明确要隐藏」成了同一件事，**每个调用点都静默丢了
+  重试按钮**（`git show HEAD` 确认是既有缺陷，非本批引入）。已用
+  `withDefaults(…, { isRetryVisible: true })` 修掉并由新 spec 钉住。
+- **验证**：`vue-tsc -b` 退出码 0；`vitest` **121 项全绿 / 12 个文件**（既有 89 项不受影响 +
+  新增 **32 项**：`ParameterForm` 4（**复活 D.10 那份 parked spec**，含「选项下标必须以字符串上抛」）、
+  `StatusBadge` 8、`PaginationBar` 6、`ErrorBanner` 8、`EmptyNotice` 4，逐个在文件顶部写
+  `// @vitest-environment jsdom`，全局 `environment: node` 未动）；`build` 成功（452 ms）。
+  **体积账（本批的主要代价）**：主 CSS **17,372 B → 382,097 B**（gzip 约 **52.5 kB**），
+  ECharts 那块 559.35 kB **未变**（基线 559,451 B），JS 合计 1,023,443 B、assets 合计 1,405,540 B
+  （**JS 增量未取到 like-for-like 基线**——为取它要先 stash，而工作区里有 12 改 + 6 新共 18 个文件，
+  不值当，故只报绝对值不报差）。产物自检三项：① EP 片段进了产物；
+  ② **Tailwind 的层原样进了产物**（`grep -c '@layer'` = **5**，此前只校验过源文件）；
+  ③ **换肤块在位**——`--el-color-primary` 恰好 **2** 处（EP 出厂的 `#409eff` 与我们的
+  `var(--color-brand)`），且后者带 `html:root` 选择器。另注：`color-mix()` 在**构建期**就被折算了
+  （`--el-color-primary-light-5` 落成字面量 `#8ea7ec`，因为 `--color-brand` 有字面值），
+  所以**运行期换肤对 light-N 那几档不成立**，改品牌色要重新构建；剩下 64 处 `color-mix` 是
+  Tailwind 自己的 lab/oklab。
+- **不做 / 留后**：`ConfirmDialog` → `ElMessageBox`（**形状不匹配**：今天是声明式
+  `isOpen` prop + `confirm`/`cancel` emit + `isBusy`，MessageBox 是命令式 + Promise，
+  换过去要把每个调用点的 `v-if` 控制反转成 `await` 流程，另一种迁移）；`ElMessage` toast
+  （全站今天**没有** toast 通道，这是产品决策不是迁移）；页码按钮；`FilePicker` /
+  `DirectoryPicker` / `ArtifactList` / `ResultTablePanel` / `EquityChartPanel`（布局件，
+  §12.18 已预判）；其余 5 个页面（后续批次）；`app.use(ElementPlus)` 全量注册 / sass /
+  响应式 / 深色模式；把散落的 `text-rose-600` 之类改成语义令牌 `text-danger`（全仓重命名，
+  与本批边界冲突）。**`LoadingNotice` 不动**——EP 没有等价物（`v-loading` 是遮罩指令），
+  它留在原地也正是 `role="status"` 不丢的原因。
+- **文档回写**：`platform-plan.md`（§10 两行加「EP 化 2026-09-26」、P4 依赖那段补日期与现状、
+  §12.18 加增补小节含实测代价、§13 新增十行拍板表）、`PROGRESS.md`（本条 + 拍板表两行注明取代 +
+  归档索引三行 + R.01 加手工验收待办；**D.08 与 D.09 两条整条移入归档**——主文件加本条后
+  越过 50 KB，按 §8.1 把 ✅ 区最旧的整条搬走（搬 D.08 后仍差一点，接着搬 D.09，
+  最终 48,709 B），搬运由脚本对条目边界完成、原文取自 `git HEAD`、正文一字未改，
+  主文件里 5 处 `见 D.08` 与 4 处 `见 D.09` 一并改写成 `见归档 D.xx`）、两处过期注释
+  （`vite.config.ts` 的「不装 jsdom」、`ConfirmDialog.vue` 的「因为最小集里没有组件库」）。
+- **待用户手工验收**（浏览器里走一遍，本批验收主体）：
+  ① `/runs`——四个下拉与倒序能改、**筛选能被 × 清回「全部」**（本批唯一改动操作方式的地方，
+  专看这条）、表格九列对齐（两列右对齐）、徽章配色与可读性、翻页、筛选后回第一页、
+  「新建回测」**中键能开新标签页**（验证锚点没丢）；
+  ② `/runs/new`——**选策略 → 参数与字段被带出且提示条可见 → 点「重置为默认值」→ 回到默认且
+  提示条消失 → 再选一次该策略仍带出 → 换个没跑过的策略为纯默认、无提示条**（这是 D.10 欠着的
+  手工验收，本批一并走）；参数项的必填/越界提示仍是 domain 那几句中文；回车能提交；
+  ③ **换肤是否生效**——EP 按钮/标签应是品牌蓝 `#1d4ed8`，若仍是出厂亮蓝 `#409eff` 说明换肤没吃到；
+  ④ 顺带回归四个共用页面（`/strategies`、`/strategies/:id`、`/users`、`/runs/:id`）：
+  徽章/空态/错误条/分页条变了样，功能应不变——**空态的居中与灰阶是这批里最可能想调回来的地方**。
+
+---
 
 ### D.10 · 2026-09-26 （第十批） 提交页按策略预填「上一次提交的参数」
 
@@ -117,135 +224,13 @@ Python 策略**。
 
 ### D.09 · 2026-09-26 （第九批） 网格步长由绝对价格改为比例
 
-- **起因（用户实测报的异常）**：`GridStep=10` 在 `SZSE/000001`（锚价 11.94）上每一档都远在
-  市价之外，一轮 **610 笔委托、0 笔成交**；同一份参数在 `SSE/600519`（约 1558）上只有
-  0.64% 的间距，照常成交。故它是**绝对价差**，在低价标的上结构性失效。用户以为
-  "同参数直接跑 QTT 有成交"，实为**换了标的**——那轮的 `MissingRateKeys` 指认它跑的是
-  `SSE/600519`（记此以免后人照抄这个比较）。
-- **改法（用户拍板：线性比例）**：档位价 `锚价 × (1 ∓ 步长 × 档号)`、平仓价
-  `开仓成交价 × (1 ± 步长)`，步长是**比例**（`0.01 = 1%`）。落点三处：① 引擎仓
-  `test/PythonStrategyGrid/grid_strategy.py` 及其运行副本 `bin/Release/grid_strategy.py`；
-  ② C++ 孪生 `test/TestStrategyGrid/GridStrategy.cpp/.h` 与其单测；③ **平台已上传的那份**
-  （源码 + manifest 快照 + 库里那一行，见下）。
-- **构造期校验（两侧同源）**：`0 < GridStep × GridCount < 1`（最远一档仍为正价）。Python 抛
-  `ValueError`（中文消息落在作业目录的 `stderr.txt`，用户看得见）；C++ 抛 `std::logic_error`，
-  且 `Main.cpp` 新增 `try/catch` 把它挡成**退出码 1「宿主启动失败」**，不再走 abort
-  （`RunResult.h` 记明 MSVC 下 abort 与「引擎报告失败」同为码 3，只能靠结果文件消歧）。
-- **连带项**：三份 `TestStrategyGrid.json` 的 `10.0 → 0.01`；manifest 的默认值 `0.01`、
-  标签改「网格步长(比例, 0.01=1%)」、`minimum` 由 `0` 收到 `0.0001`（0 必被拒启，不该在表单里可选）；
-  真引擎验收基线重取（下表）；`job-workspace.md` 新增 §6.3 并在 §6.2 加指针、计划 §11 追加
-  「口径变更」段；`UnitTests.exe` 与两个 `TestStrategyGrid.exe` 重编（**旧 exe 配新配置会
-  静默 0 成交**，故必须跟着重编）。
-- **基线重取（同链路、同输入、只换 `GridStep`）**：
-
-  | 指标 | 旧（绝对 10.0） | 新（比例 0.01） |
-  | ---- | ---- | ---- |
-  | `TradeCount` | 84 | **34** |
-  | `OrderCount` | 654 | **629** |
-  | `Balance`（无种子库） | 999377.0899999999 | **999257.8562340003** |
-  | `BarMarketDataCount` | 2928 | 2928（不变） |
-  | `PositionDetail` | 290 | 282 |
-
-  成交变少是**预期**：旧值在 `600519` 上等于 0.64% 间距，新值 1% 更宽。
-  **带种子库那份 `998951.4506464996` 是旧口径的**（本机种子库不在盘上，无法重取），
-  与新版余额不可相减——「费用三项 = 两份基线的差」这条判据只在旧口径内成立，已写进
-  `job-workspace.md` §6.3。
-- **验证**：C++ 单测 **112/112、743 断言全过**（新增 1 条"比例越界构造期拒启"用例）；
-  做**两次变异**——把两处公式改回绝对形态、把比例上界拿掉——分别转红且只红对应用例，
-  两次都已还原并重建；真引擎验收 **4 项全过**；**两个孪生在同一输入下逐位同值**
-  （`629 / 34 / 999257.8562340003`，C++ 那轮在 `bin/Debug` 下跑）；比例守卫逐点探过：
-  `0.01×5` ✓、`0.1999×5` ✓、`0.2×5` ✗、`10×5` ✗、`0` ✗、`-0.01` ✗、`GridCount=0` ✗。
-- **副作用（用户需知道）**：① 平台那份**已上传的版本 1 是就地改写**——源码、`manifest.json`
-  快照、库里的 `ManifestJson` 与 `SourceHash` 三处一起动（提交页读的是库里那份，落单就会
-  "界面显示旧默认值、实跑新代码"）。旧件已复制留档在
-  `%TEMP%/quant-cdp/uploaded-version-1-backup-20260926/`；**策略版本本应不可变**，就地改是
-  用户点名的落点，若要改走"上传新版本"则须重走一遍上传接口。② 引擎仓 **8 个文件已改但
-  未提交**（AI 不代提交引擎仓，待用户定）。③ `bin/Release/result.json` **未动**；
-  `bin/Debug` 下多了一轮真回测产物；本轮验收产物在 `backend/_acc_tmp/ratio-20260926/`。
-
----
-
-### D.08 · 2026-09-26 （第八批） P5 可视化：权益曲线与回撤 + 5 张结果明细表
-
-- **交付（后端，不新增 Python 依赖）**：新模块
-  `backend/app/services/result_database.py`——白名单 5 张表
-  （`Capital` / `Trade` / `Order` / `Position` / `PositionDetail`）、
-  只读连接 contextmanager、`read_capital_series` 与 `read_result_table_page`；
-  `catalog/schemas.py` 增 `EquityPointResponse` / `RunEquityResponse` /
-  `ResultTableResponse`；`routers/runs.py` 增
-  `GET /api/runs/{id}/equity` 与 `GET /api/runs/{id}/tables/{table_name}`
-  （`offset` / `limit` 走 `Query` 约束），加两个私有前置
-  `_require_finished_run`（非终态 → **409**）与
-  `_resolve_result_database_path`（`resolve()` 后必须仍在作业目录内）。
-- **交付（前端）**：`echarts ^6.1.0` + `vue-echarts ^8.3.0`（已拍板，
-  按需 `use([...])` 注册）；`api/types.ts` 加结果库契约与 5 张表的**镜像**清单、
-  `api/runs.ts` 加两个请求函数；`domain/equity.ts`（**纯函数**：
-  `buildEquitySeries` / `summarizeEquity`）+ 15 项 spec；`format.ts` 加
-  `formatPercentRatio`；新组件 `EquityChartPanel.vue`（概要四项 + **两张独立的图**：
-  权益曲线与回撤面积图，各带 `dataZoom`）与 `ResultTablePanel.vue`
-  （5 个页签按需取数、表头取响应的 `columns`、`PaginationBar`）；
-  `RunDetailView.vue` 在终态挂载这两节，非终态显示一句提示（复用既有
-  `watch(isTerminal)`，翻成终态即取数，不必再等一次 2 秒轮询）。
-- **验收**：后端 **432 项通过 / 4 项 deselect**（新增 26 项，见下）；
-  前端 `type-check` 无错、`vitest run` **75 项全绿**（6 个 spec）、
-  `vite build` 成功——ECharts 只进详情页那一块 chunk（559 kB / gzip 190 kB，
-  按路由懒加载，首屏不付这份钱）。**真引擎验收 4 项全过**：在既有的
-  `test_a_real_bar_backtest_runs_through_the_platform` 的 `async with` 块内补了
-  `/equity` 与 `/tables/Trade`、`/tables/Order` 三次请求（该测试原有的断言都在
-  块外，而 API 调用必须在块内）。
-- **代理链路冒烟 12 项**（沿用归档 D.07 的一次性临时库手法，项目自带的
-  `backend/data/` 与 `runs/` 一行未碰）：权益 62 点、首点 `1000000.0`、
-  末点 `999377.0899999999`、`Trade` 总 84（本页 5 行、含 `TradingDay` 列）、
-  `Order` 总 654、`Position` 116、`PositionDetail` 290，以及
-  `BarMarketData` **404**（真实存在但未开）、`limit=101` **422**、`offset=-1`
-  **422**、`/files` 回归 200。
-- **验收判据订正**：计划 §11 原文的「`1000000.0 → 999549.73`」中，`999549.73`
-  是 **P0 有种子库那轮的基线，而那批产物已不在盘上**（`runs/` 已被清掉）。
-  改为**自洽形式**：首点恒为 `1000000.0`（`Capital` 的种子行 = 初始资金）、
-  末点与该轮 `result.json.Balance` **逐位相等**。这条不依赖种子库在不在，
-  比钉死一个常数更强，本轮实测即 `999377.0899999999`（无种子库变体）。
-- **对着真结果库核实过的引擎事实**（写进断言之前先只读验过，不是推测）：
-  `Capital` 22 列、PK `(TradingDay, AccountId)`、**首行是种子行**
-  （`Deposit` = 初始资金，`Balance` = `PreAvailable` = `1000000.0`），
-  首行 `TradingDay` == `StartTradingDay`、末行 == `LastTradingDay`；
-  **`Order` 是 SQLite 保留字**，不加引号直接 `near "Order": syntax error`；
-  `?mode=ro` **确实是只读的**（对同一文件写报 `attempt to write a readonly
-  database`）；行值只有 `str`/`int`/`float`（无 BLOB、无 NULL）。
-- **三处必须写对的地方**：① **`as_uri()` 要求绝对路径**，先 `resolve()`，
-  否则 `ValueError: relative paths can't be expressed as file URIs`；
-  ② **`db_path` 视为不可信输入**——它是引擎侧写进 `result.json` 再由调度侧镜像
-  入库的值，而策略是任意 Python、**它同样可以被伪造**，故与产物路径同等对待；
-  ③ **`asyncio.to_thread` 本仓首例**：sqlite3 是阻塞 API 且连接不能跨线程，
-  把「开连接 → 查询 → 关连接」整个放进同一个 worker；与 P4 直接内联文件 IO
-  的做法**有意分叉**（一条 `COUNT(*)` + 一页 `SELECT` 的耗时随库长大，
-  目标是云上多用户，不该占着事件循环）。
-- **回撤不在后端算**：端点只回 `Capital` 的原样逐日序列，回撤与收益率由前端
-  纯函数派生。理由是它是**派生数据**——后端一旦算了，前端要点另一条曲线就再加
-  一个字段，接口会随图表变化；而前端这份是纯逻辑，正好进 vitest 单测。
-  `summarizeEquity` 用**单遍峰值跟踪**而不是 `Math.max(...balances)`
-  （大序列会撞上实参个数上限），且比较用 `>` 而非 `>=`（等深时记**第一个**谷底）。
-- **矩阵式变异检查**（本项目既定手法，改坏即转红、改完原样恢复）：
-  去掉表名白名单 → 白名单组转红；表名不加引号 → `Order` 那条转红
-  （`sqlite3.OperationalError: near "Order": syntax error`）；
-  去掉 `is_relative_to` → 穿越用例转红；去掉 `TERMINAL_RUN_STATUSES` 判定 →
-  「运行中」用例转红；去掉 `?mode=ro` → 只读用例转红。**只读这条是断言不是注释**：
-  对 contextmanager 出来的连接执行 `CREATE TABLE` 必须抛 `OperationalError`。
-- **两处 Harness 红线当场处理**：`EquityChartPanel`（215 行）与
-  `ResultTablePanel`（224 行）都越过了「单文件 200 行须先请示」——
-  在**不牺牲可读性**的前提下压回 199 / 198 行（单行三属性元素、抽
-  `describeTabClass` 辅助、收紧文档注释），未改变任何行为。
-- **新记的已知缺口**（见 `platform-plan.md` §12.19–12.22）：
-  另 12 张表在界面上看不到（含 2928 行的 `BarMarketData`）；
-  **表名清单是两处真相**（后端白名单 + 前端镜像，漏改一处只会让某个页签 404）；
-  **盘中回撤不可得**（`Capital` 只有逐日结算权益，`Margin`/`MarketValue`
-  在本样本里恒为 0，图上画的是逐日而非日内）；
-  **失败的轮看不到部分结果**（`db_path` 只在 `result.json` 写成功后才镜像入库，
-  取消/超时/启动失败的轮一律空串 → 404）。**不做**：K 线图、多轮曲线叠加（P6）、
-  图表导出图片、明细表导出 CSV、大表虚拟滚动（一页最多 100 行）。
-- **文档回写**：`platform-plan.md`（§9 新增「P5 落地范围」六条 + 排序与分页说明、
-  §10 页面表 `/runs/:id` 改 ✅ P5 并补 ECharts 落地实况、
-  §11 的 P5 行改 ✅ 并**订正 `999549.73` 那条判据**、§12 新增缺口 19–22、
-  §13 新增「P5 开工前拍板表」）、`PROGRESS.md`（本条 + R.01 标题与 P5 行）。
+- **已归档**：原文见 [`PROGRESS-archive.md`](PROGRESS-archive.md) 的 `D.09`
+  （加 D.11 后主文件越过 50 KB 上限时移出）。该条里**仍在生效的结论**：
+  `GridStep` 是**比例**（`0.01 = 1%`）、档位价与平仓价两条公式、合法区间
+  `0 < GridStep × GridCount < 1`、越界在**构造期**拒启（两侧孪生同源校验），
+  以及**重取后的真引擎基线**（成交 `34`、委托 `629`、余额 `999257.8562340003`）
+  —— 基线表在 `job-workspace.md` §6.3，单位契约另见下方备注。
+  **旧口径与新口径的数字不可相减**；引用该条其余细节前，先 grep 归档核实原文。
 
 ---
 
@@ -296,11 +281,11 @@ Python 策略**。
   **P4 的验收项（计划 §11 原文的「登录 → 上传策略 → 提交 → 看指标 → 下载」）
   已由归档 D.07 的代理冒烟 13 项证明链路成立，剩下的「真引擎一轮真回测走完界面」
   属人工验收，须由用户在浏览器里走一遍**（步骤见 `platform-plan.md` §8.1）。
-- **P5 可视化 ✅ 已完成**（见上 D.08）：权益曲线与回撤曲线、5 张结果表的明细分页表。
+- **P5 可视化 ✅ 已完成**（见归档 D.08）：权益曲线与回撤曲线、5 张结果表的明细分页表。
   两条读端点（`/equity`、`/tables/{table}`）落地在
   `services/result_database.py`；前端两个面板 + `domain/equity.ts` 纯函数。
   **「曲线与实测数据点吻合」的判据已改成自洽形式**（首点 `1000000.0`、
-  末点与该轮 `result.json.Balance` 逐位相等），理由见 D.08 与计划 §11。
+  末点与该轮 `result.json.Balance` 逐位相等），理由见归档 D.08 与计划 §11。
   **P5 的浏览器人工验收（打开一个 succeeded 的轮看曲线与 5 个页签）
   与 P4 那条一样，须由用户走一遍**（步骤见 `platform-plan.md` §8.3，
   前置与 §8.2 相同）。
@@ -309,7 +294,14 @@ Python 策略**。
   另给「重置为默认值」按钮。**它的手工验收（选策略 → 参数与字段被带出且提示条可见
   → 点重置回到默认且提示条消失 → 再选一次该策略仍带出 → 换一个没跑过的策略为纯默认、
   无提示条）与 P4/P5 那两条一样，须由用户在浏览器里走一遍**（前置与 §8.2 相同）。
-- **⚠️ 参数语义变更：网格步长已由绝对价格改为比例**（见上 D.09）：
+- **UI 组件库 ✅ 已引入**（见上 D.11，2026-09-26 用户提出）：Element Plus `^2.14.6`，
+  地基 4 个共用件 + 两个最脏页（`/runs`、`/runs/new`）换库；主题五族色阶经
+  `html:root` 的 `--el-*` 覆盖对齐到既有 `@theme` 令牌。**它的手工验收（`/runs` 四个下拉与
+  筛选的 × 清空、九列对齐、分页、中键开新标签页；`/runs/new` 的预填整条流程；
+  EP 按钮/标签是否呈品牌蓝 `#1d4ed8`；四个共用页面回归）与 P4/P5 那两条一样，
+  须由用户在浏览器里走一遍**（清单见 D.11 末，前置与 §8.2 相同）。
+  **本批改动操作方式一处**：筛选不再靠选中列表里的「全部」，改成 placeholder + × 清空。
+- **⚠️ 参数语义变更：网格步长已由绝对价格改为比例**（见归档 D.09）：
   `GridStep` 现为**比例**（`0.01 = 1%`），旧值 `10.0` 这种绝对价格写法
   **在构造期就被拒**（合法区间 `0 < GridStep × GridCount < 1`，两侧
   Python 与 C++ 同源校验）。连带后果：**`test_real_engine_acceptance.py`
@@ -354,11 +346,11 @@ Python 策略**。
 | 前端样式 | **Tailwind** | 与参考项目 `defect_tools` 的纯 CSS **有意分叉** |
 | 授权选人 | **受限用户目录**（只回 `id` + `display_name`） | 已于 P4 落地并收口，见归档 D.07 与归档 `Q.05` |
 | Tick 选项 | **表单不显示**，提交侧继续 400 | 三档撮合语义仍未定，不阻塞 P4 |
-| 前端依赖 | **最小集**：原生 `fetch`，不引 axios、不引 UI 库 | 表格/分页/模态框等自写，见归档 D.07 |
-| 前端测试 | **vitest 只测纯逻辑**（`environment: node`） | 不装 `@vue/test-utils` 与 jsdom；要测组件时再加 |
+| 前端依赖 | **最小集**：原生 `fetch`，不引 axios、不引 UI 库 | 表格/分页/模态框等自写，见归档 D.07。**2026-09-26 起 UI 库一项被 Element Plus `^2.14.6` 取代**（见 D.11）；**axios / sass 两条仍然有效** |
+| 前端测试 | **vitest 只测纯逻辑**（`environment: node`） | 不装 `@vue/test-utils` 与 jsdom；**要测组件时再加**。**2026-09-26 正是按本行自己预设的条件加装**（jsdom + @vue/test-utils；全局仍 `node`，组件 spec 逐文件声明 jsdom），见 D.11；当时的存疑原文已归档为 `Q.07` |
 | 前端页面范围 | **闭环 + 最小 admin 用户页** | 不含 `/compare`、`/settings`；**权益曲线与明细分页表已于 P5 补齐** |
 | 前端版本号 | **照抄本机同族项目的已验证组合** | router 5 / pinia 4 / vitest 5 / TS 7 都是主版本跳跃，不追 |
-| 结果表明细范围 | **精选 5 张**：`Capital` / `Trade` / `Order` / `Position` / `PositionDetail` | P5 拍板；**不加列表端点**，表名清单前端镜像一份，见 D.08 |
+| 结果表明细范围 | **精选 5 张**：`Capital` / `Trade` / `Order` / `Position` / `PositionDetail` | P5 拍板；**不加列表端点**，表名清单前端镜像一份，见归档 D.08 |
 | 回撤在哪算 | **前端纯函数派生**（`domain/equity.ts`） | P5 拍板；后端只回原样逐日序列，接口不随图表变化 |
 | 阻塞的库调用 | **`asyncio.to_thread`**（本仓首例，P5 引入） | sqlite3 阻塞且连接不能跨线程；与 P4 内联文件 IO 有意分叉 |
 
@@ -399,14 +391,6 @@ Python 策略**。
   PBKDF2 的 260k 迭代只起减速作用。若要加，需定阈值与锁定时长
   （单机部署，进程内计数即可，不必上 Redis）。
 
-- **前端组件测试的 DOM 环境未定**（2026-09-26 修提交按钮时暴露）：
-  本仓前端只有纯函数 spec，`vitest` 跑在 `environment: node` 下，而 SFC 一律按 SSR 模式
-  编译（只有 `ssrRender`、没有 `render`），故 `createRenderer` 那条零依赖的组件测试
-  路子走不通；修提交按钮时写好的 `ParameterForm.spec.ts`（断言「敲进父状态的值
-  就是敲进去的那个」）**因此没能入库**，暂存在
-  `%TEMP%/quant-cdp/parked-specs-20260926/`。真跑组件测试要加 **`jsdom` +
-  `@vue/test-utils`** 两个 devDependencies —— 按 Harness §2 须先经用户同意，故记此待定；
-  不加就继续靠真实浏览器的 CDP 探针验收（本轮即如此）。
 ---
 
 ## 备注
@@ -425,11 +409,15 @@ Python 策略**。
   手工验收想用一次性库而不碰项目自带的 `backend/data/`，就把
   `QUANT_DATABASE_URL` / `QUANT_RUNS_ROOT` / `QUANT_USER_LIBRARY_ROOT`
   指到 `%TEMP%` 下（归档 D.07 的冒烟即如此）。
-- **前端技术栈与版本锁定**（归档 D.07，D.08 补两个图表依赖）：Vue 3.5 / TS 6.0 /
+- **前端技术栈与版本锁定**（归档 D.07，归档 D.08 补两个图表依赖，D.11 补 UI 库）：
+  Vue 3.5 / TS 6.0 /
   Vite 8.3 / Tailwind v4（CSS 优先，**没有 `tailwind.config.js`**）/ Pinia 3 /
-  vue-router 4.6 / vitest 4（`environment: node`）；D.08 起加
+  vue-router 4.6 / vitest 4（`environment: node`）；归档 D.08 起加
   **`echarts ^6.1.0` + `vue-echarts ^8.3.0`**（P5 拍板的一对，按需注册，
-  ECharts 只进详情页那块 chunk）。运行时依赖共五个，**无 UI 库、无 axios、无 sass**。
+  ECharts 只进详情页那块 chunk）；D.11 起加 **`element-plus ^2.14.6`**
+  （**显式 import + 全量 CSS**，不做 `app.use(ElementPlus)` 全量注册、不引任何
+  自动导入插件、不引 sass）。运行时依赖共六个，**无 axios、无 sass**；
+  devDependencies 同批加 **`jsdom ^30.1.1` + `@vue/test-utils ^2.5.1`**（组件测试用，见 D.11）。
 
 - **`argv[0]` 传裸文件名是现行选择, 不是硬约束**（**D.06 实测订正**）：
   带路径的形态（正斜杠相对、反斜杠绝对）实测同样跑完整轮、退出码 0，
@@ -449,7 +437,7 @@ Python 策略**。
   它能挡住界面越权与误访问，**挡不住恶意读盘**。开放给不可信用户之前，
   系统级隔离是必须的前置门槛。
 - **`BarPreces` 是引擎侧既有拼写**，非笔误，不可擅改，平台配置键须逐字一致。
-- **策略参数的单位是契约的一部分**（D.09 起）：网格步长 `GridStep` 是**比例**
+- **策略参数的单位是契约的一部分**（归档 D.09 起）：网格步长 `GridStep` 是**比例**
   （`0.01 = 1%`），档位价 `锚价 × (1 ∓ 步长 × 档号)`、平仓价
   `开仓成交价 × (1 ± 步长)`，合法区间 `0 < GridStep × GridCount < 1`
   （最远一档仍须为正价）。越界在**构造期**抛错、不进回测（两侧孪生同源校验，
@@ -490,13 +478,13 @@ Python 策略**。
   13:30 那轮的 `20260926_133008_119`（`SSE/600519`、`OrderCount=654`、`TradeCount=84`、
   `Balance=999377.0899999999`），D.06 探针的 `20260925_225502_898` 已被那轮盖掉；
   P0 那份带种子库的七项基线数字已抄进 `job-workspace.md` §6.1 与归档 D.01，信息未丢，
-  但**文件本身已不是原物**。⚠️ 步长改比例后这四个数都是旧口径，现值见 D.09 与 §6.3）；
+  但**文件本身已不是原物**。⚠️ 步长改比例后这四个数都是旧口径，现值见归档 D.09 与 §6.3）；
   ② 多出 `BackTest_<RunId>.db`、`log/`、`Dump/<RunId>/` 等产物；
   ③ 另有一次在系统临时目录里跑的复测（不落在两个仓内）。
   **未改任何源码，也未删任何文件。** 若要还原，`result.json` 需重跑一轮
   （要带种子库才能得到 P0 那份数）。
 - **`backend/_acc_tmp/` 是真引擎验收的 pytest 临时根**（约 22 MB，
-  四个用例各一个作业目录；D.09 的重取基线那轮收在其下的 **`ratio-20260926/`**
+  四个用例各一个作业目录；归档 D.09 的重取基线那轮收在其下的 **`ratio-20260926/`**
   子目录里，与旧口径的产物分开放）。它已并入 `.gitignore`（连同 `.gitignore` 的
   这条注释一起提交），故不会误入库；用例的 docstring 也写明了规范调用形态
   `pytest -m real_engine … --basetemp=_acc_tmp`（`%TEMP%` 下的临时根在

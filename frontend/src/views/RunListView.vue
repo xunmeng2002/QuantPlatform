@@ -7,6 +7,7 @@
  */
 
 import { computed, onMounted, ref, watch } from 'vue';
+import { ElButton, ElCheckbox, ElOption, ElSelect, ElTable, ElTableColumn } from 'element-plus';
 import { RouterLink } from 'vue-router';
 
 import { ApiError } from '../api/client';
@@ -104,99 +105,107 @@ onMounted(() => {
   <section>
     <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <h1 class="text-lg font-semibold text-slate-900">回测运行</h1>
+      <!-- tag="a" + href 而不是 @click="router.push": 中键 / 右键「在新标签页打开」是真实用法,
+           丢掉真锚点就没了. navigate 会自己 preventDefault, 左键仍是单页跳转. -->
       <RouterLink
-        class="rounded bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-strong"
+        v-slot="{ navigate, href }"
+        custom
         :to="{ name: 'run-submit' }"
       >
-        新建回测
+        <ElButton
+          tag="a"
+          type="primary"
+          :href="href"
+          @click="navigate"
+        >
+          新建回测
+        </ElButton>
       </RouterLink>
     </header>
 
+    <!-- 筛选 / 排序 / 每页. 「全部」不再是一个 value="" 的选项 —— el-option 的 value 为空串时
+         EP 永远显示不出它的标签 (空串被判为"未选中"), 改用 placeholder + 右上角的 × 清空;
+         value-on-clear 必须显式写 '' (EP 的清空默认值是 undefined, 与 domain 的判据不符). -->
     <div class="mb-4 grid gap-3 sm:grid-cols-4">
       <label class="flex flex-col gap-1 text-sm text-slate-600">
         状态
-        <select
+        <ElSelect
           v-model="statusFilter"
-          class="rounded border border-line bg-surface px-2 py-1.5 text-sm"
+          clearable
+          placeholder="全部状态"
+          :value-on-clear="''"
           @change="reloadFromFirstPage"
         >
-          <option value="">
-            全部
-          </option>
-          <option
+          <ElOption
             v-for="status in RUN_STATUSES"
             :key="status"
+            :label="describeRunStatus(status).label"
             :value="status"
-          >
-            {{ describeRunStatus(status).label }}
-          </option>
-        </select>
+          />
+        </ElSelect>
       </label>
 
       <label class="flex flex-col gap-1 text-sm text-slate-600">
         策略
-        <select
+        <ElSelect
           v-model="strategyFilter"
-          class="rounded border border-line bg-surface px-2 py-1.5 text-sm"
+          clearable
+          placeholder="全部策略"
+          :value-on-clear="''"
           @change="reloadFromFirstPage"
         >
-          <option value="">
-            全部
-          </option>
-          <option
+          <ElOption
             v-for="strategy in strategyCatalog.strategies"
             :key="strategy.id"
+            :label="strategy.name"
             :value="strategy.id"
-          >
-            {{ strategy.name }}
-          </option>
-        </select>
+          />
+        </ElSelect>
       </label>
 
+      <!-- 排序与每页都**没有**空值: 清空它们会让 sort_by 变成空串, 后端直接判非法.
+           所以这两个不 clearable, 也就不需要 placeholder. -->
       <label class="flex flex-col gap-1 text-sm text-slate-600">
         排序
-        <select
+        <ElSelect
           v-model="sortBy"
-          class="rounded border border-line bg-surface px-2 py-1.5 text-sm"
           @change="reloadFromFirstPage"
         >
-          <option
+          <ElOption
             v-for="sortColumn in RUN_SORT_COLUMNS"
             :key="sortColumn"
+            :label="describeRunSortColumn(sortColumn)"
             :value="sortColumn"
-          >
-            {{ describeRunSortColumn(sortColumn) }}
-          </option>
-        </select>
+          />
+        </ElSelect>
       </label>
 
       <label class="flex flex-col gap-1 text-sm text-slate-600">
         每页
-        <select
-          v-model.number="limit"
-          class="rounded border border-line bg-surface px-2 py-1.5 text-sm"
+        <ElSelect
+          v-model="limit"
           @change="reloadFromFirstPage"
         >
-          <option
+          <ElOption
             v-for="pageSize in PAGE_SIZE_OPTIONS"
             :key="pageSize"
+            :label="String(pageSize)"
             :value="pageSize"
-          >
-            {{ pageSize }}
-          </option>
-        </select>
+          />
+        </ElSelect>
       </label>
     </div>
 
-    <label class="mb-4 flex items-center gap-2 text-sm text-slate-600">
-      <input
+    <!-- el-checkbox 的根节点自己就是一个 <label>, 所以这里不能再套一层 label (嵌套 label 是非法
+         HTML, 而且点一下会切两次), 文字改为它的子节点. -->
+    <div class="mb-4">
+      <ElCheckbox
         v-model="descending"
-        type="checkbox"
-        class="size-4 accent-blue-700"
         @change="reloadFromFirstPage"
       >
-      倒序
-    </label>
+        倒序
+      </ElCheckbox>
+    </div>
 
     <ErrorBanner
       :message="errorMessage"
@@ -212,78 +221,77 @@ onMounted(() => {
     />
 
     <template v-else>
-      <div class="overflow-x-auto rounded-lg border border-line bg-surface">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-50 text-left text-xs text-slate-500">
-            <tr>
-              <th class="px-3 py-2 font-medium">
-                提交时间
-              </th>
-              <th class="px-3 py-2 font-medium">
-                策略
-              </th>
-              <th class="px-3 py-2 font-medium">
-                状态
-              </th>
-              <th class="px-3 py-2 font-medium">
-                引擎判定
-              </th>
-              <th class="px-3 py-2 font-medium">
-                交易日区间
-              </th>
-              <th class="px-3 py-2 font-medium">
-                耗时
-              </th>
-              <th class="px-3 py-2 text-right font-medium">
-                交易笔数
-              </th>
-              <th class="px-3 py-2 text-right font-medium">
-                余额
-              </th>
-              <th class="px-3 py-2 font-medium" />
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-line">
-            <tr
-              v-for="run in runs"
-              :key="run.id"
-              class="hover:bg-slate-50"
-            >
-              <td class="px-3 py-2 whitespace-nowrap text-slate-600">
-                {{ formatDateTime(run.submitted_at) }}
-              </td>
-              <td class="px-3 py-2">
-                {{ strategyCatalog.nameFor(run.strategy_id) }}
-              </td>
-              <td class="px-3 py-2">
-                <StatusBadge v-bind="describeRunStatus(run.status)" />
-              </td>
-              <td class="px-3 py-2">
-                <StatusBadge v-bind="describeEngineVerdict(run.is_success)" />
-              </td>
-              <td class="px-3 py-2 whitespace-nowrap text-slate-600">
-                {{ formatTradingDay(run.start_trading_day) }} ~ {{ formatTradingDay(run.end_trading_day) }}
-              </td>
-              <td class="px-3 py-2 whitespace-nowrap text-slate-600">
-                {{ formatDuration(run.duration_ms) }}
-              </td>
-              <td class="px-3 py-2 text-right text-slate-600">
-                {{ formatCount(run.trade_count) }}
-              </td>
-              <td class="px-3 py-2 text-right text-slate-600">
-                {{ formatAmount(run.balance) }}
-              </td>
-              <td class="px-3 py-2 text-right">
-                <RouterLink
-                  class="text-brand hover:underline"
-                  :to="{ name: 'run-detail', params: { id: run.id } }"
-                >
-                  详情
-                </RouterLink>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <!-- 不加 row-key: EP 里它的全部用途是选中 / 展开 / 树形 / 当前行的记账, 本表一个都不用,
+           2 秒轮询整体换数据也是按位置 patch. 空表头就是省掉 label (它没有默认值). -->
+      <div class="overflow-hidden rounded-lg border border-line">
+        <ElTable :data="runs">
+          <ElTableColumn label="提交时间">
+            <template #default="{ row }">
+              <span class="whitespace-nowrap">{{ formatDateTime(row.submitted_at) }}</span>
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn label="策略">
+            <template #default="{ row }">
+              {{ strategyCatalog.nameFor(row.strategy_id) }}
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn label="状态">
+            <template #default="{ row }">
+              <StatusBadge v-bind="describeRunStatus(row.status)" />
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn label="引擎判定">
+            <template #default="{ row }">
+              <StatusBadge v-bind="describeEngineVerdict(row.is_success)" />
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn label="交易日区间">
+            <template #default="{ row }">
+              <span class="whitespace-nowrap">
+                {{ formatTradingDay(row.start_trading_day) }} ~ {{ formatTradingDay(row.end_trading_day) }}
+              </span>
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn label="耗时">
+            <template #default="{ row }">
+              <span class="whitespace-nowrap">{{ formatDuration(row.duration_ms) }}</span>
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn
+            label="交易笔数"
+            align="right"
+          >
+            <template #default="{ row }">
+              {{ formatCount(row.trade_count) }}
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn
+            label="余额"
+            align="right"
+          >
+            <template #default="{ row }">
+              {{ formatAmount(row.balance) }}
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn align="right">
+            <template #default="{ row }">
+              <RouterLink
+                class="text-brand hover:underline"
+                :to="{ name: 'run-detail', params: { id: row.id } }"
+              >
+                详情
+              </RouterLink>
+            </template>
+          </ElTableColumn>
+        </ElTable>
       </div>
 
       <PaginationBar

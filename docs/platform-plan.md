@@ -737,8 +737,8 @@ npm run dev     # http://localhost:5173/
 | ---- | ---- | ---- | ---- |
 | `/login` | 登录 | 换取 JWT 存 localStorage；失败文案用后端原文 | ✅ P4 |
 | `/` | —— | 重定向到 `/runs` | ✅ P4 |
-| `/runs` | 运行列表 | 状态徽章 / 引擎判定 / 交易日区间 / 耗时 / 交易笔数 / 余额；按状态与策略筛选、按指标排序、分页；**存在非终态轮时 2 s 轮询** | ✅ P4 |
-| `/runs/new` | 新建回测 | 选策略 → 选版本（缺省最新）→ **按 manifest 动态生成参数表单** → 提交；`match_mode` 固定 `Bar`。**选中策略时按「你上次提交的那一份」预填**（策略参数 + 标的/日期/初始资金/周期），并给一个**「重置为默认值」**按钮（见 §11 的增补段） | ✅ P4（预填 2026-09-26 增补） |
+| `/runs` | 运行列表 | 状态徽章 / 引擎判定 / 交易日区间 / 耗时 / 交易笔数 / 余额；按状态与策略筛选、按指标排序、分页；**存在非终态轮时 2 s 轮询**。**控件与表格已换成 Element Plus**（见 §12.18 与 §13 的 EP 拍板表） | ✅ P4（EP 化 2026-09-26） |
+| `/runs/new` | 新建回测 | 选策略 → 选版本（缺省最新）→ **按 manifest 动态生成参数表单** → 提交；`match_mode` 固定 `Bar`。**选中策略时按「你上次提交的那一份」预填**（策略参数 + 标的/日期/初始资金/周期），并给一个**「重置为默认值」**按钮（见 §11 的增补段）。**控件已换成 Element Plus，但表单外壳仍是原生 `<form>`**（见 §13） | ✅ P4（预填 2026-09-26 增补，EP 化 2026-09-26） |
 | `/runs/:id` | 运行详情 | 概览 / 绩效指标 / 引擎数据镜像 / **权益曲线与回撤曲线** / **5 张结果表的明细分页表** / 提交参数与引擎配置 / stdout·stderr 尾巴 / 产物清单与下载 / 取消；未结束时 2 s 轮询 | ✅ P5（**结果库两节只在终态挂载**：未结束时后端回 409，前端干脆不请求，翻成终态由既有的 `watch(isTerminal)` 自动接上） |
 | `/strategies` | 策略管理 | 列表 + 上传面板 + 可见性 + 归属（经用户目录映显示名） | ✅ P4 |
 | `/strategies/:id` | 策略详情 | 版本列表（含该版本 manifest 的参数预览）+ 传新版本 + **授权编辑器（目录选人）** + 软删 | ✅ P4 |
@@ -756,7 +756,9 @@ npm run dev     # http://localhost:5173/
 应用详情那一块 chunk（559 kB / gzip 190 kB），**按路由懒加载**，首屏不付这份钱。
 P4 的依赖当时只有 `vue` / `vue-router` / `pinia` 三个（**无 UI 组件库**：
 表格、分页、模态框、提示条、表单控件都是自己用 Tailwind 写的，见 §13 的
-P4 拍板表）。
+P4 拍板表）。**这一条只在 P4 成立**：2026-09-26 起引入 **Element Plus**，
+`/runs` 与 `/runs/new` 两页的控件与表格先换（见 §12.18 与 §13 的 EP 拍板表），
+其余页面分批跟进。
 
 ---
 
@@ -895,11 +897,31 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
 17. **生产部署仍靠 Vite 代理**（两个终端），FastAPI 托管 `dist/` 或反向代理
     留 P8。**同一条里还有：前端没有 e2e**，闭环靠 §8.2 的手动验收——
     这本就是计划原本的验收方式，不是临时降级。
-18. **不引 UI 组件库的代价**：表格、分页、模态框、提示条、表单控件都是自写的
+18. **不引 UI 组件库的代价**（**2026-09-26 起部分作废，见下方增补**）：
+    表格、分页、模态框、提示条、表单控件都是自写的
     （14 个 `components/`）。这是"最小集"的直接后果；若日后要换
     Element Plus，那批里只有布局件需要留。另：Tailwind v4 是 **CSS 优先**，
     主题令牌写在 `src/style.css` 的 `@theme` 块里，**没有 `tailwind.config.js`**
     （照 v3 的教程去找那个文件会找不到）。
+
+    **增补（2026-09-26，已完成第一批）**：本条当时的预判落地了——引入
+    **Element Plus `^2.14.6`**，先做**地基 + 两个最脏页**：4 个纯展示共用件
+    （`StatusBadge` / `EmptyNotice` / `ErrorBanner` / `PaginationBar`）换内部实现
+    （对外 props/emits **一字未改**）、`/runs` 的筛选下拉 / 倒序 / 表格、
+    `/runs/new` 与 `ParameterField` 的控件。**布局件如预判一样留下**
+    （`AppLayout` / `FilePicker` / `DirectoryPicker` / `ResultTablePanel` /
+    `EquityChartPanel`），`LoadingNotice` 也留（`role="status"`，EP 没有等价物）。
+    逐条的取舍见 §13 的 EP 拍板表，四条跨层契约（参数下标字符串 / 分页 offset /
+    `{label,tone}` / 校验语义归 `domain/`）在本批里全部原样存活。
+
+    新增的代价（实测数字）：主 CSS **17,372 B → 382,097 B（gzip 52.5 kB）**——
+    这是"显式 import + 全量 CSS"这个选择的已知代价，不是意外；ECharts 那块
+    chunk 不受影响（559 kB → 559 kB）。想要小体积的退路是按需引
+    `theme-chalk/el-<组件>.css`（本批用到的集合约 80 kB），**只需改 `main.ts` 一行**。
+    另外三笔**仍是缺的**：`ElMessageBox`（模态框仍是 `ConfirmDialog`，形态是声明式
+    与命令式之别）、`ElMessage` toast（全站今天没有 toast 通道，那是产品决策不是迁移）、
+    页码按钮（原组件的既定决定：运行数上千之后再说）。两套样式语会**共存一段时间**，
+    直到其余 5 个页面跟完。
 
 **P5 起新记的已知缺口**：
 
@@ -957,6 +979,20 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
 | 前端样式 | **Tailwind**（按 §11 原文） | 参考项目 `defect_tools` 用纯 CSS，此处**有意分叉**；见归档 `Q.04` |
 | 授权选人 | **受限用户目录**，只回 `id` + `display_name` | 端点已随 P4 落地，边界与泄漏面已在 §7.5 逐条收口 |
 | Tick 显示 | **表单不显示**，提交侧继续 400 | 三档撮合语义仍未定，不阻塞 P4；见 §12.13 |
+
+**Element Plus 开工前新增的拍板**（2026-09-26）：
+
+| 决策点 | 选择 | 备注 |
+| ---- | ---- | ---- |
+| 组件库与版本 | **Element Plus `^2.14.6`** | 进 `dependencies`；peer 写 `vue ^3.3.7`，本仓 3.5.39 ✓ |
+| 本批范围 | **地基 4 件 + 两个最脏页**（`/runs`、`/runs/new`） | 其余页面后续批次；"分批替换"是 §12.18 的预判 |
+| 引入方式 | **显式 `import { ElButton } from 'element-plus'` + 全量 CSS**（`element-plus/dist/index.css`） | **不引** `unplugin-auto-import` / `unplugin-vue-components`——隐式全局与"名称即意图"相冲（D.07 曾对 `unplugin-auto-import` 有过同样的拒绝）。代价见 §12.18 的体积账 |
+| 主题换肤 | **走 `--el-*` CSS 变量，不引 sass** | 五族（primary/success/warning/danger/info）**全对齐**：`@theme` 补 `danger`/`success`/`warning`/`info` 四个语义令牌，EP 的 7 档色阶用 `color-mix()` 生成 |
+| 换肤块的选择器 | **`html:root`，不是 `:root`** | 我们的覆盖与 EP 自己的 `:root` **同为无层样式**，同权重下靠源序决胜，而源序取决于 Vite 打产物的顺序（未实测，不押）。`html:root` 是 (0,1,1)，压过 (0,1,0)，**与顺序无关** |
+| 校验语义归谁 | **仍全部归 `domain/`**（**绝不用 `el-form` 的 rules**） | `el-form-item` 的错误是 `position:absolute`，会压在设计好的流内提示上；且 `required`/`rules`/`prop` 任一都会激活 EP 自己的校验，等于与 `visibleFieldErrors` 并列的第二处真相 |
+| 测试环境 | **`jsdom` + `@vue/test-utils`**（本批安装） | 全局 `environment` 仍为 `node`，组件 spec 逐个在文件顶部写 `// @vitest-environment jsdom`——这正是 P4 拍板行"**要测组件时再加**"预设的那个条件 |
+| 中文 locale | `ElConfigProvider :locale="zhCn"`，取 `element-plus/es/locale/lang/zh-cn` | 不做 `app.use(ElementPlus)` 全量注册（会废掉摇树），locale 只能走 provider；`dist/locale/zh-cn.mjs` **没有类型声明**，在 `vue-tsc -b` 下会报缺声明 |
+| 本批不做 | `ConfirmDialog → ElMessageBox`、`ElMessage` toast、页码按钮、其余 5 个页面、`text-rose-600 → text-danger` 全仓重命名 | 逐条理由见 `PROGRESS.md` 的 `D.11` |
 
 **P4 交付时的实现选择**（2026-09-25）：
 

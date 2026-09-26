@@ -26,8 +26,9 @@ export default defineConfig({
   },
 
   test: {
-    // 只测纯逻辑, 故用 node 环境 (不装 jsdom). 组件测试要加时, 在单个文件顶部写
-    // `// @vitest-environment jsdom`, 而不是把全局默认换掉.
+    // 默认仍是 node 环境 (绝大多数用例测的是纯逻辑). 组件测试在**单个文件顶部**写
+    // `// @vitest-environment jsdom`, 而不是把全局默认换掉 —— 逐文件声明时 Vitest 会把该文件的
+    // SFC 按浏览器模式编译 (带 render 而不只是 ssrRender), 组件测试因此不必再自己搭 SSR 上下文.
     environment: 'node',
     // 必须用 POSIX 分隔符: Windows 上写成 'src\\**\\*.spec.ts' 会静默匹配不到任何文件, 且不报错.
     include: ['src/**/*.spec.ts'],

@@ -517,6 +517,148 @@
 
 ---
 
+## D.08 · 2026-09-26 （第八批） P5 可视化：权益曲线与回撤 + 5 张结果明细表
+
+> 归档于 2026-09-26（主文件加 D.11 后越过 50 KB 上限，按 Harness §8.1
+> 把 ✅ 区最旧的整条移出）。**下列原文一字未改。**
+
+
+- **交付（后端，不新增 Python 依赖）**：新模块
+  `backend/app/services/result_database.py`——白名单 5 张表
+  （`Capital` / `Trade` / `Order` / `Position` / `PositionDetail`）、
+  只读连接 contextmanager、`read_capital_series` 与 `read_result_table_page`；
+  `catalog/schemas.py` 增 `EquityPointResponse` / `RunEquityResponse` /
+  `ResultTableResponse`；`routers/runs.py` 增
+  `GET /api/runs/{id}/equity` 与 `GET /api/runs/{id}/tables/{table_name}`
+  （`offset` / `limit` 走 `Query` 约束），加两个私有前置
+  `_require_finished_run`（非终态 → **409**）与
+  `_resolve_result_database_path`（`resolve()` 后必须仍在作业目录内）。
+- **交付（前端）**：`echarts ^6.1.0` + `vue-echarts ^8.3.0`（已拍板，
+  按需 `use([...])` 注册）；`api/types.ts` 加结果库契约与 5 张表的**镜像**清单、
+  `api/runs.ts` 加两个请求函数；`domain/equity.ts`（**纯函数**：
+  `buildEquitySeries` / `summarizeEquity`）+ 15 项 spec；`format.ts` 加
+  `formatPercentRatio`；新组件 `EquityChartPanel.vue`（概要四项 + **两张独立的图**：
+  权益曲线与回撤面积图，各带 `dataZoom`）与 `ResultTablePanel.vue`
+  （5 个页签按需取数、表头取响应的 `columns`、`PaginationBar`）；
+  `RunDetailView.vue` 在终态挂载这两节，非终态显示一句提示（复用既有
+  `watch(isTerminal)`，翻成终态即取数，不必再等一次 2 秒轮询）。
+- **验收**：后端 **432 项通过 / 4 项 deselect**（新增 26 项，见下）；
+  前端 `type-check` 无错、`vitest run` **75 项全绿**（6 个 spec）、
+  `vite build` 成功——ECharts 只进详情页那一块 chunk（559 kB / gzip 190 kB，
+  按路由懒加载，首屏不付这份钱）。**真引擎验收 4 项全过**：在既有的
+  `test_a_real_bar_backtest_runs_through_the_platform` 的 `async with` 块内补了
+  `/equity` 与 `/tables/Trade`、`/tables/Order` 三次请求（该测试原有的断言都在
+  块外，而 API 调用必须在块内）。
+- **代理链路冒烟 12 项**（沿用归档 D.07 的一次性临时库手法，项目自带的
+  `backend/data/` 与 `runs/` 一行未碰）：权益 62 点、首点 `1000000.0`、
+  末点 `999377.0899999999`、`Trade` 总 84（本页 5 行、含 `TradingDay` 列）、
+  `Order` 总 654、`Position` 116、`PositionDetail` 290，以及
+  `BarMarketData` **404**（真实存在但未开）、`limit=101` **422**、`offset=-1`
+  **422**、`/files` 回归 200。
+- **验收判据订正**：计划 §11 原文的「`1000000.0 → 999549.73`」中，`999549.73`
+  是 **P0 有种子库那轮的基线，而那批产物已不在盘上**（`runs/` 已被清掉）。
+  改为**自洽形式**：首点恒为 `1000000.0`（`Capital` 的种子行 = 初始资金）、
+  末点与该轮 `result.json.Balance` **逐位相等**。这条不依赖种子库在不在，
+  比钉死一个常数更强，本轮实测即 `999377.0899999999`（无种子库变体）。
+- **对着真结果库核实过的引擎事实**（写进断言之前先只读验过，不是推测）：
+  `Capital` 22 列、PK `(TradingDay, AccountId)`、**首行是种子行**
+  （`Deposit` = 初始资金，`Balance` = `PreAvailable` = `1000000.0`），
+  首行 `TradingDay` == `StartTradingDay`、末行 == `LastTradingDay`；
+  **`Order` 是 SQLite 保留字**，不加引号直接 `near "Order": syntax error`；
+  `?mode=ro` **确实是只读的**（对同一文件写报 `attempt to write a readonly
+  database`）；行值只有 `str`/`int`/`float`（无 BLOB、无 NULL）。
+- **三处必须写对的地方**：① **`as_uri()` 要求绝对路径**，先 `resolve()`，
+  否则 `ValueError: relative paths can't be expressed as file URIs`；
+  ② **`db_path` 视为不可信输入**——它是引擎侧写进 `result.json` 再由调度侧镜像
+  入库的值，而策略是任意 Python、**它同样可以被伪造**，故与产物路径同等对待；
+  ③ **`asyncio.to_thread` 本仓首例**：sqlite3 是阻塞 API 且连接不能跨线程，
+  把「开连接 → 查询 → 关连接」整个放进同一个 worker；与 P4 直接内联文件 IO
+  的做法**有意分叉**（一条 `COUNT(*)` + 一页 `SELECT` 的耗时随库长大，
+  目标是云上多用户，不该占着事件循环）。
+- **回撤不在后端算**：端点只回 `Capital` 的原样逐日序列，回撤与收益率由前端
+  纯函数派生。理由是它是**派生数据**——后端一旦算了，前端要点另一条曲线就再加
+  一个字段，接口会随图表变化；而前端这份是纯逻辑，正好进 vitest 单测。
+  `summarizeEquity` 用**单遍峰值跟踪**而不是 `Math.max(...balances)`
+  （大序列会撞上实参个数上限），且比较用 `>` 而非 `>=`（等深时记**第一个**谷底）。
+- **矩阵式变异检查**（本项目既定手法，改坏即转红、改完原样恢复）：
+  去掉表名白名单 → 白名单组转红；表名不加引号 → `Order` 那条转红
+  （`sqlite3.OperationalError: near "Order": syntax error`）；
+  去掉 `is_relative_to` → 穿越用例转红；去掉 `TERMINAL_RUN_STATUSES` 判定 →
+  「运行中」用例转红；去掉 `?mode=ro` → 只读用例转红。**只读这条是断言不是注释**：
+  对 contextmanager 出来的连接执行 `CREATE TABLE` 必须抛 `OperationalError`。
+- **两处 Harness 红线当场处理**：`EquityChartPanel`（215 行）与
+  `ResultTablePanel`（224 行）都越过了「单文件 200 行须先请示」——
+  在**不牺牲可读性**的前提下压回 199 / 198 行（单行三属性元素、抽
+  `describeTabClass` 辅助、收紧文档注释），未改变任何行为。
+- **新记的已知缺口**（见 `platform-plan.md` §12.19–12.22）：
+  另 12 张表在界面上看不到（含 2928 行的 `BarMarketData`）；
+  **表名清单是两处真相**（后端白名单 + 前端镜像，漏改一处只会让某个页签 404）；
+  **盘中回撤不可得**（`Capital` 只有逐日结算权益，`Margin`/`MarketValue`
+  在本样本里恒为 0，图上画的是逐日而非日内）；
+  **失败的轮看不到部分结果**（`db_path` 只在 `result.json` 写成功后才镜像入库，
+  取消/超时/启动失败的轮一律空串 → 404）。**不做**：K 线图、多轮曲线叠加（P6）、
+  图表导出图片、明细表导出 CSV、大表虚拟滚动（一页最多 100 行）。
+- **文档回写**：`platform-plan.md`（§9 新增「P5 落地范围」六条 + 排序与分页说明、
+  §10 页面表 `/runs/:id` 改 ✅ P5 并补 ECharts 落地实况、
+  §11 的 P5 行改 ✅ 并**订正 `999549.73` 那条判据**、§12 新增缺口 19–22、
+  §13 新增「P5 开工前拍板表」）、`PROGRESS.md`（本条 + R.01 标题与 P5 行）。
+
+---
+
+## D.09 · 2026-09-26 （第九批） 网格步长由绝对价格改为比例
+
+> 归档于 2026-09-26（加 D.11 后主文件越过 50 KB 上限，按 Harness §8.1
+> 把 ✅ 区最旧的整条移出）。**下列原文一字未改。**
+
+
+- **起因（用户实测报的异常）**：`GridStep=10` 在 `SZSE/000001`（锚价 11.94）上每一档都远在
+  市价之外，一轮 **610 笔委托、0 笔成交**；同一份参数在 `SSE/600519`（约 1558）上只有
+  0.64% 的间距，照常成交。故它是**绝对价差**，在低价标的上结构性失效。用户以为
+  "同参数直接跑 QTT 有成交"，实为**换了标的**——那轮的 `MissingRateKeys` 指认它跑的是
+  `SSE/600519`（记此以免后人照抄这个比较）。
+- **改法（用户拍板：线性比例）**：档位价 `锚价 × (1 ∓ 步长 × 档号)`、平仓价
+  `开仓成交价 × (1 ± 步长)`，步长是**比例**（`0.01 = 1%`）。落点三处：① 引擎仓
+  `test/PythonStrategyGrid/grid_strategy.py` 及其运行副本 `bin/Release/grid_strategy.py`；
+  ② C++ 孪生 `test/TestStrategyGrid/GridStrategy.cpp/.h` 与其单测；③ **平台已上传的那份**
+  （源码 + manifest 快照 + 库里那一行，见下）。
+- **构造期校验（两侧同源）**：`0 < GridStep × GridCount < 1`（最远一档仍为正价）。Python 抛
+  `ValueError`（中文消息落在作业目录的 `stderr.txt`，用户看得见）；C++ 抛 `std::logic_error`，
+  且 `Main.cpp` 新增 `try/catch` 把它挡成**退出码 1「宿主启动失败」**，不再走 abort
+  （`RunResult.h` 记明 MSVC 下 abort 与「引擎报告失败」同为码 3，只能靠结果文件消歧）。
+- **连带项**：三份 `TestStrategyGrid.json` 的 `10.0 → 0.01`；manifest 的默认值 `0.01`、
+  标签改「网格步长(比例, 0.01=1%)」、`minimum` 由 `0` 收到 `0.0001`（0 必被拒启，不该在表单里可选）；
+  真引擎验收基线重取（下表）；`job-workspace.md` 新增 §6.3 并在 §6.2 加指针、计划 §11 追加
+  「口径变更」段；`UnitTests.exe` 与两个 `TestStrategyGrid.exe` 重编（**旧 exe 配新配置会
+  静默 0 成交**，故必须跟着重编）。
+- **基线重取（同链路、同输入、只换 `GridStep`）**：
+
+  | 指标 | 旧（绝对 10.0） | 新（比例 0.01） |
+  | ---- | ---- | ---- |
+  | `TradeCount` | 84 | **34** |
+  | `OrderCount` | 654 | **629** |
+  | `Balance`（无种子库） | 999377.0899999999 | **999257.8562340003** |
+  | `BarMarketDataCount` | 2928 | 2928（不变） |
+  | `PositionDetail` | 290 | 282 |
+
+  成交变少是**预期**：旧值在 `600519` 上等于 0.64% 间距，新值 1% 更宽。
+  **带种子库那份 `998951.4506464996` 是旧口径的**（本机种子库不在盘上，无法重取），
+  与新版余额不可相减——「费用三项 = 两份基线的差」这条判据只在旧口径内成立，已写进
+  `job-workspace.md` §6.3。
+- **验证**：C++ 单测 **112/112、743 断言全过**（新增 1 条"比例越界构造期拒启"用例）；
+  做**两次变异**——把两处公式改回绝对形态、把比例上界拿掉——分别转红且只红对应用例，
+  两次都已还原并重建；真引擎验收 **4 项全过**；**两个孪生在同一输入下逐位同值**
+  （`629 / 34 / 999257.8562340003`，C++ 那轮在 `bin/Debug` 下跑）；比例守卫逐点探过：
+  `0.01×5` ✓、`0.1999×5` ✓、`0.2×5` ✗、`10×5` ✗、`0` ✗、`-0.01` ✗、`GridCount=0` ✗。
+- **副作用（用户需知道）**：① 平台那份**已上传的版本 1 是就地改写**——源码、`manifest.json`
+  快照、库里的 `ManifestJson` 与 `SourceHash` 三处一起动（提交页读的是库里那份，落单就会
+  "界面显示旧默认值、实跑新代码"）。旧件已复制留档在
+  `%TEMP%/quant-cdp/uploaded-version-1-backup-20260926/`；**策略版本本应不可变**，就地改是
+  用户点名的落点，若要改走"上传新版本"则须重走一遍上传接口。② 引擎仓 **8 个文件已改但
+  未提交**（AI 不代提交引擎仓，待用户定）。③ `bin/Release/result.json` **未动**；
+  `bin/Debug` 下多了一轮真回测产物；本轮验收产物在 `backend/_acc_tmp/ratio-20260926/`。
+
+---
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型
@@ -618,3 +760,20 @@
   - **已定（2026-09-25 用户拍板）**：P4 的"新建回测"表单**不显示 Tick 选项**，
     提交侧继续一律 400（判据是常量 `SUBMITTABLE_MATCH_MODES`）。故 P4 表单
     按 Bar 单模式生成，不做模式联动。
+
+---
+
+## Q.07 · 前端组件测试的 DOM 环境未定（2026-09-26，D.10 引入）
+
+> 归档于 2026-09-26（**本批结清**：装了 `jsdom` + `@vue/test-utils`，组件 spec 逐个在
+> 文件顶部写 `// @vitest-environment jsdom`，那条 parked spec 已改写入库；见 D.11）。
+> **下列原文一字未改** —— 当时的措辞保留，其中「未定」已由 D.11 结清。
+
+- **前端组件测试的 DOM 环境未定**（2026-09-26 修提交按钮时暴露）：
+  本仓前端只有纯函数 spec，`vitest` 跑在 `environment: node` 下，而 SFC 一律按 SSR 模式
+  编译（只有 `ssrRender`、没有 `render`），故 `createRenderer` 那条零依赖的组件测试
+  路子走不通；修提交按钮时写好的 `ParameterForm.spec.ts`（断言「敲进父状态的值
+  就是敲进去的那个」）**因此没能入库**，暂存在
+  `%TEMP%/quant-cdp/parked-specs-20260926/`。真跑组件测试要加 **`jsdom` +
+  `@vue/test-utils`** 两个 devDependencies —— 按 Harness §2 须先经用户同意，故记此待定；
+  不加就继续靠真实浏览器的 CDP 探针验收（本轮即如此）。
