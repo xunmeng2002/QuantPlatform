@@ -15,6 +15,16 @@
 
 @import "tailwindcss";
 
+/**
+ * 测试文件不进产物.
+ *
+ * Tailwind v4 自动扫描源码找类名, 扫的是"工程里所有没被 .gitignore 的文件", spec 也在内. 于是
+ * `App.spec.ts` 里那句 `stubs: { transition: false }` 让产物多出一整条 `.transition{...}` —— 实测
+ * 主 CSS 384,550 → 385,126 B, 全是没人用的死代码 (jsdom 里根本不加载样式表). 此类字眼在 spec 里只
+ * 会越来越多, 故在这里一次性排除, 而不是每加一条 spec 就核一遍字节账.
+ */
+@source not "./**/*.spec.ts";
+
 @theme {
   --color-page: #f8fafc;
   --color-surface: #ffffff;

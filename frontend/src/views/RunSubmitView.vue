@@ -310,9 +310,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <!-- mx-auto 是本批新加的: 内容区从 1152px 放宽到 1280px 之后, 这个自限 896px 的窄栏若仍靠左,
-       右边会空出一大块, 看起来像没做完. 页头在这个 section 里, 跟着一起居中. -->
   <section class="mx-auto max-w-4xl">
+    <!-- mx-auto 是本批新加的: 内容区从 1152px 放宽到 1280px 之后, 这个自限 896px 的窄栏若仍靠左,
+         右边会空出一大块, 看起来像没做完. 页头在这个 section 里, 跟着一起居中.
+         写在根元素**里面**是有意的: 根节点前多一个节点会让本组件编译成片段, 路由过渡会白屏. -->
+
     <PageHeader title="新建回测">
       <template #leading>
         <RouterLink

@@ -68,8 +68,10 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <!-- 这是全站唯一"没有外壳"的页面 (登录页不挂顶栏), 所以它自己那张卡要窄 -->
   <SurfaceCard class="mx-auto mt-16 max-w-sm">
+    <!-- 全站唯一"没有外壳"的页面 (登录页不挂顶栏), 所以它自己那张卡要窄.
+         写在根元素**里面**是有意的: 根节点前多一个节点会让本组件编译成片段, 路由过渡会白屏. -->
+
     <PageHeader
       title="薪火量化"
       description="请登录后继续"
