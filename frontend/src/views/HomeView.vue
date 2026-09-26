@@ -38,6 +38,24 @@ interface EngineEnvironmentRow {
   detail: string;
 }
 
+interface MeasuredStat {
+  value: string;
+  caption: string;
+}
+
+/**
+ * 主视觉下方那三个数.
+ *
+ * 全是**实测值**, 且与「引擎与运行环境」一节里的两行同源 (改一处要两处一起改, 不许在这里"美化").
+ * 落地页第一屏原本只有三行字, 没有任何可看的东西; 数字带是给它一个视觉落点, 顺带把"多快"这件事
+ * 从一段文字变成一眼能扫到的东西.
+ */
+const measuredStats: readonly MeasuredStat[] = [
+  { value: '3.8 秒', caption: '2010–2024 全段回测 (58176 根 bar, 678 笔成交)' },
+  { value: '17 张', caption: '每轮落下的结果表, 逐笔明细可单独下载' },
+  { value: '3.0 MB', caption: '单轮产物: 结果库, CSV 与日志' },
+];
+
 const session = useSessionStore();
 
 const capabilityCards: readonly CapabilityCard[] = [
@@ -196,6 +214,28 @@ const boundaryNotes: readonly string[] = [
 
           <span class="text-sm text-slate-500">账号由管理员开通.</span>
         </template>
+      </div>
+
+      <!-- 每条 dt/dd 外各自套一层 div 是合法的: HTML5 允许 dl 用 div 分组. 分隔线画在这里而不是
+           给每个数加边框 —— 三列在窄屏会折成一列, 逐列画线会折出一堆断头线. -->
+      <div class="mt-10 border-t border-line pt-6">
+        <p class="text-xs font-medium text-slate-500">
+          本机实测
+        </p>
+        <dl class="mt-4 grid gap-x-8 gap-y-6 sm:grid-cols-3">
+          <div
+            v-for="stat in measuredStats"
+            :key="stat.value"
+            class="min-w-0"
+          >
+            <dt class="text-2xl font-semibold text-slate-900 tabular-nums">
+              {{ stat.value }}
+            </dt>
+            <dd class="mt-1 text-xs leading-5 text-slate-500">
+              {{ stat.caption }}
+            </dd>
+          </div>
+        </dl>
       </div>
     </section>
 

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  标签页图标.
+
+  纯几何标记, 不排汉字: 16px 下"薪"是 17 画, 缩到那一格只会糊成一团黑; 而且 SVG 图标不走页面的
+  字体栈, 在没装中文字体的机器上会直接落成一个空方框. 三根柱子中高两低, 既像一根火苗 (薪火),
+  又像一张走势/柱状图 (量化).
+
+  这里的 #1d4ed8 是**写死**的: 图标由浏览器在页面之外渲染, 读不到 style.css 的 color-brand
+  令牌. 换品牌色时这一处要跟着手改 (全仓第二处硬编码色值, 第一处是 backend 的 /docs 主题).
+-->
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 32 32"
+  role="img"
+  aria-label="薪火量化"
+>
+  <rect
+    width="32"
+    height="32"
+    rx="7"
+    fill="#1d4ed8"
+  />
+  <path
+    d="M9.5 22.5V17M16 22.5V9.5M22.5 22.5V14"
+    stroke="#ffffff"
+    stroke-width="3.2"
+    stroke-linecap="round"
+  />
+</svg>
