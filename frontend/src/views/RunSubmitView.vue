@@ -30,7 +30,9 @@ import { SUBMITTABLE_MATCH_MODE } from '../api/types';
 import type { LastSubmittedParameters, MarketDataType, RunSubmitPayload, StrategyDetail } from '../api/types';
 import EmptyNotice from '../components/EmptyNotice.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
+import PageHeader from '../components/PageHeader.vue';
 import ParameterForm from '../components/ParameterForm.vue';
+import SurfaceCard from '../components/SurfaceCard.vue';
 import { describeApiFailure, showSuccessToast } from '../composables/use-feedback';
 import { parseStrategyManifest, createInitialParameterInputs, deriveParameterDescriptors, deriveParameterValues, deriveRunFieldRequirements } from '../domain/manifest';
 import type { ParameterInput, RunFieldRequirements } from '../domain/manifest';
@@ -308,16 +310,19 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="max-w-4xl">
-    <header class="mb-4 flex items-center gap-3">
-      <RouterLink
-        class="text-sm text-brand hover:underline"
-        :to="{ name: 'runs' }"
-      >
-        ← 运行列表
-      </RouterLink>
-      <h1 class="text-lg font-semibold text-slate-900">新建回测</h1>
-    </header>
+  <!-- mx-auto 是本批新加的: 内容区从 1152px 放宽到 1280px 之后, 这个自限 896px 的窄栏若仍靠左,
+       右边会空出一大块, 看起来像没做完. 页头在这个 section 里, 跟着一起居中. -->
+  <section class="mx-auto max-w-4xl">
+    <PageHeader title="新建回测">
+      <template #leading>
+        <RouterLink
+          class="text-sm text-brand hover:underline"
+          :to="{ name: 'runs' }"
+        >
+          ← 运行列表
+        </RouterLink>
+      </template>
+    </PageHeader>
 
     <ErrorBanner
       :message="loadErrorMessage"
@@ -362,7 +367,10 @@ onMounted(() => {
         </ElAlert>
       </div>
 
-      <fieldset class="space-y-4 rounded-lg border border-line bg-surface p-4">
+      <SurfaceCard
+        tag="fieldset"
+        class="space-y-4"
+      >
         <legend class="px-1 text-sm font-semibold text-slate-700">
           策略与版本
         </legend>
@@ -408,17 +416,20 @@ onMounted(() => {
 
         <p
           v-if="isLoadingVersions"
+          role="status"
           class="text-xs text-slate-400"
         >
           加载版本中…
         </p>
 
-        <div
+        <!-- closable 显式关掉: 这条提示说的是"这个版本不可用", 关掉它不会让那个版本变得可用 ——
+             与上面那条预填提示同一理由 (关闭只翻内部标志, 状态没有变). -->
+        <ElAlert
           v-else-if="manifestResult && !manifestResult.ok"
-          class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
-        >
-          {{ manifestResult.message }} — 该版本无法生成提交表单, 请重新上传该版本.
-        </div>
+          type="warning"
+          :closable="false"
+          :title="`${manifestResult.message} — 该版本无法生成提交表单, 请重新上传该版本.`"
+        />
 
         <dl
           v-else-if="manifestResult?.ok"
@@ -457,9 +468,12 @@ onMounted(() => {
             </dd>
           </div>
         </dl>
-      </fieldset>
+      </SurfaceCard>
 
-      <fieldset class="space-y-4 rounded-lg border border-line bg-surface p-4">
+      <SurfaceCard
+        tag="fieldset"
+        class="space-y-4"
+      >
         <legend class="px-1 text-sm font-semibold text-slate-700">
           运行范围
         </legend>
@@ -573,11 +587,12 @@ onMounted(() => {
             >该策略的 manifest 声明了这个键, 故必填</span>
           </label>
         </div>
-      </fieldset>
+      </SurfaceCard>
 
-      <fieldset
+      <SurfaceCard
         v-if="descriptors.length > 0"
-        class="space-y-4 rounded-lg border border-line bg-surface p-4"
+        tag="fieldset"
+        class="space-y-4"
       >
         <legend class="px-1 text-sm font-semibold text-slate-700">
           策略参数
@@ -587,7 +602,7 @@ onMounted(() => {
           :descriptors="descriptors"
           :errors="visibleFieldErrors"
         />
-      </fieldset>
+      </SurfaceCard>
 
       <p
         v-else-if="manifestResult?.ok"

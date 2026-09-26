@@ -13,6 +13,7 @@
  */
 
 import { computed, onMounted, ref } from 'vue';
+import { ElButton, ElOption, ElSelect } from 'element-plus';
 import { RouterLink, useRouter } from 'vue-router';
 
 import { deleteStrategy, fetchStrategyDetail, replaceStrategyGrants } from '../api/strategies';
@@ -24,12 +25,14 @@ import type {
   StrategyVersion,
   UserDirectoryEntry,
 } from '../api/types';
+import ContentSkeleton from '../components/ContentSkeleton.vue';
 import DirectoryPicker from '../components/DirectoryPicker.vue';
 import EmptyNotice from '../components/EmptyNotice.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
-import LoadingNotice from '../components/LoadingNotice.vue';
+import PageHeader from '../components/PageHeader.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import StrategyVersionUploadForm from '../components/StrategyVersionUploadForm.vue';
+import SurfaceCard from '../components/SurfaceCard.vue';
 import {
   confirmAction,
   describeApiFailure,
@@ -114,7 +117,9 @@ const isGrantDraftDirty = computed(() => {
 });
 
 async function loadStrategyDetail(): Promise<void> {
-  isLoading.value = true;
+  // 只有"还没有东西可看"时才是首屏加载. 传完新版本也要走这里, 那时页面上已有整份详情, 把整页
+  // 换成骨架屏等于让一次成功的上传闪一下灰条 (同 `/runs` 那条"轮询不换表格"的判据).
+  isLoading.value = strategyDetail.value === null;
   errorMessage.value = null;
 
   try {
@@ -163,6 +168,12 @@ function removeGrant(granteeUserId: string): void {
   );
 }
 
+/**
+ * 名单是数组, 元素不能直接 `v-model`, 故由模板传「谁」、事件传「改成什么」两半拼起来.
+ *
+ * 第二参是 `ElSelect` 的 `@change` 载荷 —— 它是**值本身**, 不是 DOM 事件 (原手写 `<select>` 那份
+ * 代码读的是 `event.target.value`). 照抄旧签名会在运行时炸.
+ */
 function changeGrantPermission(
   granteeUserId: string,
   permission: GrantPermission,
@@ -172,13 +183,6 @@ function changeGrantPermission(
       ? { grantee_user_id: grant.grantee_user_id, permission_type: permission }
       : grant,
   );
-}
-
-/** 下拉的取值要在事件里读: 名单是数组, 元素不能直接 `v-model`. */
-function handleGrantPermissionChange(granteeUserId: string, event: Event): void {
-  const selectElement = event.target as HTMLSelectElement;
-
-  changeGrantPermission(granteeUserId, selectElement.value as GrantPermission);
 }
 
 async function saveGrants(): Promise<void> {
@@ -232,43 +236,50 @@ onMounted(() => {
 
 <template>
   <section>
-    <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <div class="flex flex-wrap items-center gap-3">
+    <PageHeader :title="strategy?.name ?? '策略详情'">
+      <template #leading>
         <RouterLink
           class="text-sm text-brand hover:underline"
           :to="{ name: 'strategies' }"
         >
           ← 策略列表
         </RouterLink>
-        <h1 class="text-lg font-semibold text-slate-900">
-          {{ strategy?.name ?? '策略详情' }}
-        </h1>
+      </template>
+
+      <template #badges>
         <StatusBadge
           v-if="strategy"
           v-bind="describeStrategyVisibility(strategy.visibility_type)"
         />
-      </div>
+      </template>
 
-      <button
-        v-if="isOwner"
-        type="button"
-        class="rounded border border-rose-300 px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-        :disabled="isDeleting"
-        @click="deleteStrategyWithConfirmation"
-      >
-        {{ isDeleting ? '删除中…' : '删除策略' }}
-      </button>
-    </header>
+      <template #actions>
+        <ElButton
+          v-if="isOwner"
+          type="danger"
+          plain
+          :loading="isDeleting"
+          @click="deleteStrategyWithConfirmation"
+        >
+          {{ isDeleting ? '删除中…' : '删除策略' }}
+        </ElButton>
+      </template>
+    </PageHeader>
 
     <ErrorBanner
       :message="errorMessage"
       @retry="loadStrategyDetail"
     />
 
-    <LoadingNotice v-if="isLoading" />
+    <ContentSkeleton v-if="isLoading" />
 
     <template v-else-if="strategy">
-      <dl class="mb-6 grid gap-x-6 gap-y-2 rounded-lg border border-line bg-surface p-4 text-xs sm:grid-cols-2">
+      <!-- 无 title 的卡片: 主体是 slot 的唯一子节点, 故 tag="dl" 合法 (dl 的直接子节点只能是
+           div/dt/dd —— 让 SurfaceCard 自己在中间插一层 div 就非法了). -->
+      <SurfaceCard
+        tag="dl"
+        class="mb-6 grid gap-x-6 gap-y-2 text-xs sm:grid-cols-2"
+      >
         <div class="flex gap-2">
           <dt class="w-20 shrink-0 text-slate-500">
             策略 ID
@@ -312,13 +323,12 @@ onMounted(() => {
             {{ strategy.description }}
           </dd>
         </div>
-      </dl>
+      </SurfaceCard>
 
-      <section class="mb-6">
-        <h2 class="mb-2 text-sm font-semibold text-slate-700">
-          版本 ({{ versionRows.length }})
-        </h2>
-
+      <SurfaceCard
+        class="mb-6"
+        :title="`版本 (${versionRows.length})`"
+      >
         <EmptyNotice
           v-if="versionRows.length === 0"
           message="这个策略还没有版本"
@@ -332,7 +342,7 @@ onMounted(() => {
           <li
             v-for="(versionRow, versionIndex) in versionRows"
             :key="versionRow.version.id"
-            class="rounded-lg border border-line bg-surface p-4"
+            class="rounded-md border border-line p-4"
           >
             <div class="flex flex-wrap items-center justify-between gap-2">
               <div class="flex flex-wrap items-center gap-2">
@@ -434,32 +444,25 @@ onMounted(() => {
             </details>
           </li>
         </ul>
-      </section>
+      </SurfaceCard>
 
-      <section
+      <SurfaceCard
         v-if="isOwner"
-        class="mb-6 rounded-lg border border-line bg-surface p-4"
+        class="mb-6"
+        title="上传新版本"
       >
-        <h2 class="mb-4 text-sm font-semibold text-slate-700">
-          上传新版本
-        </h2>
         <StrategyVersionUploadForm
           :strategy-id="props.id"
           @uploaded="handleVersionUploaded"
         />
-      </section>
+      </SurfaceCard>
 
-      <section
+      <SurfaceCard
         v-if="isOwner"
-        class="mb-6 rounded-lg border border-line bg-surface p-4"
+        class="mb-6"
+        :title="`授权 (${grantDraft.length})`"
+        description="保存时整体替换名单: 从下面移除的人, 保存后就失去了这份策略."
       >
-        <h2 class="mb-1 text-sm font-semibold text-slate-700">
-          授权 ({{ grantDraft.length }})
-        </h2>
-        <p class="mb-4 text-xs text-slate-400">
-          保存时整体替换名单: 从下面移除的人, 保存后就失去了这份策略.
-        </p>
-
         <ErrorBanner
           :message="grantErrorMessage"
           :is-retry-visible="false"
@@ -484,26 +487,28 @@ onMounted(() => {
               {{ directoryStore.displayNameFor(grant.grantee_user_id) }}
             </span>
             <div class="flex items-center gap-2">
-              <select
-                :value="grant.permission_type"
-                class="rounded border border-line bg-surface px-2 py-1 text-xs"
-                @change="handleGrantPermissionChange(grant.grantee_user_id, $event)"
+              <!-- el-select 默认铺满容器, 在 flex 行里会把「移除」挤出去, 故给一个显式宽度.
+                   载荷是值不是事件 (见 `changeGrantPermission` 的说明). -->
+              <ElSelect
+                :model-value="grant.permission_type"
+                class="w-28"
+                @change="changeGrantPermission(grant.grantee_user_id, $event)"
               >
-                <option
+                <ElOption
                   v-for="permission in GRANT_PERMISSIONS"
                   :key="permission"
+                  :label="describeGrantPermission(permission)"
                   :value="permission"
-                >
-                  {{ describeGrantPermission(permission) }}
-                </option>
-              </select>
-              <button
-                type="button"
-                class="rounded border border-line px-2 py-1 text-xs text-rose-700 hover:bg-rose-50"
+                />
+              </ElSelect>
+              <ElButton
+                type="danger"
+                plain
+                size="small"
                 @click="removeGrant(grant.grantee_user_id)"
               >
                 移除
-              </button>
+              </ElButton>
             </div>
           </li>
         </ul>
@@ -511,14 +516,14 @@ onMounted(() => {
         <DirectoryPicker @select="addGrant" />
 
         <div class="mt-4 flex items-center gap-3">
-          <button
-            type="button"
-            class="rounded bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-50"
+          <ElButton
+            type="primary"
+            :loading="isSavingGrants"
             :disabled="isSavingGrants || !isGrantDraftDirty"
             @click="saveGrants"
           >
             {{ isSavingGrants ? '保存中…' : '保存授权' }}
-          </button>
+          </ElButton>
           <span
             v-if="isGrantDraftDirty"
             class="text-xs text-amber-700"
@@ -528,7 +533,7 @@ onMounted(() => {
             class="text-xs text-slate-400"
           >与已保存的名单一致</span>
         </div>
-      </section>
+      </SurfaceCard>
     </template>
   </section>
 </template>

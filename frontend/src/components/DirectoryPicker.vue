@@ -8,6 +8,7 @@
  */
 
 import { onMounted, ref } from 'vue';
+import { ElButton, ElInput } from 'element-plus';
 
 import type { UserDirectoryEntry } from '../api/types';
 import { describeApiFailure } from '../composables/use-feedback';
@@ -44,21 +45,19 @@ function selectEntry(entry: UserDirectoryEntry): void {
 <template>
   <div class="rounded-lg border border-line bg-surface p-4">
     <div class="flex gap-2">
-      <input
+      <ElInput
         v-model="searchQuery"
         type="search"
-        class="flex-1 rounded border border-line px-2 py-1.5 text-sm"
+        class="flex-1"
         placeholder="按显示名搜索"
         @keyup.enter="runSearch"
-      >
-      <button
-        type="button"
-        class="rounded border border-line px-3 py-1.5 text-sm hover:bg-slate-50"
+      />
+      <ElButton
         :disabled="directoryStore.isLoading"
         @click="runSearch"
       >
         搜索
-      </button>
+      </ElButton>
     </div>
 
     <p
@@ -68,8 +67,11 @@ function selectEntry(entry: UserDirectoryEntry): void {
       {{ errorMessage }}
     </p>
 
+    <!-- role="status": 这个是"正在进行"的说法, 与下面那句"没有匹配"是两回事, 读屏用户需要被告知
+         查询在跑 (本批之前它是一句裸文本). -->
     <p
       v-else-if="directoryStore.isLoading"
+      role="status"
       class="mt-2 text-xs text-slate-400"
     >
       搜索中…
@@ -85,13 +87,12 @@ function selectEntry(entry: UserDirectoryEntry): void {
         class="flex items-center justify-between py-2"
       >
         <span class="text-sm text-slate-700">{{ entry.display_name }}</span>
-        <button
-          type="button"
-          class="rounded border border-line px-2 py-1 text-xs hover:bg-slate-50"
+        <ElButton
+          size="small"
           @click="selectEntry(entry)"
         >
           选择
-        </button>
+        </ElButton>
       </li>
     </ul>
 

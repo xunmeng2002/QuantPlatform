@@ -10,6 +10,7 @@
  */
 
 import { computed, ref, watch } from 'vue';
+import { ElButton, ElInput, ElOption, ElSelect } from 'element-plus';
 
 import { createStrategy } from '../api/strategies';
 import {
@@ -116,13 +117,12 @@ async function submit(): Promise<void> {
           class="text-sm font-medium text-slate-700"
           for="strategy-name"
         >策略名</label>
-        <input
+        <ElInput
           id="strategy-name"
           v-model="name"
           type="text"
-          class="rounded border border-line px-2 py-1.5 text-sm"
           :maxlength="MAXIMUM_STRATEGY_NAME_LENGTH"
-        >
+        />
       </div>
 
       <div class="flex flex-col gap-1">
@@ -130,19 +130,17 @@ async function submit(): Promise<void> {
           class="text-sm font-medium text-slate-700"
           for="strategy-visibility"
         >可见性</label>
-        <select
+        <ElSelect
           id="strategy-visibility"
           v-model="visibilityType"
-          class="rounded border border-line bg-surface px-2 py-1.5 text-sm"
         >
-          <option
+          <ElOption
             v-for="visibility in STRATEGY_VISIBILITIES"
             :key="visibility"
+            :label="describeStrategyVisibility(visibility).label"
             :value="visibility"
-          >
-            {{ describeStrategyVisibility(visibility).label }}
-          </option>
-        </select>
+          />
+        </ElSelect>
       </div>
     </div>
 
@@ -151,11 +149,11 @@ async function submit(): Promise<void> {
         class="text-sm font-medium text-slate-700"
         for="strategy-description"
       >说明 (可留空)</label>
-      <textarea
+      <ElInput
         id="strategy-description"
         v-model="description"
-        rows="2"
-        class="rounded border border-line px-2 py-1.5 text-sm"
+        type="textarea"
+        :rows="2"
         :maxlength="MAXIMUM_STRATEGY_DESCRIPTION_LENGTH"
       />
     </div>
@@ -185,11 +183,15 @@ async function submit(): Promise<void> {
         class="text-sm font-medium text-slate-700"
         for="strategy-manifest"
       >manifest (JSON)</label>
-      <textarea
+      <!-- 等宽与字号写在**外层**而不是内层: `.el-textarea__inner` 上是 `font-family: inherit;
+           font-size: inherit`, 故这两个工具类会顺着继承落到真正的编辑区 (已在 2.14.6 的
+           dist/index.css 上核实), 不必动用 `input-style`. -->
+      <ElInput
         id="strategy-manifest"
         v-model="manifestText"
-        rows="8"
-        class="rounded border border-line px-2 py-1.5 font-mono text-xs"
+        type="textarea"
+        :rows="8"
+        class="font-mono text-xs"
         placeholder='{"entry_filename": "strategy.py", "config_filename": "Strategy.json", "supported_match_modes": ["Bar"], "params": []}'
       />
       <p
@@ -200,12 +202,13 @@ async function submit(): Promise<void> {
       </p>
     </div>
 
-    <button
-      type="submit"
-      class="rounded bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-50"
+    <ElButton
+      type="primary"
+      native-type="submit"
+      :loading="isSubmitting"
       :disabled="isSubmitDisabled"
     >
       {{ isSubmitting ? '上传中…' : '上传策略' }}
-    </button>
+    </ElButton>
   </form>
 </template>

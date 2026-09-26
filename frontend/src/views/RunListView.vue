@@ -12,13 +12,15 @@ import { RouterLink } from 'vue-router';
 
 import { DEFAULT_RUN_SORT_COLUMN, RUN_SORT_COLUMNS, fetchRuns } from '../api/runs';
 import type { RunSortColumn } from '../api/runs';
-import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, RUN_STATUSES } from '../api/types';
+import { DEFAULT_PAGE_SIZE, RUN_STATUSES } from '../api/types';
 import type { PageResponse, RunStatus, RunSummary } from '../api/types';
+import ContentSkeleton from '../components/ContentSkeleton.vue';
 import EmptyNotice from '../components/EmptyNotice.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
-import LoadingNotice from '../components/LoadingNotice.vue';
-import PaginationBar from '../components/PaginationBar.vue';
+import PageHeader from '../components/PageHeader.vue';
+import PaginationToolbar from '../components/PaginationToolbar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import SurfaceCard from '../components/SurfaceCard.vue';
 import { describeApiFailure } from '../composables/use-feedback';
 import { usePolling } from '../composables/usePolling';
 import {
@@ -103,116 +105,105 @@ onMounted(() => {
 
 <template>
   <section>
-    <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <h1 class="text-lg font-semibold text-slate-900">回测运行</h1>
+    <PageHeader title="回测运行">
       <!-- tag="a" + href 而不是 @click="router.push": 中键 / 右键「在新标签页打开」是真实用法,
            丢掉真锚点就没了. navigate 会自己 preventDefault, 左键仍是单页跳转. -->
-      <RouterLink
-        v-slot="{ navigate, href }"
-        custom
-        :to="{ name: 'run-submit' }"
-      >
-        <ElButton
-          tag="a"
-          type="primary"
-          :href="href"
-          @click="navigate"
+      <template #actions>
+        <RouterLink
+          v-slot="{ navigate, href }"
+          custom
+          :to="{ name: 'run-submit' }"
         >
-          新建回测
-        </ElButton>
-      </RouterLink>
-    </header>
+          <ElButton
+            tag="a"
+            type="primary"
+            :href="href"
+            @click="navigate"
+          >
+            新建回测
+          </ElButton>
+        </RouterLink>
+      </template>
+    </PageHeader>
 
-    <!-- 筛选 / 排序 / 每页. 「全部」不再是一个 value="" 的选项 —— el-option 的 value 为空串时
-         EP 永远显示不出它的标签 (空串被判为"未选中"), 改用 placeholder + 右上角的 × 清空;
-         value-on-clear 必须显式写 '' (EP 的清空默认值是 undefined, 与 domain 的判据不符). -->
-    <div class="mb-4 grid gap-3 sm:grid-cols-4">
-      <label class="flex flex-col gap-1 text-sm text-slate-600">
-        状态
-        <ElSelect
-          v-model="statusFilter"
-          clearable
-          placeholder="全部状态"
-          :value-on-clear="''"
+    <SurfaceCard class="mb-4">
+      <!-- 筛选 / 排序. 「全部」不再是一个 value="" 的选项 —— el-option 的 value 为空串时
+           EP 永远显示不出它的标签 (空串被判为"未选中"), 改用 placeholder + 右上角的 × 清空;
+           value-on-clear 必须显式写 '' (EP 的清空默认值是 undefined, 与 domain 的判据不符). -->
+      <div class="grid gap-3 sm:grid-cols-3">
+        <label class="flex flex-col gap-1 text-sm text-slate-600">
+          状态
+          <ElSelect
+            v-model="statusFilter"
+            clearable
+            placeholder="全部状态"
+            :value-on-clear="''"
+            @change="reloadFromFirstPage"
+          >
+            <ElOption
+              v-for="status in RUN_STATUSES"
+              :key="status"
+              :label="describeRunStatus(status).label"
+              :value="status"
+            />
+          </ElSelect>
+        </label>
+
+        <label class="flex flex-col gap-1 text-sm text-slate-600">
+          策略
+          <ElSelect
+            v-model="strategyFilter"
+            clearable
+            placeholder="全部策略"
+            :value-on-clear="''"
+            @change="reloadFromFirstPage"
+          >
+            <ElOption
+              v-for="strategy in strategyCatalog.strategies"
+              :key="strategy.id"
+              :label="strategy.name"
+              :value="strategy.id"
+            />
+          </ElSelect>
+        </label>
+
+        <!-- 排序**没有**空值: 清空它会让 sort_by 变成空串, 后端直接判非法. 所以它不 clearable,
+             也就不需要 placeholder. 「每页」不在这一格里了 —— 它搬到了表格下面那条工具条上,
+             与另外两个列表页同一处. -->
+        <label class="flex flex-col gap-1 text-sm text-slate-600">
+          排序
+          <ElSelect
+            v-model="sortBy"
+            @change="reloadFromFirstPage"
+          >
+            <ElOption
+              v-for="sortColumn in RUN_SORT_COLUMNS"
+              :key="sortColumn"
+              :label="describeRunSortColumn(sortColumn)"
+              :value="sortColumn"
+            />
+          </ElSelect>
+        </label>
+      </div>
+
+      <!-- el-checkbox 的根节点自己就是一个 <label>, 所以这里不能再套一层 label (嵌套 label 是非法
+           HTML, 而且点一下会切两次), 文字改为它的子节点. -->
+      <div class="mt-3">
+        <ElCheckbox
+          v-model="descending"
           @change="reloadFromFirstPage"
         >
-          <ElOption
-            v-for="status in RUN_STATUSES"
-            :key="status"
-            :label="describeRunStatus(status).label"
-            :value="status"
-          />
-        </ElSelect>
-      </label>
-
-      <label class="flex flex-col gap-1 text-sm text-slate-600">
-        策略
-        <ElSelect
-          v-model="strategyFilter"
-          clearable
-          placeholder="全部策略"
-          :value-on-clear="''"
-          @change="reloadFromFirstPage"
-        >
-          <ElOption
-            v-for="strategy in strategyCatalog.strategies"
-            :key="strategy.id"
-            :label="strategy.name"
-            :value="strategy.id"
-          />
-        </ElSelect>
-      </label>
-
-      <!-- 排序与每页都**没有**空值: 清空它们会让 sort_by 变成空串, 后端直接判非法.
-           所以这两个不 clearable, 也就不需要 placeholder. -->
-      <label class="flex flex-col gap-1 text-sm text-slate-600">
-        排序
-        <ElSelect
-          v-model="sortBy"
-          @change="reloadFromFirstPage"
-        >
-          <ElOption
-            v-for="sortColumn in RUN_SORT_COLUMNS"
-            :key="sortColumn"
-            :label="describeRunSortColumn(sortColumn)"
-            :value="sortColumn"
-          />
-        </ElSelect>
-      </label>
-
-      <label class="flex flex-col gap-1 text-sm text-slate-600">
-        每页
-        <ElSelect
-          v-model="limit"
-          @change="reloadFromFirstPage"
-        >
-          <ElOption
-            v-for="pageSize in PAGE_SIZE_OPTIONS"
-            :key="pageSize"
-            :label="String(pageSize)"
-            :value="pageSize"
-          />
-        </ElSelect>
-      </label>
-    </div>
-
-    <!-- el-checkbox 的根节点自己就是一个 <label>, 所以这里不能再套一层 label (嵌套 label 是非法
-         HTML, 而且点一下会切两次), 文字改为它的子节点. -->
-    <div class="mb-4">
-      <ElCheckbox
-        v-model="descending"
-        @change="reloadFromFirstPage"
-      >
-        倒序
-      </ElCheckbox>
-    </div>
+          倒序
+        </ElCheckbox>
+      </div>
+    </SurfaceCard>
 
     <ErrorBanner
       :message="errorMessage"
       @retry="refreshRuns"
     />
 
-    <LoadingNotice v-if="isLoading" />
+    <ContentSkeleton v-if="isLoading" />
 
     <EmptyNotice
       v-else-if="runs.length === 0"
@@ -294,10 +285,10 @@ onMounted(() => {
         </ElTable>
       </div>
 
-      <PaginationBar
+      <PaginationToolbar
+        v-model:limit="limit"
         :total="totalCount"
         :offset="offset"
-        :limit="limit"
         @update:offset="goToOffset"
       />
     </template>

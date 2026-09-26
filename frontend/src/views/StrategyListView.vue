@@ -9,17 +9,20 @@
  */
 
 import { computed, onMounted, ref } from 'vue';
+import { ElButton, ElTable, ElTableColumn } from 'element-plus';
 import { RouterLink, useRouter } from 'vue-router';
 
 import { fetchStrategies } from '../api/strategies';
-import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../api/types';
+import { DEFAULT_PAGE_SIZE } from '../api/types';
 import type { PageResponse, Strategy } from '../api/types';
+import ContentSkeleton from '../components/ContentSkeleton.vue';
 import EmptyNotice from '../components/EmptyNotice.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
-import LoadingNotice from '../components/LoadingNotice.vue';
-import PaginationBar from '../components/PaginationBar.vue';
+import PageHeader from '../components/PageHeader.vue';
+import PaginationToolbar from '../components/PaginationToolbar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import StrategyUploadForm from '../components/StrategyUploadForm.vue';
+import SurfaceCard from '../components/SurfaceCard.vue';
 import { describeApiFailure, showSuccessToast } from '../composables/use-feedback';
 import { formatDateTime } from '../domain/format';
 import { describeStrategyVisibility } from '../domain/labels';
@@ -42,7 +45,9 @@ const strategies = computed(() => strategiesPage.value?.records ?? []);
 const totalCount = computed(() => strategiesPage.value?.total ?? 0);
 
 async function refreshStrategies(): Promise<void> {
-  isLoading.value = true;
+  // 只有"手上还没有一页数据"才是首屏. 翻页、上传成功后重取都走这里, 那时表格已经有内容, 换成
+  // 骨架屏就是"每次翻页闪一下灰条" —— 骨架屏是带动画的, 而本批的判据是"列表数据刷新不加动画".
+  isLoading.value = strategiesPage.value === null;
   errorMessage.value = null;
 
   try {
@@ -62,11 +67,6 @@ async function refreshStrategies(): Promise<void> {
 
 function goToOffset(nextOffset: number): void {
   offset.value = nextOffset;
-  void refreshStrategies();
-}
-
-function handlePageSizeChange(): void {
-  offset.value = 0;
   void refreshStrategies();
 }
 
@@ -90,33 +90,31 @@ onMounted(() => {
 
 <template>
   <section>
-    <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <h1 class="text-lg font-semibold text-slate-900">策略</h1>
-      <button
-        type="button"
-        class="rounded bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-strong"
-        @click="isUploadPanelOpen = !isUploadPanelOpen"
-      >
-        {{ isUploadPanelOpen ? '收起上传表单' : '上传策略' }}
-      </button>
-    </header>
+    <PageHeader title="策略">
+      <template #actions>
+        <ElButton
+          :type="isUploadPanelOpen ? 'default' : 'primary'"
+          @click="isUploadPanelOpen = !isUploadPanelOpen"
+        >
+          {{ isUploadPanelOpen ? '收起上传表单' : '上传策略' }}
+        </ElButton>
+      </template>
+    </PageHeader>
 
-    <section
+    <SurfaceCard
       v-if="isUploadPanelOpen"
-      class="mb-6 rounded-lg border border-line bg-surface p-4"
+      class="mb-6"
+      title="上传新策略"
     >
-      <h2 class="mb-4 text-sm font-semibold text-slate-700">
-        上传新策略
-      </h2>
       <StrategyUploadForm @created="handleCreated" />
-    </section>
+    </SurfaceCard>
 
     <ErrorBanner
       :message="errorMessage"
       @retry="refreshStrategies"
     />
 
-    <LoadingNotice v-if="isLoading" />
+    <ContentSkeleton v-if="isLoading" />
 
     <EmptyNotice
       v-else-if="strategies.length === 0"
@@ -125,86 +123,63 @@ onMounted(() => {
     />
 
     <template v-else>
-      <div class="overflow-x-auto rounded-lg border border-line bg-surface">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-50 text-left text-xs text-slate-500">
-            <tr>
-              <th class="px-3 py-2 font-medium">
-                策略名
-              </th>
-              <th class="px-3 py-2 font-medium">
-                说明
-              </th>
-              <th class="px-3 py-2 font-medium">
-                可见性
-              </th>
-              <th class="px-3 py-2 font-medium">
-                归属
-              </th>
-              <th class="px-3 py-2 font-medium">
-                更新时间
-              </th>
-              <th class="px-3 py-2 font-medium" />
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-line">
-            <tr
-              v-for="strategy in strategies"
-              :key="strategy.id"
-              class="hover:bg-slate-50"
-            >
-              <td class="px-3 py-2 text-slate-800">
-                {{ strategy.name }}
-              </td>
-              <td class="max-w-md truncate px-3 py-2 text-slate-500">
-                {{ strategy.description || '—' }}
-              </td>
-              <td class="px-3 py-2">
-                <StatusBadge v-bind="describeStrategyVisibility(strategy.visibility_type)" />
-              </td>
-              <td class="px-3 py-2 text-slate-600">
-                {{ directoryStore.displayNameFor(strategy.owner_user_id) }}
-              </td>
-              <td class="px-3 py-2 whitespace-nowrap text-slate-600">
-                {{ formatDateTime(strategy.updated_at) }}
-              </td>
-              <td class="px-3 py-2 text-right">
-                <RouterLink
-                  class="text-brand hover:underline"
-                  :to="{ name: 'strategy-detail', params: { id: strategy.id } }"
-                >
-                  详情
-                </RouterLink>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <!-- 不加 row-key: 与 /runs 同一理由 —— 本表不用选中 / 展开 / 树形, 用不上它. 空表头就是省掉
+           label (它没有默认值). 说明那一列用 show-overflow-tooltip: 原来的 `truncate` 是块级
+           overflow 裁切, el-table 的单元格是表格布局, 换过来只能靠 EP 自己这套省略 + 悬浮全量. -->
+      <div class="overflow-hidden rounded-lg border border-line">
+        <ElTable :data="strategies">
+          <ElTableColumn label="策略名">
+            <template #default="{ row }">
+              <span class="text-slate-800">{{ row.name }}</span>
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn
+            label="说明"
+            show-overflow-tooltip
+          >
+            <template #default="{ row }">
+              {{ row.description || '—' }}
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn label="可见性">
+            <template #default="{ row }">
+              <StatusBadge v-bind="describeStrategyVisibility(row.visibility_type)" />
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn label="归属">
+            <template #default="{ row }">
+              {{ directoryStore.displayNameFor(row.owner_user_id) }}
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn label="更新时间">
+            <template #default="{ row }">
+              <span class="whitespace-nowrap">{{ formatDateTime(row.updated_at) }}</span>
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn align="right">
+            <template #default="{ row }">
+              <RouterLink
+                class="text-brand hover:underline"
+                :to="{ name: 'strategy-detail', params: { id: row.id } }"
+              >
+                详情
+              </RouterLink>
+            </template>
+          </ElTableColumn>
+        </ElTable>
       </div>
 
-      <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <label class="flex items-center gap-2 text-sm text-slate-600">
-          每页
-          <select
-            v-model.number="limit"
-            class="rounded border border-line bg-surface px-2 py-1 text-sm"
-            @change="handlePageSizeChange"
-          >
-            <option
-              v-for="pageSize in PAGE_SIZE_OPTIONS"
-              :key="pageSize"
-              :value="pageSize"
-            >
-              {{ pageSize }}
-            </option>
-          </select>
-        </label>
-        <PaginationBar
-          :total="totalCount"
-          :offset="offset"
-          :limit="limit"
-          @update:offset="goToOffset"
-        />
-      </div>
+      <PaginationToolbar
+        v-model:limit="limit"
+        :total="totalCount"
+        :offset="offset"
+        @update:offset="goToOffset"
+      />
     </template>
   </section>
 </template>

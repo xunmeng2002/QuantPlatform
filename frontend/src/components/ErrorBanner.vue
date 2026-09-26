@@ -20,7 +20,7 @@
  *    调用点都会静默地失去重试按钮 (本文件在 2026-09-26 之前就是这样).
  */
 
-import { ElAlert } from 'element-plus';
+import { ElAlert, ElButton } from 'element-plus';
 
 withDefaults(
   defineProps<{
@@ -47,13 +47,14 @@ const emit = defineEmits<{
       :title="message"
       :closable="false"
     />
-    <button
+    <ElButton
       v-if="isRetryVisible"
-      type="button"
-      class="rounded border border-rose-400 px-2 py-1 text-xs font-medium text-rose-800 hover:bg-rose-100"
+      type="danger"
+      plain
+      size="small"
       @click="emit('retry')"
     >
       {{ retryLabel ?? '重试' }}
-    </button>
+    </ElButton>
   </div>
 </template>

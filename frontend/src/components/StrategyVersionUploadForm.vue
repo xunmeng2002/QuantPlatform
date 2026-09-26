@@ -10,6 +10,7 @@
  */
 
 import { computed, ref, watch } from 'vue';
+import { ElButton, ElInput } from 'element-plus';
 
 import { uploadStrategyVersion } from '../api/strategies';
 import type { StrategyVersion } from '../api/types';
@@ -119,11 +120,14 @@ async function submit(): Promise<void> {
         class="text-sm font-medium text-slate-700"
         for="version-manifest"
       >manifest (JSON)</label>
-      <textarea
+      <!-- 等宽与字号写在外层: `.el-textarea__inner` 是 `font-family: inherit; font-size: inherit`,
+           见 `StrategyUploadForm` 里同一处的说明. -->
+      <ElInput
         id="version-manifest"
         v-model="manifestText"
-        rows="8"
-        class="rounded border border-line px-2 py-1.5 font-mono text-xs"
+        type="textarea"
+        :rows="8"
+        class="font-mono text-xs"
       />
       <p
         v-if="manifestProblem"
@@ -133,12 +137,13 @@ async function submit(): Promise<void> {
       </p>
     </div>
 
-    <button
-      type="submit"
-      class="rounded bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-50"
+    <ElButton
+      type="primary"
+      native-type="submit"
+      :loading="isSubmitting"
       :disabled="isSubmitDisabled"
     >
       {{ isSubmitting ? '上传中…' : '上传新版本' }}
-    </button>
+    </ElButton>
   </form>
 </template>

@@ -16,6 +16,7 @@
  */
 
 import { computed, onMounted, ref } from 'vue';
+import { ElButton, ElInput, ElOption, ElSelect, ElTable, ElTableColumn } from 'element-plus';
 
 import { createUser, fetchUsers, updateUserStatus } from '../api/users';
 import {
@@ -25,15 +26,16 @@ import {
   MAXIMUM_USERNAME_LENGTH,
   MINIMUM_PASSWORD_LENGTH,
   MINIMUM_USERNAME_LENGTH,
-  PAGE_SIZE_OPTIONS,
   USER_TYPES,
 } from '../api/types';
 import type { PageResponse, User, UserStatus, UserType } from '../api/types';
+import ContentSkeleton from '../components/ContentSkeleton.vue';
 import EmptyNotice from '../components/EmptyNotice.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
-import LoadingNotice from '../components/LoadingNotice.vue';
-import PaginationBar from '../components/PaginationBar.vue';
+import PageHeader from '../components/PageHeader.vue';
+import PaginationToolbar from '../components/PaginationToolbar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import SurfaceCard from '../components/SurfaceCard.vue';
 import {
   confirmAction,
   describeApiFailure,
@@ -97,7 +99,9 @@ function describeStatusChangeConsequence(user: User, nextStatus: UserStatus): st
 }
 
 async function refreshUsers(): Promise<void> {
-  isLoading.value = true;
+  // 同 `/strategies`: 只有首屏才给骨架屏. 建号成功、改完状态、翻页都要重取, 那些时刻表格里已经有
+  // 内容, 换成骨架屏只会闪 —— 骨架屏自己带动画, 而列表数据刷新是不加动画的.
+  isLoading.value = usersPage.value === null;
   errorMessage.value = null;
 
   try {
@@ -111,11 +115,6 @@ async function refreshUsers(): Promise<void> {
 
 function goToOffset(nextOffset: number): void {
   offset.value = nextOffset;
-  void refreshUsers();
-}
-
-function handlePageSizeChange(): void {
-  offset.value = 0;
   void refreshUsers();
 }
 
@@ -197,25 +196,22 @@ onMounted(async () => {
 
 <template>
   <section>
-    <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <h1 class="text-lg font-semibold text-slate-900">用户管理</h1>
-      <button
-        type="button"
-        class="rounded bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-strong"
-        @click="isCreatePanelOpen = !isCreatePanelOpen"
-      >
-        {{ isCreatePanelOpen ? '收起建号表单' : '新建账号' }}
-      </button>
-    </header>
+    <PageHeader title="用户管理">
+      <template #actions>
+        <ElButton
+          :type="isCreatePanelOpen ? 'default' : 'primary'"
+          @click="isCreatePanelOpen = !isCreatePanelOpen"
+        >
+          {{ isCreatePanelOpen ? '收起建号表单' : '新建账号' }}
+        </ElButton>
+      </template>
+    </PageHeader>
 
-    <section
+    <SurfaceCard
       v-if="isCreatePanelOpen"
-      class="mb-6 rounded-lg border border-line bg-surface p-4"
+      class="mb-6"
+      title="新建账号"
     >
-      <h2 class="mb-4 text-sm font-semibold text-slate-700">
-        新建账号
-      </h2>
-
       <form
         class="space-y-4"
         @submit.prevent="submitCreateUser"
@@ -226,15 +222,17 @@ onMounted(async () => {
               class="text-sm font-medium text-slate-700"
               for="new-user-username"
             >登录名</label>
-            <input
+            <!-- minlength / maxlength / autocomplete 都是 el-input 声明过的 prop, 它会把它们
+                 绑到内层原生 <input> 上 (已在 2.14.6 的产物上核实: 内层元素的属性表里这三个都在,
+                 且排在透传的 attrs 之后, 属性值胜出). -->
+            <ElInput
               id="new-user-username"
               v-model="newUsername"
               type="text"
               autocomplete="off"
-              class="rounded border border-line px-2 py-1.5 text-sm"
               :minlength="MINIMUM_USERNAME_LENGTH"
               :maxlength="MAXIMUM_USERNAME_LENGTH"
-            >
+            />
             <span class="text-xs text-slate-400">
               {{ MINIMUM_USERNAME_LENGTH }}–{{ MAXIMUM_USERNAME_LENGTH }} 个字符, 不可重复
             </span>
@@ -245,13 +243,12 @@ onMounted(async () => {
               class="text-sm font-medium text-slate-700"
               for="new-user-display-name"
             >显示名</label>
-            <input
+            <ElInput
               id="new-user-display-name"
               v-model="newDisplayName"
               type="text"
-              class="rounded border border-line px-2 py-1.5 text-sm"
               :maxlength="MAXIMUM_DISPLAY_NAME_LENGTH"
-            >
+            />
             <span class="text-xs text-slate-400">
               必填: 授权表单里就是按它认人
             </span>
@@ -262,15 +259,14 @@ onMounted(async () => {
               class="text-sm font-medium text-slate-700"
               for="new-user-password"
             >初始口令</label>
-            <input
+            <ElInput
               id="new-user-password"
               v-model="newPassword"
               type="password"
               autocomplete="new-password"
-              class="rounded border border-line px-2 py-1.5 text-sm"
               :minlength="MINIMUM_PASSWORD_LENGTH"
               :maxlength="MAXIMUM_PASSWORD_LENGTH"
-            >
+            />
             <span class="text-xs text-slate-400">
               至少 {{ MINIMUM_PASSWORD_LENGTH }} 位
             </span>
@@ -281,31 +277,30 @@ onMounted(async () => {
               class="text-sm font-medium text-slate-700"
               for="new-user-type"
             >账号类型</label>
-            <select
+            <ElSelect
               id="new-user-type"
               v-model="newUserType"
-              class="rounded border border-line bg-surface px-2 py-1.5 text-sm"
             >
-              <option
+              <ElOption
                 v-for="userType in USER_TYPES"
                 :key="userType"
+                :label="describeUserType(userType)"
                 :value="userType"
-              >
-                {{ describeUserType(userType) }}
-              </option>
-            </select>
+              />
+            </ElSelect>
           </div>
         </div>
 
-        <button
-          type="submit"
-          class="rounded bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-50"
+        <ElButton
+          type="primary"
+          native-type="submit"
+          :loading="isCreating"
           :disabled="isCreateDisabled"
         >
           {{ isCreating ? '创建中…' : '创建账号' }}
-        </button>
+        </ElButton>
       </form>
-    </section>
+    </SurfaceCard>
 
     <ErrorBanner
       :message="errorMessage"
@@ -318,7 +313,7 @@ onMounted(async () => {
       :is-retry-visible="false"
     />
 
-    <LoadingNotice v-if="isLoading" />
+    <ContentSkeleton v-if="isLoading" />
 
     <EmptyNotice
       v-else-if="users.length === 0"
@@ -327,92 +322,68 @@ onMounted(async () => {
     />
 
     <template v-else>
-      <div class="overflow-x-auto rounded-lg border border-line bg-surface">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-50 text-left text-xs text-slate-500">
-            <tr>
-              <th class="px-3 py-2 font-medium">
-                显示名
-              </th>
-              <th class="px-3 py-2 font-medium">
-                登录名
-              </th>
-              <th class="px-3 py-2 font-medium">
-                类型
-              </th>
-              <th class="px-3 py-2 font-medium">
-                状态
-              </th>
-              <th class="px-3 py-2 font-medium">
-                建号时间
-              </th>
-              <th class="px-3 py-2 font-medium" />
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-line">
-            <tr
-              v-for="user in users"
-              :key="user.id"
-              class="hover:bg-slate-50"
-            >
-              <td class="px-3 py-2 text-slate-800">
-                {{ user.display_name || '—' }}
-                <span
-                  v-if="session.currentUser?.id === user.id"
-                  class="ml-1 text-xs text-slate-400"
-                >(你)</span>
-              </td>
-              <td class="px-3 py-2 text-slate-600">
-                {{ user.username }}
-              </td>
-              <td class="px-3 py-2 text-slate-600">
-                {{ describeUserType(user.user_type) }}
-              </td>
-              <td class="px-3 py-2">
-                <StatusBadge v-bind="describeUserStatus(user.status)" />
-              </td>
-              <td class="px-3 py-2 whitespace-nowrap text-slate-600">
-                {{ formatDateTime(user.created_at) }}
-              </td>
-              <td class="px-3 py-2 text-right">
-                <button
-                  type="button"
-                  class="rounded border border-line px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-50"
-                  :disabled="statusChangingUser !== null"
-                  @click="changeUserStatus(user)"
-                >
-                  {{ user.status === 'active' ? '停用' : '启用' }}
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <!-- 不加 row-key: 与 /runs、/strategies 同一理由 (本表不用选中 / 展开 / 树形). 行内那个按钮
+           的忙碌态绑在**具体那一行**上: `statusChangingUser` 非空时全表按钮都禁用 (防连点),
+           但只有它指向的那一行转圈. -->
+      <div class="overflow-hidden rounded-lg border border-line">
+        <ElTable :data="users">
+          <ElTableColumn label="显示名">
+            <template #default="{ row }">
+              <span class="text-slate-800">{{ row.display_name || '—' }}</span>
+              <span
+                v-if="session.currentUser?.id === row.id"
+                class="ml-1 text-xs text-slate-400"
+              >(你)</span>
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn label="登录名">
+            <template #default="{ row }">
+              {{ row.username }}
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn label="类型">
+            <template #default="{ row }">
+              {{ describeUserType(row.user_type) }}
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn label="状态">
+            <template #default="{ row }">
+              <StatusBadge v-bind="describeUserStatus(row.status)" />
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn label="建号时间">
+            <template #default="{ row }">
+              <span class="whitespace-nowrap">{{ formatDateTime(row.created_at) }}</span>
+            </template>
+          </ElTableColumn>
+
+          <ElTableColumn align="right">
+            <template #default="{ row }">
+              <!-- `row` 的类型是 el-table 自己的行泛型 (一个宽泛的记录), 直接传给吃 `User` 的函数
+                   过不了类型检查; 这里断言成 `User` —— 声明处 `:data="users"` 已经保证它就是. -->
+              <ElButton
+                size="small"
+                :disabled="statusChangingUser !== null"
+                :loading="statusChangingUser?.id === row.id"
+                @click="changeUserStatus(row as User)"
+              >
+                {{ row.status === 'active' ? '停用' : '启用' }}
+              </ElButton>
+            </template>
+          </ElTableColumn>
+        </ElTable>
       </div>
 
-      <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <label class="flex items-center gap-2 text-sm text-slate-600">
-          每页
-          <select
-            v-model.number="limit"
-            class="rounded border border-line bg-surface px-2 py-1 text-sm"
-            @change="handlePageSizeChange"
-          >
-            <option
-              v-for="pageSize in PAGE_SIZE_OPTIONS"
-              :key="pageSize"
-              :value="pageSize"
-            >
-              {{ pageSize }}
-            </option>
-          </select>
-        </label>
-        <PaginationBar
-          :total="totalCount"
-          :offset="offset"
-          :limit="limit"
-          @update:offset="goToOffset"
-        />
-      </div>
+      <PaginationToolbar
+        v-model:limit="limit"
+        :total="totalCount"
+        :offset="offset"
+        @update:offset="goToOffset"
+      />
     </template>
   </section>
 </template>

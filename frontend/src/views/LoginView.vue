@@ -7,10 +7,13 @@
  */
 
 import { computed, ref } from 'vue';
+import { ElButton, ElInput } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 
 import { MAXIMUM_USERNAME_LENGTH } from '../api/types';
 import ErrorBanner from '../components/ErrorBanner.vue';
+import PageHeader from '../components/PageHeader.vue';
+import SurfaceCard from '../components/SurfaceCard.vue';
 import { describeApiFailure } from '../composables/use-feedback';
 import { useSessionStore } from '../stores/session';
 
@@ -65,12 +68,15 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <div class="mx-auto mt-16 max-w-sm rounded-lg border border-line bg-surface p-6 shadow-sm">
-    <h1 class="text-lg font-semibold text-slate-900">量化回测平台</h1>
-    <p class="mt-1 text-sm text-slate-500">请登录后继续</p>
+  <!-- 这是全站唯一"没有外壳"的页面 (未登录时 AppLayout 不挂载), 所以它自己那张卡要窄 -->
+  <SurfaceCard class="mx-auto mt-16 max-w-sm">
+    <PageHeader
+      title="量化回测平台"
+      description="请登录后继续"
+    />
 
     <form
-      class="mt-6 space-y-4"
+      class="space-y-4"
       @submit.prevent="submit"
     >
       <ErrorBanner
@@ -83,14 +89,13 @@ async function submit(): Promise<void> {
           class="text-sm font-medium text-slate-700"
           for="login-username"
         >用户名</label>
-        <input
+        <ElInput
           id="login-username"
           v-model="username"
           type="text"
           autocomplete="username"
-          class="rounded border border-line px-2 py-1.5 text-sm"
           :maxlength="MAXIMUM_USERNAME_LENGTH"
-        >
+        />
       </div>
 
       <div class="flex flex-col gap-1">
@@ -98,22 +103,25 @@ async function submit(): Promise<void> {
           class="text-sm font-medium text-slate-700"
           for="login-password"
         >口令</label>
-        <input
+        <ElInput
           id="login-password"
           v-model="password"
           type="password"
           autocomplete="current-password"
-          class="rounded border border-line px-2 py-1.5 text-sm"
-        >
+        />
       </div>
 
-      <button
-        type="submit"
-        class="w-full rounded bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-50"
+      <!-- :loading 之外文案也跟着换: 转圈不进可访问名, 读屏用户只能靠"登录中…"这三个字知道这次
+           提交在飞 (与提交回测、上传表单同一处理). 按钮是 w-full, 换字不会让宽度跳一下. -->
+      <ElButton
+        class="w-full"
+        type="primary"
+        native-type="submit"
+        :loading="isSubmitting"
         :disabled="isSubmitDisabled"
       >
         {{ isSubmitting ? '登录中…' : '登录' }}
-      </button>
+      </ElButton>
     </form>
-  </div>
+  </SurfaceCard>
 </template>

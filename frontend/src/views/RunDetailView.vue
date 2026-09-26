@@ -16,17 +16,20 @@
  */
 
 import { computed, onMounted, ref, watch } from 'vue';
+import { ElAlert, ElButton } from 'element-plus';
 import { RouterLink } from 'vue-router';
 
 import { cancelRun as cancelRunRequest, fetchRunArtifacts, fetchRunArtifactBlob, fetchRunDetail } from '../api/runs';
 import type { JobArtifact, RunDetail } from '../api/types';
 import ArtifactList from '../components/ArtifactList.vue';
+import ContentSkeleton from '../components/ContentSkeleton.vue';
 import EmptyNotice from '../components/EmptyNotice.vue';
 import EquityChartPanel from '../components/EquityChartPanel.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
-import LoadingNotice from '../components/LoadingNotice.vue';
+import PageHeader from '../components/PageHeader.vue';
 import ResultTablePanel from '../components/ResultTablePanel.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import SurfaceCard from '../components/SurfaceCard.vue';
 import {
   confirmAction,
   describeApiFailure,
@@ -231,15 +234,17 @@ onMounted(async () => {
 
 <template>
   <section>
-    <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <div class="flex flex-wrap items-center gap-3">
+    <PageHeader title="运行详情">
+      <template #leading>
         <RouterLink
           class="text-sm text-brand hover:underline"
           :to="{ name: 'runs' }"
         >
           ← 运行列表
         </RouterLink>
-        <h1 class="text-lg font-semibold text-slate-900">运行详情</h1>
+      </template>
+
+      <template #badges>
         <StatusBadge
           v-if="run"
           v-bind="describeRunStatus(run.status)"
@@ -252,43 +257,46 @@ onMounted(async () => {
           v-if="isPolling"
           class="text-xs text-slate-400"
         >自动刷新中</span>
-      </div>
+      </template>
 
-      <button
-        v-if="run && !isTerminal"
-        type="button"
-        class="rounded border border-rose-300 px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-        :disabled="isCancelling"
-        @click="cancelRunWithConfirmation"
-      >
-        {{ isCancelling ? '取消中…' : '取消运行' }}
-      </button>
-    </header>
+      <template #actions>
+        <ElButton
+          v-if="run && !isTerminal"
+          type="danger"
+          plain
+          :loading="isCancelling"
+          @click="cancelRunWithConfirmation"
+        >
+          {{ isCancelling ? '取消中…' : '取消运行' }}
+        </ElButton>
+      </template>
+    </PageHeader>
 
     <ErrorBanner
       :message="errorMessage"
       @retry="refreshRun"
     />
 
-    <LoadingNotice v-if="isLoading" />
+    <ContentSkeleton v-if="isLoading" />
 
     <template v-else-if="run">
-      <p
+      <!-- 引擎自己写在 result.json 里的错误号与错误文案. 只给结论不给下一步, 故不 closable:
+           关掉它不会让这一轮从"引擎报错"变成别的. -->
+      <ElAlert
         v-if="run.error_msg"
-        class="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
-      >
-        引擎错误 {{ run.error_id }}: {{ run.error_msg }}
-      </p>
+        class="mb-4"
+        type="warning"
+        :closable="false"
+        :title="`引擎错误 ${run.error_id}: ${run.error_msg}`"
+      />
 
-      <section
+      <SurfaceCard
         v-for="metricSection in metricSections"
         :key="metricSection.title"
         class="mb-6"
+        :title="metricSection.title"
       >
-        <h2 class="mb-2 text-sm font-semibold text-slate-700">
-          {{ metricSection.title }}
-        </h2>
-        <dl class="grid gap-x-6 gap-y-2 rounded-lg border border-line bg-surface p-4 sm:grid-cols-2 lg:grid-cols-3">
+        <dl class="grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
           <div
             v-for="metricRow in metricSection.rows"
             :key="metricRow.label"
@@ -302,12 +310,12 @@ onMounted(async () => {
             </dd>
           </div>
         </dl>
-      </section>
+      </SurfaceCard>
 
-      <section class="mb-6">
-        <h2 class="mb-2 text-sm font-semibold text-slate-700">
-          提交的参数与引擎配置
-        </h2>
+      <SurfaceCard
+        class="mb-6"
+        title="提交的参数与引擎配置"
+      >
         <div class="grid gap-4 lg:grid-cols-2">
           <div>
             <p class="mb-1 text-xs text-slate-500">
@@ -322,13 +330,13 @@ onMounted(async () => {
             <pre class="max-h-80 overflow-auto rounded-lg border border-line bg-surface p-3 text-xs text-slate-700">{{ formatJsonText(run.backtest_config_json) }}</pre>
           </div>
         </div>
-      </section>
+      </SurfaceCard>
 
-      <section class="mb-6">
-        <h2 class="mb-2 text-sm font-semibold text-slate-700">
-          作业目录
-        </h2>
-        <dl class="space-y-1 rounded-lg border border-line bg-surface p-4 text-xs">
+      <SurfaceCard
+        class="mb-6"
+        title="作业目录"
+      >
+        <dl class="space-y-1 text-xs">
           <div class="flex gap-2">
             <dt class="w-24 shrink-0 text-slate-500">
               作业目录名
@@ -354,7 +362,7 @@ onMounted(async () => {
             </dd>
           </div>
         </dl>
-      </section>
+      </SurfaceCard>
 
       <!-- 结果库那两节只在轮结束之后挂载: 引擎写库时读会拿到半份文件, 故后端对未结束的轮回
            409, 这里干脆不请求. 挂载时机由既有的 `watch(isTerminal)` 负责——轮一翻成终态, 组件
@@ -370,17 +378,20 @@ onMounted(async () => {
         />
       </template>
 
-      <p
+      <!-- 这一条不是错误, 是"还没到能看的时候" —— 用 info 而不是 warning, 免得跟上面的引擎错误
+           抢同一眼. 它会被下面每 2 秒一次的轮询重渲染, 但没有动画, 不会闪. -->
+      <ElAlert
         v-else
-        class="mb-6 rounded-md border border-line bg-surface px-4 py-3 text-sm text-slate-500"
-      >
-        运行结束后可查看权益曲线与明细表
-      </p>
+        class="mb-6"
+        type="info"
+        :closable="false"
+        title="运行结束后可查看权益曲线与明细表"
+      />
 
-      <section class="mb-6">
-        <h2 class="mb-2 text-sm font-semibold text-slate-700">
-          产物 ({{ artifacts.length }})
-        </h2>
+      <SurfaceCard
+        class="mb-6"
+        :title="`产物 (${artifacts.length})`"
+      >
         <ErrorBanner
           :message="artifactErrorMessage"
           retry-label="重新加载"
@@ -398,27 +409,25 @@ onMounted(async () => {
           message="这个运行的作业目录里没有文件"
           hint="排队中的轮还没建出目录; 也请确认该轮至少走到了引擎启动那一步"
         />
-      </section>
+      </SurfaceCard>
 
-      <section>
-        <h2 class="mb-2 text-sm font-semibold text-slate-700">
-          输出尾部
-        </h2>
+      <SurfaceCard title="输出尾部">
         <div class="grid gap-4 lg:grid-cols-2">
           <div>
             <p class="mb-1 text-xs text-slate-500">
               stdout
             </p>
-            <pre class="max-h-80 overflow-auto rounded-lg border border-line bg-slate-900 p-3 text-xs text-slate-100">{{ run.stdout_tail || '(空)' }}</pre>
+            <!-- 深底配浅色边框本来就怪: `border-line` 是给浅色卡片用的, 这里换深一档的灰. -->
+            <pre class="max-h-80 overflow-auto rounded-lg border border-slate-700 bg-slate-900 p-3 text-xs text-slate-100">{{ run.stdout_tail || '(空)' }}</pre>
           </div>
           <div>
             <p class="mb-1 text-xs text-slate-500">
               stderr
             </p>
-            <pre class="max-h-80 overflow-auto rounded-lg border border-line bg-slate-900 p-3 text-xs text-slate-100">{{ run.stderr_tail || '(空)' }}</pre>
+            <pre class="max-h-80 overflow-auto rounded-lg border border-slate-700 bg-slate-900 p-3 text-xs text-slate-100">{{ run.stderr_tail || '(空)' }}</pre>
           </div>
         </div>
-      </section>
+      </SurfaceCard>
     </template>
   </section>
 </template>

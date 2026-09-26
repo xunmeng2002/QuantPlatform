@@ -9,6 +9,7 @@
  */
 
 import { ref } from 'vue';
+import { ElButton, ElInput } from 'element-plus';
 
 import type { JobArtifact } from '../api/types';
 import { formatByteSize } from '../domain/format';
@@ -28,13 +29,13 @@ const filterQuery = ref('');
 
 <template>
   <div>
-    <input
+    <ElInput
       v-if="artifacts.length > 8"
       v-model="filterQuery"
       type="search"
-      class="mb-2 w-full rounded border border-line px-2 py-1.5 text-sm"
+      class="mb-2"
       placeholder="按路径筛选"
-    >
+    />
 
     <ul class="divide-y divide-line rounded-lg border border-line bg-surface">
       <li
@@ -45,14 +46,13 @@ const filterQuery = ref('');
         <code class="text-xs break-all text-slate-700">{{ artifact.relative_path }}</code>
         <div class="flex items-center gap-3">
           <span class="text-xs text-slate-400">{{ formatByteSize(artifact.size_bytes) }}</span>
-          <button
-            type="button"
-            class="rounded border border-line px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40"
+          <ElButton
+            size="small"
             :disabled="isDownloading"
             @click="emit('download', artifact)"
           >
             {{ isDownloading && downloadingPath === artifact.relative_path ? '下载中…' : '下载' }}
-          </button>
+          </ElButton>
         </div>
       </li>
     </ul>
