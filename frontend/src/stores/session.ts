@@ -3,7 +3,8 @@
  *
  * 令牌**只在这里**落地到 localStorage, 再经下面那个 `watch` 单向推给 `api/client`. 两处各存
  * 一份是「某一处忘了更新」的经典产地: 刷新页面后 store 有令牌而 client 没有, 表现为「刚进去
- * 每一步都 401」.
+ * 每一步都 401」. 那个 `watch` 因此带 `flush: 'sync'`——默认的 `pre` 会让两处在一整个微任务
+ * 的窗口里不一致, 而窗口两端都出过真 bug (见该处的注释与 session.spec.ts).
  *
  * 没有 refresh 端点, 令牌过期后唯一的恢复路径就是重新登录.
  */
@@ -32,7 +33,12 @@ export const useSessionStore = defineStore('session', () => {
       setAccessToken(token);
       persistAccessToken(token);
     },
-    { immediate: true },
+    // `flush: 'sync'` 是**载重**的, 不是随手加的性能选项. 默认的 `pre` 把回调排进微任务, 于是
+    // 「store 的令牌」与「client 的令牌」之间有一整个微任务的窗口不一致: `login()` 里紧跟的
+    // `/auth/me` 会赶在 `setAccessToken` 之前发出去 (不带 Authorization 头 → 后端 401
+    // 「缺少访问令牌」→ client 拿到 401 顺手清会话 → 怎么登都进不去); `clear()` 之后同样有
+    // 一个窗口把已作废的令牌继续带出去. 回归用例见同目录的 session.spec.ts.
+    { immediate: true, flush: 'sync' },
   );
 
   async function login(username: string, password: string): Promise<void> {

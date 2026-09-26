@@ -606,3 +606,11 @@ Python 策略**。
   变量解析——否则 `test_from_environment_applies_documented_defaults` 那条断言
   「未设环境变量时初始口令为 None」会变成"本机有 .env 则红、别处则绿"。
   排查看启动日志那一行 `已从 …\.env 读入 N 项配置 (取值不打印)`。
+- **把状态副本推给别处的 `watch` 必须带 `flush: 'sync'`**（2026-09-26 修登录 bug 时
+  定下）：令牌在 `stores/session.ts` 与 `api/client.ts` 各存一份，靠一个 `watch` 单向
+  推，而 watch 默认 `flush: 'pre'` 把回调排进微任务——两份在这一个微任务的窗口里不
+  一致，`login()` 里紧跟的 `/auth/me` 赶在 `setAccessToken` 之前发出去（不带
+  `Authorization` 头），后端回 401「缺少访问令牌」而 client 拿 401 顺手清会话，现象是
+  **怎么登都进不去**；`clear()` 后同样有窗口把作废令牌带出去。此条对任何"模块级可变
+  状态 + 请求离开时才读"的结构都成立。回归用例 `frontend/src/stores/session.spec.ts`
+  断言**请求离开那一刻带了什么头**——事后查 store 在两种实现下都对。
