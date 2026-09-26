@@ -2,16 +2,18 @@
 /**
  * 主页 (公开落地页).
  *
- * 全站唯一"不需要登录也能看"的内容页: 讲清这是什么, 能做什么, 一轮回测怎么走, 底下是什么,
- * 以及**当前边界在哪**. 内容全是静态文案, 因此这一页没有请求, 没有加载态, 也不碰任何反馈通道.
+ * 全站唯一"不需要登录也能看"的内容页: 讲清这是什么, 能做什么, 一轮回测怎么走, 引擎与运行环境
+ * 是什么, 以及**当前边界在哪**. 内容全是静态文案, 因此这一页没有请求, 没有加载态, 也不碰任何反馈通道.
  *
  * 主视觉自绘而不是套 `PageHeader`: 那个组件是"工作页页头"原语 (它的 `h1` 是 `text-xl`, 布局是
  * "标题 + 右侧动作"), 而落地页的主视觉要更大的排版重心, 且这一页有五个同级分节. 全页仍只有一个
  * `h1`.
  *
- * 两处措辞上的自我约束, 改文案时别越过去:
+ * 三处措辞上的自我约束, 改文案时别越过去:
  *   - 不写"云上": 上云是部署节奏 (本机先跑通, 再迁 Windows 云主机), 不是今天的能力;
- *   - 只写"尚未提供", 不写路线图式的"即将支持" —— 未实现的对比页与设置页在这里不出现.
+ *   - 只写"尚未提供", 不写路线图式的"即将支持" —— 未实现的对比页与设置页在这里不出现;
+ *   - 不介绍站点自己的实现 (前端框架, 后端框架, 进程与调度怎么接到一起): 读这一页的人要判断的是
+ *     策略跑不跑得动, 多快, 产物是什么. 因此这一节只讲引擎侧.
  */
 
 import { ElAlert, ElButton } from 'element-plus';
@@ -31,7 +33,7 @@ interface WorkflowStep {
   detail: string;
 }
 
-interface FoundationRow {
+interface EngineEnvironmentRow {
   term: string;
   detail: string;
 }
@@ -93,19 +95,10 @@ const workflowSteps: readonly WorkflowStep[] = [
   },
 ];
 
-const foundationRows: readonly FoundationRow[] = [
-  { term: '前端', detail: 'Vue 3 + TypeScript + Vite, Element Plus; 全中文界面.' },
-  {
-    term: '后端',
-    detail: 'FastAPI + SQLite; 每张表的查询都按当前用户收口, 跨用户访问一律回 404 而不是 403.',
-  },
+const engineEnvironmentRows: readonly EngineEnvironmentRow[] = [
   {
     term: '回测引擎',
     detail: '包裹 ../QuantTrading 的 C++ 引擎 (BackTest.dll); 平台拉起的是你上传的 Python 策略程序.',
-  },
-  {
-    term: '引擎接入',
-    detail: '一次性进程 + 常驻调度层, 靠文件与退出码通信, 不走 RPC; RunId 由调度侧注入.',
   },
   {
     term: '运行环境',
@@ -262,10 +255,10 @@ const boundaryNotes: readonly string[] = [
     </section>
 
     <section>
-      <SurfaceCard title="技术底座">
+      <SurfaceCard title="引擎与运行环境">
         <dl class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
           <template
-            v-for="row in foundationRows"
+            v-for="row in engineEnvironmentRows"
             :key="row.term"
           >
             <dt class="font-medium text-slate-700">
