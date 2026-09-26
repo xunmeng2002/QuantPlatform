@@ -26,11 +26,13 @@ const parameterGroups = computed(() =>
   groupParameterDescriptors(props.descriptors),
 );
 
-/** 显式工厂而不是模板里的内联箭头: 内联箭头的参数类型要靠上下文推断, 不必赌它推不推得出来. */
-function createParameterUpdater(parameterKey: string) {
-  return (value: ParameterInput): void => {
-    emit('update:modelValue', { ...props.modelValue, [parameterKey]: value });
-  };
+/**
+ * 模板里必须写成 `updateParameter(descriptor.key, $event)` —— 那个 `$event` 不能省.
+ * 若写成 `updateParameter(descriptor.key)`, Vue 会把它当内联语句, 编译出
+ * `($event) => updateParameter(descriptor.key)`: 参数被丢掉, 值永远冒不到父状态, 界面上一声不响.
+ */
+function updateParameter(parameterKey: string, value: ParameterInput): void {
+  emit('update:modelValue', { ...props.modelValue, [parameterKey]: value });
 }
 </script>
 
@@ -55,7 +57,7 @@ function createParameterUpdater(parameterKey: string) {
           :descriptor="descriptor"
           :model-value="modelValue[descriptor.key] ?? ''"
           :error-message="errors[descriptor.key]"
-          @update:model-value="createParameterUpdater(descriptor.key)"
+          @update:model-value="updateParameter(descriptor.key, $event)"
         />
       </div>
     </fieldset>

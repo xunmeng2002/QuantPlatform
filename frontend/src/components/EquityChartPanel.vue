@@ -175,21 +175,28 @@ onMounted(loadEquity);
           <p class="mb-1 text-xs text-slate-500">
             逐日结算权益
           </p>
-          <VChart
-            class="h-72 w-full"
-            :option="equityChartOption"
-            autoresize
-          />
+          <!--
+            高度必须给**外层 div**: vue-echarts 自带一条未分层的 `x-vue-echarts { height: 100% }`,
+            而 Tailwind 的工具类在 `@layer utilities` 里 —— 未分层优先于任何图层, 故直接写在
+            <VChart> 上的 h-72 会被压成 0, 图就画在零高容器里 (画面全空且只有一句 ECharts 告警).
+          -->
+          <div class="h-72 w-full">
+            <VChart
+              :option="equityChartOption"
+              autoresize
+            />
+          </div>
         </div>
         <div>
           <p class="mb-1 text-xs text-slate-500">
             回撤 (相对逐日峰值)
           </p>
-          <VChart
-            class="h-56 w-full"
-            :option="drawdownChartOption"
-            autoresize
-          />
+          <div class="h-56 w-full">
+            <VChart
+              :option="drawdownChartOption"
+              autoresize
+            />
+          </div>
         </div>
       </div>
     </template>

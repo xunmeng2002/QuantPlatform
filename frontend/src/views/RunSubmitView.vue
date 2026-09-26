@@ -406,8 +406,8 @@ onMounted(() => {
             初始资金
             <input
               v-model="initialCapitalText"
-              type="number"
-              step="any"
+              type="text"
+              inputmode="decimal"
               class="rounded border border-line px-2 py-1.5 text-sm"
             >
             <span
