@@ -64,6 +64,17 @@ const adminRoleBadge = computed<StatusPresentation | null>(() => {
   return { label: describeUserType(currentUser.user_type), tone: 'neutral' };
 });
 
+/**
+ * 顶栏标记的地址.
+ *
+ * 走 `:src` 绑定而**不是** `src="/favicon.svg"` 字面量: 静态属性会被 `@vitejs/plugin-vue` 的
+ * `transformAssetUrls` 改写成一句 `import '/favicon.svg'` (该插件在没有 dev server 时用
+ * `includeAbsolute: true`), 而 `public/` 里的文件并不参与打包 —— 生产构建侥幸能过, 但 Vitest
+ * 会把它解析成 `file:///favicon.svg` 并当场抛 `fileURLToPath` (Windows 下该形式非法), 外壳的
+ * 两份 spec 连一条用例都跑不到. 指令绑定不在改写范围内, 公共目录的 URL 就该原样交给浏览器.
+ */
+const brandMarkUrl = '/favicon.svg';
+
 /** 头像位只放首字. 用 `Array.from` 而不是 `[0]`: 显示名可能以表情等代理对字符开头. */
 const avatarInitial = computed(() => Array.from(session.displayName.trim())[0] ?? '?');
 
@@ -92,11 +103,16 @@ async function signOut(): Promise<void> {
           :to="{ name: 'home' }"
           class="flex items-center gap-2"
         >
-          <span
-            class="flex h-7 w-7 items-center justify-center rounded-md bg-brand text-sm font-semibold text-white"
+          <!-- 标记直接引标签页图标那一份文件 (public/favicon.svg), 不在这里复刻一份 SVG: 两处几何数据
+               早晚漂移, 而"应用里的标"与"标签页上的标"本来就该是同一个. 换成几何标记是因为汉字
+               「薪」有 17 画, 塞进 28px 方块里笔画会挤成一团 (D.13 就记过这条). 圆角在文件里已经
+               画好了, 这里不再叠 `rounded-md`; `alt=""` 是因为它纯装饰 —— 紧挨着的「薪火量化」四个
+               字才是这一项的可访问名. 地址为什么走变量见 `brandMarkUrl`. -->
+          <img
+            :src="brandMarkUrl"
+            alt=""
+            class="h-7 w-7"
           >
-            薪
-          </span>
           <span class="text-sm font-semibold text-slate-900">薪火量化</span>
         </RouterLink>
 
