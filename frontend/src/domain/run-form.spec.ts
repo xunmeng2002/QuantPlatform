@@ -7,9 +7,15 @@
 
 import { describe, expect, it } from 'vitest';
 
+import type { LastSubmittedParameters } from '../api/types';
 import type { RunFieldRequirements } from './manifest';
-import { MAXIMUM_RUN_FIELD_VALUE_LENGTH, validateRunForm } from './run-form';
-import type { RunFormInput } from './run-form';
+import {
+  EMPTY_RUN_FIELDS,
+  MAXIMUM_RUN_FIELD_VALUE_LENGTH,
+  buildPrefilledRunFields,
+  validateRunForm,
+} from './run-form';
+import type { RunFieldInputs, RunFormInput } from './run-form';
 
 const UNMAPPED_RUN_FIELDS: RunFieldRequirements = {
   barPeriod: true,
@@ -171,5 +177,101 @@ describe('validateRunForm 的必填与格式', () => {
       'start_trading_day',
       'strategy_id',
     ]);
+  });
+});
+
+describe('buildPrefilledRunFields', () => {
+  function buildPrefill(
+    overrides: Partial<LastSubmittedParameters> = {},
+  ): LastSubmittedParameters {
+    return {
+      run_id: 'run-1',
+      submitted_at: '2026-09-26T03:00:00',
+      match_mode: 'Bar',
+      bar_period: '30m',
+      exchange_id: 'SZSE',
+      instrument_id: '000001',
+      start_trading_day: '20220104',
+      end_trading_day: '20221230',
+      initial_capital: 250000,
+      params: {},
+      ...overrides,
+    };
+  }
+
+  it('记忆里的运行级字段填进来, 数值原样成文本', () => {
+    expect(
+      buildPrefilledRunFields(buildPrefill(), MAPPED_RUN_FIELDS, EMPTY_RUN_FIELDS),
+    ).toEqual({
+      barPeriod: '30m',
+      exchangeId: 'SZSE',
+      instrumentId: '000001',
+      startTradingDay: '20220104',
+      endTradingDay: '20221230',
+      initialCapitalText: '250000',
+    });
+  });
+
+  it('没有记忆时结果恒等于当前输入', () => {
+    const current: RunFieldInputs = {
+      barPeriod: '1d',
+      exchangeId: 'SSE',
+      instrumentId: '600519',
+      startTradingDay: '20240102',
+      endTradingDay: '20241231',
+      initialCapitalText: '500000',
+    };
+
+    expect(buildPrefilledRunFields(null, MAPPED_RUN_FIELDS, current)).toEqual(current);
+  });
+
+  it('单项读不动时只丢那一项, 其余照填', () => {
+    // 日期不是 8 位数字、资金非正: 各自回落当前输入, 不让其余三项跟着失效.
+    const prefill = buildPrefill({
+      start_trading_day: '2022-01-04',
+      initial_capital: 0,
+    });
+
+    expect(
+      buildPrefilledRunFields(prefill, MAPPED_RUN_FIELDS, EMPTY_RUN_FIELDS),
+    ).toEqual({
+      barPeriod: '30m',
+      exchangeId: 'SZSE',
+      instrumentId: '000001',
+      startTradingDay: '',
+      endTradingDay: '20221230',
+      initialCapitalText: '100000',
+    });
+  });
+
+  it('未声明映射的运行级字段不预填: 那两个输入框根本不渲染', () => {
+    expect(
+      buildPrefilledRunFields(buildPrefill(), UNMAPPED_RUN_FIELDS, EMPTY_RUN_FIELDS),
+    ).toEqual({
+      barPeriod: '30m',
+      exchangeId: '',
+      instrumentId: '',
+      startTradingDay: '20220104',
+      endTradingDay: '20221230',
+      initialCapitalText: '250000',
+    });
+  });
+
+  it('超长与含控制字符的取值按运行级字段那套判据挡下', () => {
+    expect(
+      buildPrefilledRunFields(
+        buildPrefill({ bar_period: 'x'.repeat(MAXIMUM_RUN_FIELD_VALUE_LENGTH + 1) }),
+        MAPPED_RUN_FIELDS,
+        EMPTY_RUN_FIELDS,
+      ).barPeriod,
+    ).toBe('');
+
+    expect(
+      buildPrefilledRunFields(
+        buildPrefill({ exchange_id: 'SSE\u0007' }),
+        MAPPED_RUN_FIELDS,
+        EMPTY_RUN_FIELDS,
+      ).exchangeId,
+    ).toBe('');
   });
 });

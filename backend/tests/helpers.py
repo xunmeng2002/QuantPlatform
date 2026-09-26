@@ -316,8 +316,13 @@ async def create_strategy_version_record(
     strategy: StrategyModel,
     uploaded_by: UserModel,
     entry_filename: str = "entry.py",
+    manifest_json: str = "{}",
 ) -> StrategyVersionModel:
-    """直接落库建一个策略版本."""
+    """直接落库建一个策略版本.
+
+    `manifest_json` 默认是空对象 (读它的路径都当"没有声明"处理); 需要按 manifest 做判据的用例
+    自己给一份文本, 不必为了拿一个声明走一遍上传接口.
+    """
 
     return await persist_record(
         database,
@@ -327,7 +332,7 @@ async def create_strategy_version_record(
             version_no=1,
             entry_filename=entry_filename,
             config_filename="StrategyConfig.json",
-            manifest_json="{}",
+            manifest_json=manifest_json,
             source_hash=generate_identifier(),
             storage_path=f"{uploaded_by.id}/strategies/{strategy.id}/1",
             uploaded_by_user_id=uploaded_by.id,
@@ -345,16 +350,22 @@ async def create_run_record(
     order_count: int = BASELINE_ORDER_COUNT,
     balance: float = BASELINE_BALANCE,
     submitted_at: datetime | None = None,
+    params_json: str = "{}",
+    backtest_config_json: str = "{}",
+    run_id: str | None = None,
 ) -> RunModel:
     """直接落库建一个运行.
 
     指标列可取非基线值: 排序与筛选的断言要靠互不相同的取值才区分得开.
+
+    两份配置文本默认为空对象 (与列默认值一致), 需要断言"读回提交时那份配置"的用例自己给文本.
+    `run_id` 只在断言次序时给: 排序若以主键兜平局, 就得先把主键捏在手里.
     """
 
-    run_id = generate_identifier()
+    resolved_run_id = run_id if run_id is not None else generate_identifier()
 
     run = RunModel(
-        id=run_id,
+        id=resolved_run_id,
         user_id=user.id,
         strategy_id=strategy.id,
         strategy_version_id=version.id,
@@ -362,10 +373,12 @@ async def create_run_record(
         trade_count=trade_count,
         order_count=order_count,
         balance=balance,
+        params_json=params_json,
+        backtest_config_json=backtest_config_json,
         # 工作目录名就是主键, 二者是同一件事: 调度侧按 `runs_root / <WorkspacePath>` 找它, 而
         # 提交侧写的正是 `RunId`. 这里写成 `runs/<id>` 会让作业目录嵌进 `runs/runs/<id>`, 与
         # 真实作业对不上——造出来的行于是走不完"目录已存在"以外的任何一条真实路径.
-        workspace_path=run_id,
+        workspace_path=resolved_run_id,
     )
 
     if submitted_at is not None:

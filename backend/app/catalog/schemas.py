@@ -327,3 +327,25 @@ class ResultTableResponse(BaseModel):
     offset: int
     limit: int
     records: list[dict[str, str | int | float | bool | None]]
+
+
+class LastSubmittedParametersResponse(BaseModel):
+    """该用户在该策略下最近一次提交的参数, 供提交页预填.
+
+    字段全可空, 且**没有历史运行是正常状态** (返回 `run_id=None` + 空 `params`, 仍是 200):
+    首次使用某个策略走的就是这条路, 用 404 表达会与"策略不存在/不可见"混为一谈.
+
+    `params` 是策略参数的原始取值 (类型照旧), 不含运行级字段——后者已经拆成上面的具名字段,
+    前端因此不必认识引擎 `BackTest.json` 的键名 (其中有 `BarPreces` 这种引擎侧拼写).
+    """
+
+    run_id: str | None = None
+    submitted_at: datetime | None = None
+    match_mode: MarketDataType | None = None
+    bar_period: str | None = None
+    exchange_id: str | None = None
+    instrument_id: str | None = None
+    start_trading_day: str | None = None
+    end_trading_day: str | None = None
+    initial_capital: float | None = None
+    params: dict[str, object] = Field(default_factory=dict)

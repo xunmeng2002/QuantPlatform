@@ -124,13 +124,30 @@ export function deriveRunFieldRequirements(
   };
 }
 
+/**
+ * 每个参数的初始输入: manifest 的默认值, 能被 `rememberedValues` 顶替的才顶替.
+ *
+ * `rememberedValues` 是上一次提交时的策略参数 (见 `api/strategies.fetchLastSubmittedParameters`).
+ * 一个记忆值要顶替默认值, 必须先过 `coerceParameterInput` —— 判据与用户手填时**同一份**, 故范围
+ * 与类型规则不会长出第二处真相. 过不了的 (越界、已不在选项里、类型不符、空串) 一律回落默认值:
+ * 那份记忆来自旧版本的声明, 而"某个取值在当前版本里还能不能用"只有当前版本说了算.
+ */
 export function createInitialParameterInputs(
   descriptors: ParameterDescriptor[],
+  rememberedValues: Record<string, unknown> = {},
 ): Record<string, ParameterInput> {
   const inputs: Record<string, ParameterInput> = {};
 
   for (const descriptor of descriptors) {
-    inputs[descriptor.key] = initialInputFor(descriptor);
+    const candidateInput = candidateInputFor(
+      descriptor,
+      rememberedValues[descriptor.key],
+    );
+
+    inputs[descriptor.key] =
+      candidateInput !== null && coerceParameterInput(descriptor, candidateInput).ok
+        ? candidateInput
+        : initialInputFor(descriptor);
   }
 
   return inputs;
@@ -214,32 +231,47 @@ function toParameterDescriptor(parameter: ManifestParameter): ParameterDescripto
 }
 
 function initialInputFor(descriptor: ParameterDescriptor): ParameterInput {
+  const defaultInput = candidateInputFor(descriptor, descriptor.defaultValue);
+
+  if (defaultInput !== null) {
+    return defaultInput;
+  }
+
+  // 只有复选框的"未填"是未勾选; 其余控件的"未填"是空串. 没有默认值也不要替用户选第一项:
+  // 那会让他提交一个自己没做过的决定.
+  return descriptor.type === 'boolean' && descriptor.options.length === 0 ? false : '';
+}
+
+/**
+ * 一个取值 → 控件认得的原始输入; 该控件根本表达不了这个取值时回 `null`.
+ *
+ * 默认值与记忆值共用本函数, 故"取值怎么落到控件上"只有这一处: 有 `options` 的参数给出的是
+ * **选项下标** (`coerceParameterInput` 的契约), 没有下标就没有这个输入.
+ */
+function candidateInputFor(
+  descriptor: ParameterDescriptor,
+  value: unknown,
+): ParameterInput | null {
   if (descriptor.options.length > 0) {
-    const defaultIndex = descriptor.options.findIndex((option) =>
-      isSameOptionValue(option.value, descriptor.defaultValue),
+    const optionIndex = descriptor.options.findIndex((option) =>
+      isSameOptionValue(option.value, value),
     );
 
-    // 没有默认值就不要替用户选第一项: 那会让他提交一个自己没做过的决定.
-    return defaultIndex >= 0 ? String(defaultIndex) : '';
+    return optionIndex >= 0 ? String(optionIndex) : null;
   }
 
   if (descriptor.type === 'boolean') {
-    return descriptor.defaultValue === true;
+    return typeof value === 'boolean' ? value : null;
   }
 
-  if (descriptor.isRequired) {
-    return '';
+  if (descriptor.type === 'integer' || descriptor.type === 'number') {
+    return typeof value === 'number' && Number.isFinite(value)
+      ? String(value)
+      : null;
   }
 
-  if (typeof descriptor.defaultValue === 'string') {
-    return descriptor.defaultValue;
-  }
-
-  if (typeof descriptor.defaultValue === 'number') {
-    return String(descriptor.defaultValue);
-  }
-
-  return '';
+  // 空串按"未提供"处理 (同 `readStringValue`), 故它不是候选.
+  return typeof value === 'string' && value !== '' ? value : null;
 }
 
 function readOptionValue(

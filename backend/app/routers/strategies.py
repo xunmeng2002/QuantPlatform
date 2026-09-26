@@ -29,6 +29,7 @@ from ..catalog.pagination import DEFAULT_PAGE_SIZE, MAXIMUM_PAGE_SIZE, fetch_pag
 from ..catalog.schemas import (
     MAXIMUM_STRATEGY_DESCRIPTION_LENGTH,
     MAXIMUM_STRATEGY_NAME_LENGTH,
+    LastSubmittedParametersResponse,
     MessageResponse,
     PageResponse,
     StrategyDetailResponse,
@@ -47,6 +48,7 @@ from ..dependencies import SessionDependency, SettingsDependency
 from ..errors import ConflictError, InvalidRequestError
 from ..ids import generate_identifier
 from ..manifest import StrategyManifest, parse_strategy_manifest
+from ..services.run_prefill import read_last_submitted_parameters
 from ..services.strategy_store import store_strategy_version
 
 
@@ -402,6 +404,50 @@ async def read_strategy_handler(
     strategy = await load_visible_strategy(session, current_user, strategy_id)
 
     return await _build_strategy_detail(session, strategy, current_user)
+
+
+@router.get(
+    "/{strategy_id}/last-submitted-parameters",
+    response_model=LastSubmittedParametersResponse,
+)
+async def read_last_submitted_parameters_handler(
+    strategy_id: str,
+    session: SessionDependency,
+    current_user: CurrentUserDependency,
+) -> LastSubmittedParametersResponse:
+    """该用户在该策略下最近一次提交的参数, 供提交页预填.
+
+    可见性闸与详情同款 (`load_visible_strategy`): 别人共享给你的策略也要能用这个功能. 但
+    **取哪一轮运行**另有归属过滤 (服务层经 `visibility.build_owned_run_query`), 故共享或公开
+    策略下不会把归属人的参数填到你表单里.
+
+    没有历史运行时照常回 200 且字段全空, 不是 404——首次用某个策略走的就是这条路.
+
+    参数**不在这里按范围过滤**: 前端为了渲染控件本来就要逐项判断取值能不能用, 后端再滤一道
+    就是两处真相, 而且会静默吞掉键、让排障变难.
+    """
+
+    strategy = await load_visible_strategy(session, current_user, strategy_id)
+
+    last_submitted_parameters = await read_last_submitted_parameters(
+        session, current_user, strategy.id
+    )
+
+    if last_submitted_parameters is None:
+        return LastSubmittedParametersResponse()
+
+    return LastSubmittedParametersResponse(
+        run_id=last_submitted_parameters.run_id,
+        submitted_at=last_submitted_parameters.submitted_at,
+        match_mode=last_submitted_parameters.match_mode,
+        bar_period=last_submitted_parameters.bar_period,
+        exchange_id=last_submitted_parameters.exchange_id,
+        instrument_id=last_submitted_parameters.instrument_id,
+        start_trading_day=last_submitted_parameters.start_trading_day,
+        end_trading_day=last_submitted_parameters.end_trading_day,
+        initial_capital=last_submitted_parameters.initial_capital,
+        params=last_submitted_parameters.params,
+    )
 
 
 @router.delete("/{strategy_id}", response_model=MessageResponse)

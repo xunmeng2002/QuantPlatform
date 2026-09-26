@@ -279,12 +279,34 @@ export interface RunSubmitPayload {
   params: Record<string, unknown>;
 }
 
+/**
+ * 该用户在该策略下最近一次提交的参数, 供提交页预填.
+ *
+ * 与 `catalog/schemas.py:LastSubmittedParametersResponse` 逐字对应, 字段全可空: `run_id` 为
+ * `null` 即**没有历史运行** (正常状态, 不是错误). 取值一律照原样带回来, 不在这里判能不能用——
+ * 判据是当前那份 manifest 给的控件, 见 `domain/manifest.createInitialParameterInputs`.
+ *
+ * `params` 里只有策略参数: 运行级字段已拆成下面的具名字段, 故前端不必认识引擎 `BackTest.json`
+ * 的键名 (其中有 `BarPreces` 这种引擎侧拼写).
+ */
+export interface LastSubmittedParameters {
+  run_id: string | null;
+  submitted_at: string | null;
+  match_mode: MarketDataType | null;
+  bar_period: string | null;
+  exchange_id: string | null;
+  instrument_id: string | null;
+  start_trading_day: string | null;
+  end_trading_day: string | null;
+  initial_capital: number | null;
+  params: Record<string, unknown>;
+}
+
 export interface JobArtifact {
   /** POSIX 形式, 相对于作业目录, 可含 `/` (`Dump/<RunId>/t_trade.csv`). */
   relative_path: string;
   size_bytes: number;
 }
-
 export interface JobArtifactList {
   run_id: string;
   artifacts: JobArtifact[];

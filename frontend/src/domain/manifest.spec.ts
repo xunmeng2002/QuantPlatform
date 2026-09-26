@@ -273,6 +273,113 @@ describe('createInitialParameterInputs', () => {
   });
 });
 
+describe('createInitialParameterInputs 的预填', () => {
+  function initialInputsWithMemory(
+    parameters: ManifestParameter[],
+    rememberedValues: Record<string, unknown>,
+  ) {
+    const manifest = parseManifestOrThrow(buildManifest({ params: parameters }));
+
+    return createInitialParameterInputs(
+      deriveParameterDescriptors(manifest),
+      rememberedValues,
+    );
+  }
+
+  it('记忆里的取值顶替默认值, 且按类型回到控件认得的形态', () => {
+    expect(
+      initialInputsWithMemory(
+        [
+          { key: 'count', type: 'integer', default: 3 },
+          { key: 'ratio', type: 'number', default: 0.5 },
+          { key: 'label', type: 'string', default: '甲' },
+          { key: 'flag', type: 'boolean', default: false },
+        ],
+        { count: 20, ratio: 0.02, label: '乙', flag: true },
+      ),
+    ).toEqual({ count: '20', ratio: '0.02', label: '乙', flag: true });
+  });
+
+  it('空记忆与纯默认逐键相等', () => {
+    const parameters: ManifestParameter[] = [
+      { key: 'count', type: 'integer', default: 3 },
+      { key: 'label', type: 'string' },
+      { key: 'mode', type: 'integer', options: [{ value: 1 }, { value: 2 }] },
+    ];
+    const manifest = parseManifestOrThrow(buildManifest({ params: parameters }));
+    const descriptors = deriveParameterDescriptors(manifest);
+
+    // 记忆里没有的键 (`undefined`) 与"整个没有记忆"必须落到同一处: 前者是后端少回一个键,
+    // 后者是这个策略没跑过, 两种都不该改变表单.
+    expect(createInitialParameterInputs(descriptors, {})).toEqual(
+      createInitialParameterInputs(descriptors),
+    );
+    expect(createInitialParameterInputs(descriptors, { 无关的键: 1 })).toEqual(
+      createInitialParameterInputs(descriptors),
+    );
+  });
+
+  it('越界、类型不符、空串、非有限数一律回落默认值', () => {
+    // `GridStep` 由绝对价格改成比例之后, 历史运行里存的还是 10.0: 声明了上界的参数会把它滤掉.
+    // 没声明上界的照原样带出来 (那是"最近一次提交"的忠实语义), 故这里只断言"声明了的能挡住".
+    expect(
+      initialInputsWithMemory(
+        [{ key: 'GridStep', type: 'number', default: 0.01, maximum: 0.1 }],
+        { GridStep: 10 },
+      ),
+    ).toEqual({ GridStep: '0.01' });
+
+    expect(
+      initialInputsWithMemory(
+        [{ key: 'count', type: 'integer', default: 3 }],
+        { count: 1.5 },
+      ),
+    ).toEqual({ count: '3' });
+
+    // `true` 冒充 1: 后端那侧也要显式挡掉 bool, 这里同样不能收.
+    expect(
+      initialInputsWithMemory(
+        [{ key: 'count', type: 'integer', default: 3 }],
+        { count: true },
+      ),
+    ).toEqual({ count: '3' });
+
+    expect(
+      initialInputsWithMemory(
+        [{ key: 'flag', type: 'boolean', default: true }],
+        { flag: 'true' },
+      ),
+    ).toEqual({ flag: true });
+
+    expect(
+      initialInputsWithMemory(
+        [{ key: 'label', type: 'string', default: '甲' }],
+        { label: '' },
+      ),
+    ).toEqual({ label: '甲' });
+  });
+
+  it('下拉框的记忆按**取值**找下标, 不在选项里就回落默认值', () => {
+    const parameters: ManifestParameter[] = [
+      {
+        key: 'mode',
+        type: 'integer',
+        default: 2,
+        options: [
+          { value: 1, label: '激进' },
+          { value: 2, label: '稳健' },
+        ],
+      },
+    ];
+
+    expect(initialInputsWithMemory(parameters, { mode: 1 })).toEqual({ mode: '0' });
+    // 选项集合变过: 老版本里的那一档已经不在, 不能悄悄落到别的档上.
+    expect(initialInputsWithMemory(parameters, { mode: 3 })).toEqual({ mode: '1' });
+    // `1` 与 `true` 是同一个下标位置上的两种取值, 按同类型才相等的规则不算命中.
+    expect(initialInputsWithMemory(parameters, { mode: true })).toEqual({ mode: '1' });
+  });
+});
+
 describe('deriveParameterValues', () => {
   function deriveOne(parameter: ManifestParameter, rawInput: string | boolean) {
     const manifest = parseManifestOrThrow(buildManifest({ params: [parameter] }));

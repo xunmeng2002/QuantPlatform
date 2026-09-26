@@ -425,6 +425,98 @@
 
 ---
 
+## D.07 · 2026-09-25 （第七批） P4 前端骨架 + 三处后端前置端点
+
+> 归档于 2026-09-26（主文件再次逼近 50 KB 上限时从 ✅ 区移出）。**下列原文一字未改。**
+
+- **交付**：`frontend/` 从零到闭环——47 个源文件 / 约 6850 行。技术栈
+  **Vue 3.5 + TS 6.0 + Vite 8.3 + Tailwind v4 + Pinia 3 + vue-router 4.6**，
+  HTTP 用**原生 `fetch`**（不引 axios），**不引 UI 组件库**（表格、分页、
+  模态框、提示条、表单控件全部自写，共 14 个 `components/`）；
+  依赖只有 `vue`/`vue-router`/`pinia` 三个。目录：`api/`（`client.ts` 单一出入口
+  + `types.ts` 手写契约 + 四个域模块）、`stores/`（session / strategy-catalog /
+  user-directory）、`router/`（懒加载 + 登录守卫）、`domain/`（纯逻辑，
+  六个模块 + 四份 spec）、`components/`、`composables/`、`views/`（8 个页面）。
+- **后端三处前置件**（都是前端做不下去的硬原因，不是顺手加的）：
+  `GET /api/users/directory`（受限用户目录，授权表单选人用）、
+  `POST /api/users` 的 `display_name` **收紧为必填**（空白 → 400
+  「显示名不能为空白」）、`StrategyVersionResponse` 增 `manifest_json`
+  纯透传（提交表单按它生成控件）、`GET /api/runs/{id}/files` 与
+  `/files/{relpath}`（防穿越 + 一律附件下发）。
+- **验收**：后端 **406 项通过 / 4 项 deselect**（真引擎那 4 项默认不跑，
+  新增 26 项含目录、显示名、manifest 透传、产物四条线）；前端
+  `type-check` 无错、`vitest run` **58 项全绿**（5 个 spec，只测纯逻辑，
+  不装 `@vue/test-utils` 与 jsdom）、`vite build` 成功（按路由分包，
+  证明懒加载真的生效）。
+- **代理链路冒烟 13 项**（真后端 + 真 Vite 代理，全程打
+  `http://[::1]:5173/api`；用**一次性临时库**，`QUANT_DATABASE_URL` /
+  `QUANT_RUNS_ROOT` / `QUANT_USER_LIBRARY_ROOT` 都指向 `%TEMP%`，
+  **项目自带的 `backend/data/` 与 `runs/` 一行未碰**）：首页 200、
+  `/api/health` 无令牌 401、未知路径交前端路由、登录换到令牌、
+  建号缺 `display_name` 得 **422 且 `detail` 是数组**、显示名全空白得 400、
+  建两个号 201、目录只回 `id` + `display_name`、`query` 过滤命中、
+  **目录排除了自己**、运行与策略列表回 `{total, offset, limit, records}` 信封。
+- **⚠️ Vite 只绑 `[::1]:5173`**（IPv6 回环），`http://127.0.0.1:5173` 连不上——
+  浏览器用 `http://localhost:5173/` 即可（Windows 上 `localhost` 先解析到 `::1`），
+  但拿 `curl`/脚本探活的人会以为服务没起。**代理目标是显式写死的
+  `http://127.0.0.1:8000`**，故它打后端走的是 IPv4，两边不冲突。
+- **两处「前端比后端更严」的偏差（本批发现的真问题）**：`ManifestParameter`
+  的 `label` / `type` 与 `StrategyManifest.params` 在 TS 里**都写成了必填**，
+  而后端 `StrategyParameter` 给这些字段都写了默认值、`params` 是
+  `default_factory=list`。后果是**一份完全合法的 manifest 会被前端判为"读不动"，
+  参数表单整个不渲染**——这是本项目最忌讳的「界面放行、后端 400」的**反面**
+  （界面拦住、后端放行），且用户对着一个不出现的控件无从下手。已按后端默认值
+  放宽（省 `type` 即 `string`、`label` 空串回落 `key`、`params` 可省），
+  各补一条回归用例。**教训：契约要从后端源码逐字读，不能凭接口形状推。**
+- **错误信封的三处契约在客户端逐条对上**（`api/client.ts`）：422 的 `detail`
+  是**数组**（只读 `loc`/`msg`，**不读 `input`**，免得把提交的取值渲染到界面上）、
+  401 **可能没有 `detail`**（Starlette 层就挡了，回固定文案
+  「登录状态已失效, 请重新登录」）、`fetch` 抛异常归一成 `status === 0`
+  （「无法连接到服务器, 请确认后端已启动」）。三类各有断言。
+- **时间戳必须补 `Z`**：`clock.utc_now()` 回的是**朴素 UTC**（JSON 里没有
+  时区标记），`new Date(...)` 会按本地时区解析，UTC+8 下显示**早 8 小时**。
+  客户端一律经 `domain/format.ts` 的解析函数补 `Z` 再格式化，并给这条专门
+  写了回归用例（用例在 UTC 环境下是盲的，注释已写明这一点）。服务端发的是
+  朴素 UTC 这件事本身没改——改它要动全仓所有时间序列化，不属本批。
+- **表单里没有行情模式选择**（Tick 拍板不给）：`match_mode` 固定 `Bar`，
+  判据是常量 `SUBMITTABLE_MATCH_MODE = 'Bar'`，与后端的
+  `SUBMITTABLE_MATCH_MODES` 同名同值。参数控件的派生规则与后端
+  `validate_parameter_value` **同一套语义，报错文案逐字照抄**
+  （「需为整数」「不得小于 0.1」「必填」…）——界面放行而后端回 400 是本项目
+  最忌讳的「点了有反应但没用」。
+- **版本号照抄本机同族项目的已验证组合，不追最新**：`vue-router` 最新 5.x、
+  `pinia` 4.x、`vitest` 5.x、`typescript` 7.x **全是主版本跳跃**，
+  在 P4 顺带做迁移审查是拿验收换未知数。四处都钉在老主版本上，日后单独评估。
+  **有意不照抄兄弟项目的**：`axios`（改原生 fetch）、`element-plus`（最小集）、
+  `sass`（改 Tailwind）、`unplugin-auto-import`（隐式全局与「名称即意图」相冲）。
+- **`defect_tools`（又名 `amies`）不在本机**（全盘搜过 `D:/Gitee`、`D:/Github`、
+  `D:/Files`、`C:/Users/...`，含 `variables.css` 与 `tailwind.config*` 的文件名
+  搜索；只有两份 PROGRESS 与计划正文提到它、**都不给路径**）。故"与它有意分叉"
+  这句话的可核对依据只能是**本机真实存在的同族项目**
+  `D:/Gitee/ShopKit/frontend-platform` 与 `D:/Gitee/RMS/frontend-admin`
+  （同一作者、同栈）。**注意它们与计划 §8/§10 的描述不同**：样式是
+  **SCSS + Element Plus**、没有 `variables.css`；计划的这两节已按实况回写。
+- **踩到并写进 `frontend/.gitignore` 的一个坑**：仓根 `.gitignore` 是从 Python
+  模板来的，`lib/` `runs/` `users/` `build/` `target/` 等是**无锚点**模式，
+  会匹配任意层级——于是 `frontend/src/lib/x.ts` 或
+  `frontend/src/views/runs/x.vue` 会被**静默忽略**（文件写出来了，
+  `git status` 里什么都没有）。故前端的纯逻辑目录叫 `domain/`、运行页面是扁平的
+  `views/RunListView.vue`。`frontend/.gitignore` 里留了自查命令
+  `git check-ignore -v --no-index <路径>`。
+- **新记的已知缺口**（见 `platform-plan.md` §12.15–12.18）：
+  `display_name` **无唯一约束**（重名时授权表单分不清两个人，选错人等于把策略
+  授权给错的人；修法是加唯一约束，但那会新增一条 409 路径，超出 P4）；
+  授权被撤销后策略从可见列表消失，**运行列表与详情里的策略名回落成显示 id**；
+  生产部署仍靠 Vite 代理（**两个终端**），FastAPI 托管 `dist/` 或反向代理留 P8；
+  前端**无 e2e**，闭环靠手动验收（这也是计划原本的验收方式）。
+- **文档回写**：`platform-plan.md`（§7.5 目录端点的落地与泄漏面收口、§8 目录树
+  与本地开发起法、§9 新增目录端点行并订正 P3/P5 的落地范围、§10 页面表按实况改、
+  §11 的 P4 行、§12 新增缺口、§13 新增拍板表）、`PROGRESS.md`（本条 +
+  **Node 版本由 24.15 订正为 24.16** + 备注），归档（**D.02 与 D.03 整条搬入**
+  ——✅ 区超 5 批且主文件越过 50 KB 目标；Q.05 关闭、Q.06 半关闭）。
+
+---
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型

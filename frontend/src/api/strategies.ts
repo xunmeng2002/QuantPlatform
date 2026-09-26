@@ -8,6 +8,7 @@
 
 import { request } from './client';
 import type {
+  LastSubmittedParameters,
   MessageResponse,
   PageResponse,
   Strategy,
@@ -59,6 +60,20 @@ export function uploadStrategyVersion(
   return request<StrategyVersion>(
     `/strategies/${encodeURIComponent(strategyId)}/versions`,
     { method: 'POST', formData },
+  );
+}
+
+/**
+ * 该用户在该策略下最近一次提交的参数, 供提交页预填.
+ *
+ * 没有历史运行时也是 200 (字段全空), 故调用方不必区分"没跑过"与"请求成功". 取的是**本人**的
+ * 轮次——共享与公开策略下拿到的不是归属人的参数.
+ */
+export function fetchLastSubmittedParameters(
+  strategyId: string,
+): Promise<LastSubmittedParameters> {
+  return request<LastSubmittedParameters>(
+    `/strategies/${encodeURIComponent(strategyId)}/last-submitted-parameters`,
   );
 }
 

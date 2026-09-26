@@ -6,24 +6,31 @@
  * 决定 `exchange_id` / `instrument_id` / `bar_period` 显示不显示. 平台**按 manifest 渲染策略配置,
  * 不读策略自带的配置文件**, 所以这里不能有任何写死的参数控件.
  *
+ * 选中策略时按"你上次提交的那一份"预填 (参数与运行级字段都填): 每次回到这个页面都要重敲一遍
+ * 标的、日期、资金与一整组参数, 是纯粹的重复劳动. 取值由后端从该用户在该策略下最新那一轮运行里
+ * 解出来 (`GET /api/strategies/{id}/last-submitted-parameters`), 前端只按当前 manifest 判一判
+ * 能不能用 (见 `domain/manifest.createInitialParameterInputs`)——那份记忆可能来自旧版本.
+ *
  * 表单里**没有行情模式选择**: 提交侧当前只收 Bar (`run_submission.MATCH_MODE_NOT_SUBMITTABLE_MESSAGE`),
  * 给了 Tick 也只是让用户点一个必然被拒的选项.
  */
 
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 
 import { ApiError } from '../api/client';
 import { submitRun } from '../api/runs';
-import { fetchStrategyDetail } from '../api/strategies';
+import { fetchLastSubmittedParameters, fetchStrategyDetail } from '../api/strategies';
 import { SUBMITTABLE_MATCH_MODE } from '../api/types';
-import type { MarketDataType, RunSubmitPayload, StrategyDetail } from '../api/types';
+import type { LastSubmittedParameters, MarketDataType, RunSubmitPayload, StrategyDetail } from '../api/types';
 import EmptyNotice from '../components/EmptyNotice.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
 import ParameterForm from '../components/ParameterForm.vue';
 import { parseStrategyManifest, createInitialParameterInputs, deriveParameterDescriptors, deriveParameterValues, deriveRunFieldRequirements } from '../domain/manifest';
 import type { ParameterInput, RunFieldRequirements } from '../domain/manifest';
-import { validateRunForm } from '../domain/run-form';
+import { EMPTY_RUN_FIELDS, buildPrefilledRunFields, validateRunForm } from '../domain/run-form';
+import type { RunFieldInputs } from '../domain/run-form';
+import { formatDateTime } from '../domain/format';
 import { useStrategyCatalogStore } from '../stores/strategy-catalog';
 
 /** 提交侧唯一可用的行情模式, 取自 `api/types` 的契约镜像而不是写死字面量. */
@@ -47,13 +54,19 @@ const submitErrorMessage = ref<string | null>(null);
 const isSubmitting = ref(false);
 const hasAttemptedSubmit = ref(false);
 
-const barPeriod = ref('');
-const exchangeId = ref('');
-const instrumentId = ref('');
-const startTradingDay = ref('');
-const endTradingDay = ref('');
-const initialCapitalText = ref('100000');
+const runFields = ref<RunFieldInputs>({ ...EMPTY_RUN_FIELDS });
 const parameterInputs = ref<Record<string, ParameterInput>>({});
+
+/** 当前这份表单套用的记忆; `null` 即没有 (提示条据此显隐). */
+const appliedPrefill = ref<LastSubmittedParameters | null>(null);
+
+/**
+ * 选择切换的序号, 用来丢弃"迟到的回包".
+ *
+ * 快速连着换两次策略时, 第一次的请求可能后到, 于是 A 策略的详情 (与它的记忆) 落进 B 策略的表单.
+ * 每次发起前自增并记下, 回包时若已不是最新就整份丢掉.
+ */
+let selectionToken = 0;
 
 const selectedVersion = computed(
   () =>
@@ -98,17 +111,12 @@ const submissionPayload = computed<RunSubmitPayload | null>(() => {
   }
 
   const formValidation = validateRunForm({
+    ...runFields.value,
     strategyId: selectedStrategyId.value,
     strategyVersionId: selectedVersionId.value,
     matchMode: MATCH_MODE,
     isMatchModeSupported: isMatchModeSupported.value,
     runFieldRequirements: runFieldRequirements.value,
-    barPeriod: barPeriod.value,
-    exchangeId: exchangeId.value,
-    instrumentId: instrumentId.value,
-    startTradingDay: startTradingDay.value,
-    endTradingDay: endTradingDay.value,
-    initialCapitalText: initialCapitalText.value,
     parameterValues: parameterDerivation.value.values,
   });
 
@@ -125,17 +133,12 @@ const visibleFieldErrors = computed<Record<string, string>>(() => {
 
   if (submissionPayload.value === null) {
     const formValidation = validateRunForm({
+      ...runFields.value,
       strategyId: selectedStrategyId.value,
       strategyVersionId: selectedVersionId.value,
       matchMode: MATCH_MODE,
       isMatchModeSupported: isMatchModeSupported.value,
       runFieldRequirements: runFieldRequirements.value,
-      barPeriod: barPeriod.value,
-      exchangeId: exchangeId.value,
-      instrumentId: instrumentId.value,
-      startTradingDay: startTradingDay.value,
-      endTradingDay: endTradingDay.value,
-      initialCapitalText: initialCapitalText.value,
       parameterValues: parameterDerivation.value.ok
         ? parameterDerivation.value.values
         : {},
@@ -155,15 +158,45 @@ const isSubmitDisabled = computed(
   () => isSubmitting.value || selectedVersion.value === null,
 );
 
-// 换版本 (或换策略) 就把参数控件重置成该版本的默认值: 沿用上一个版本的输入, 会把只在旧版本里
-// 存在的取值带进来, 而后端对未声明的参数是直接 400.
-watch(descriptors, (nextDescriptors) => {
-  parameterInputs.value = createInitialParameterInputs(nextDescriptors);
-});
+/**
+ * 按当前选中的版本重算整张表单: 参数控件重置成该版本的默认值 (能被记忆顶替的顶替), 运行级字段
+ * 由记忆补上.
+ *
+ * 换版本时**参数一定会重建**: 沿用上一个版本的输入, 会把只在旧版本里存在的取值带进来, 而后端对
+ * 未声明的参数是直接 400. 运行级字段反过来只补不改——它们与版本无关, 而用户刚敲进去的东西不该
+ * 因为换了个版本就没了 (`buildPrefilledRunFields` 的回落值是当前输入).
+ *
+ * 这里**没有 watcher**: 预填要发一次请求, 必然晚于 `descriptors` 变化, 用 watcher 重置就一定会
+ * 把填好的记忆清掉. 改成两个 `@change` 各调一次本函数, 重置点因此只有这一处.
+ */
+function applyFormForCurrentSelection(): void {
+  const prefill = appliedPrefill.value;
+
+  parameterInputs.value = createInitialParameterInputs(
+    descriptors.value,
+    prefill?.params ?? {},
+  );
+  runFields.value = buildPrefilledRunFields(
+    prefill,
+    runFieldRequirements.value,
+    runFields.value,
+  );
+}
+
+/** 「重置为默认值」: 丢掉本轮套用的那份记忆, 把整张表单恢复成 manifest 默认值. */
+function resetToDefaults(): void {
+  appliedPrefill.value = null;
+  runFields.value = { ...EMPTY_RUN_FIELDS };
+  parameterInputs.value = createInitialParameterInputs(descriptors.value);
+  hasAttemptedSubmit.value = false;
+}
 
 async function loadStrategyDetail(strategyId: string): Promise<void> {
+  const requestToken = ++selectionToken;
+
   strategyDetail.value = null;
   selectedVersionId.value = '';
+  appliedPrefill.value = null;
   loadErrorMessage.value = null;
 
   if (!strategyId) {
@@ -173,22 +206,60 @@ async function loadStrategyDetail(strategyId: string): Promise<void> {
   isLoadingVersions.value = true;
 
   try {
-    const detail = await fetchStrategyDetail(strategyId);
+    const [detail, prefill] = await Promise.all([
+      fetchStrategyDetail(strategyId),
+      readLastSubmittedParameters(strategyId),
+    ]);
+
+    if (requestToken !== selectionToken) {
+      return;
+    }
 
     strategyDetail.value = detail;
+    appliedPrefill.value = prefill;
     // 版本号倒序, 故第一个就是最新版本 —— 这也是「缺省最新」的含义.
     selectedVersionId.value = detail.versions[0]?.id ?? '';
+
+    // 顺序有意如此: 这两行读的都是上面刚写下的 state, 故先落 state 再算表单.
+    applyFormForCurrentSelection();
   } catch (error) {
+    if (requestToken !== selectionToken) {
+      return;
+    }
+
     loadErrorMessage.value =
       error instanceof ApiError ? error.detail : '加载策略版本失败';
   } finally {
-    isLoadingVersions.value = false;
+    if (requestToken === selectionToken) {
+      isLoadingVersions.value = false;
+    }
+  }
+}
+
+/**
+ * 上次提交的参数; 取不到就当没有.
+ *
+ * 预填是锦上添花: 这一路失败不该让整张表单加载不出来 (策略详情那条路径的失败才是致命的, 故它
+ * 照常报错). 无令牌 (401) 之类的失败在这里与"没跑过"落到同一种表现——空表单.
+ */
+async function readLastSubmittedParameters(
+  strategyId: string,
+): Promise<LastSubmittedParameters | null> {
+  try {
+    return await fetchLastSubmittedParameters(strategyId);
+  } catch {
+    return null;
   }
 }
 
 function handleStrategyChange(): void {
   hasAttemptedSubmit.value = false;
   void loadStrategyDetail(selectedStrategyId.value);
+}
+
+function handleVersionChange(): void {
+  hasAttemptedSubmit.value = false;
+  applyFormForCurrentSelection();
 }
 
 async function submit(): Promise<void> {
@@ -252,6 +323,20 @@ onMounted(() => {
       class="space-y-6"
       @submit.prevent="submit"
     >
+      <div
+        v-if="appliedPrefill?.run_id"
+        class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-line bg-surface px-3 py-2 text-xs text-slate-500"
+      >
+        <span>已按你上次提交的参数填充 ({{ formatDateTime(appliedPrefill.submitted_at) }})</span>
+        <button
+          type="button"
+          class="text-brand hover:underline"
+          @click="resetToDefaults"
+        >
+          重置为默认值
+        </button>
+      </div>
+
       <fieldset class="space-y-4 rounded-lg border border-line bg-surface p-4">
         <legend class="px-1 text-sm font-semibold text-slate-700">
           策略与版本
@@ -288,6 +373,7 @@ onMounted(() => {
               v-model="selectedVersionId"
               class="rounded border border-line bg-surface px-2 py-1.5 text-sm"
               :disabled="isLoadingVersions || strategyDetail === null"
+              @change="handleVersionChange"
             >
               <option value="">
                 {{ strategyDetail === null ? '请先选择策略' : '没有可用版本' }}
@@ -365,7 +451,7 @@ onMounted(() => {
           <label class="flex flex-col gap-1 text-sm text-slate-600">
             开始交易日
             <input
-              v-model="startTradingDay"
+              v-model="runFields.startTradingDay"
               type="text"
               inputmode="numeric"
               maxlength="8"
@@ -385,7 +471,7 @@ onMounted(() => {
           <label class="flex flex-col gap-1 text-sm text-slate-600">
             结束交易日
             <input
-              v-model="endTradingDay"
+              v-model="runFields.endTradingDay"
               type="text"
               inputmode="numeric"
               maxlength="8"
@@ -405,7 +491,7 @@ onMounted(() => {
           <label class="flex flex-col gap-1 text-sm text-slate-600">
             初始资金
             <input
-              v-model="initialCapitalText"
+              v-model="runFields.initialCapitalText"
               type="text"
               inputmode="decimal"
               class="rounded border border-line px-2 py-1.5 text-sm"
@@ -419,7 +505,7 @@ onMounted(() => {
           <label class="flex flex-col gap-1 text-sm text-slate-600">
             K 线周期 (bar_period)
             <input
-              v-model="barPeriod"
+              v-model="runFields.barPeriod"
               type="text"
               class="rounded border border-line px-2 py-1.5 text-sm"
             >
@@ -439,7 +525,7 @@ onMounted(() => {
           >
             交易所 (exchange_id)
             <input
-              v-model="exchangeId"
+              v-model="runFields.exchangeId"
               type="text"
               class="rounded border border-line px-2 py-1.5 text-sm"
             >
@@ -459,7 +545,7 @@ onMounted(() => {
           >
             合约 (instrument_id)
             <input
-              v-model="instrumentId"
+              v-model="runFields.instrumentId"
               type="text"
               class="rounded border border-line px-2 py-1.5 text-sm"
             >

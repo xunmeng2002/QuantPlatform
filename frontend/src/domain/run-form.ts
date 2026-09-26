@@ -12,7 +12,11 @@
  * 纯函数, 故能直接单测: 视图只负责把校验结果画出来.
  */
 
-import type { MarketDataType, RunSubmitPayload } from '../api/types';
+import type {
+  LastSubmittedParameters,
+  MarketDataType,
+  RunSubmitPayload,
+} from '../api/types';
 import type { RunFieldRequirements } from './manifest';
 
 /** 与 `run_submission.MAXIMUM_RUN_FIELD_VALUE_LENGTH` 一致. */
@@ -20,19 +24,35 @@ export const MAXIMUM_RUN_FIELD_VALUE_LENGTH = 64;
 
 const TRADING_DAY_PATTERN = /^\d{8}$/;
 
-export interface RunFormInput {
-  strategyId: string;
-  strategyVersionId: string;
-  matchMode: MarketDataType;
-  /** 选中的版本是否支持该行情模式 (`manifest.supported_match_modes`). */
-  isMatchModeSupported: boolean;
-  runFieldRequirements: RunFieldRequirements;
+const INITIAL_CAPITAL_TEXT = '100000';
+
+/** 表单里六个运行级控件的输入, 键名与 `RunFormInput` 的同名字段一致, 便于整体展开. */
+export interface RunFieldInputs {
   barPeriod: string;
   exchangeId: string;
   instrumentId: string;
   startTradingDay: string;
   endTradingDay: string;
   initialCapitalText: string;
+}
+
+/** 表单刚打开时的运行级输入. */
+export const EMPTY_RUN_FIELDS: RunFieldInputs = {
+  barPeriod: '',
+  exchangeId: '',
+  instrumentId: '',
+  startTradingDay: '',
+  endTradingDay: '',
+  initialCapitalText: INITIAL_CAPITAL_TEXT,
+};
+
+export interface RunFormInput extends RunFieldInputs {
+  strategyId: string;
+  strategyVersionId: string;
+  matchMode: MarketDataType;
+  /** 选中的版本是否支持该行情模式 (`manifest.supported_match_modes`). */
+  isMatchModeSupported: boolean;
+  runFieldRequirements: RunFieldRequirements;
   /** 已由 `deriveParameterValues` 收好类型的策略参数, 这里不再复验. */
   parameterValues: Record<string, unknown>;
 }
@@ -40,6 +60,103 @@ export interface RunFormInput {
 export type RunFormValidation =
   | { ok: true; payload: RunSubmitPayload }
   | { ok: false; errors: Record<string, string> };
+
+/**
+ * 用上一次提交的运行级字段填表: 逐字段"能用就用, 不能用就原样留着".
+ *
+ * 判据复用 `validateRunForm` 的那三个读取器 (一次性 `errors` 对象用完即丢), 故界面上的运行级
+ * 规则**只有一处**: 记忆里的取值若在本表单上会被判错, 那它就不该被填进来.
+ *
+ * 回落到 `current` 而不是空串, 是为了不静默抹掉用户已经敲进去的东西——记忆是锦上添花, 每次重新
+ * 载入就把用户填好的一半表单清掉, 比不预填更糟. `prefill` 为 `null` (没跑过这个策略) 时结果
+ * 恒等于 `current`, 与没有这个功能时一模一样.
+ *
+ * `exchange_id` / `instrument_id` 未声明映射时不预填: 那两个输入框在界面上根本不渲染, 填了只是
+ * 死数据 (`validateRunForm` 也会把它丢掉).
+ */
+export function buildPrefilledRunFields(
+  prefill: LastSubmittedParameters | null,
+  requirements: RunFieldRequirements,
+  current: RunFieldInputs,
+): RunFieldInputs {
+  return {
+    barPeriod: rememberedRunField(
+      prefill?.bar_period,
+      'bar_period',
+      true,
+      current.barPeriod,
+    ),
+    exchangeId: rememberedRunField(
+      prefill?.exchange_id,
+      'exchange_id',
+      requirements.exchangeId,
+      current.exchangeId,
+    ),
+    instrumentId: rememberedRunField(
+      prefill?.instrument_id,
+      'instrument_id',
+      requirements.instrumentId,
+      current.instrumentId,
+    ),
+    startTradingDay: rememberedTradingDay(
+      prefill?.start_trading_day,
+      'start_trading_day',
+      current.startTradingDay,
+    ),
+    endTradingDay: rememberedTradingDay(
+      prefill?.end_trading_day,
+      'end_trading_day',
+      current.endTradingDay,
+    ),
+    initialCapitalText: rememberedInitialCapitalText(
+      prefill?.initial_capital,
+      current.initialCapitalText,
+    ),
+  };
+}
+
+function rememberedRunField(
+  rememberedValue: string | null | undefined,
+  fieldName: string,
+  isRequired: boolean,
+  fallbackValue: string,
+): string {
+  const errors: Record<string, string> = {};
+  const acceptedValue = readRunFieldValue(
+    rememberedValue ?? '',
+    fieldName,
+    errors,
+    isRequired,
+  );
+
+  return acceptedValue ?? fallbackValue;
+}
+
+function rememberedTradingDay(
+  rememberedValue: string | null | undefined,
+  fieldName: string,
+  fallbackValue: string,
+): string {
+  const errors: Record<string, string> = {};
+
+  return (
+    readTradingDay(rememberedValue ?? '', fieldName, errors) ?? fallbackValue
+  );
+}
+
+function rememberedInitialCapitalText(
+  rememberedValue: number | null | undefined,
+  fallbackValue: string,
+): string {
+  const errors: Record<string, string> = {};
+  const rememberedText =
+    typeof rememberedValue === 'number' && Number.isFinite(rememberedValue)
+      ? String(rememberedValue)
+      : '';
+  const parsedValue = readInitialCapital(rememberedText, errors);
+
+  return parsedValue === null ? fallbackValue : rememberedText;
+}
 
 export function validateRunForm(input: RunFormInput): RunFormValidation {
   const errors: Record<string, string> = {};

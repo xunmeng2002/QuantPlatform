@@ -47,6 +47,25 @@ MATCH_MODE_VALUES = {MarketDataType.BAR: 3}
 # 可提交的行情模式即"引擎取值已知"的那些: 两者是同一件事, 故由同一张表派生.
 SUBMITTABLE_MATCH_MODES = frozenset(MATCH_MODE_VALUES)
 
+# 反查表由同一张表翻转而来: 读回 `MatchMode` 时的对应关系因此不可能与写出去的那份不一致.
+MARKET_DATA_TYPES_BY_ENGINE_VALUE = {
+    engine_value: match_mode for match_mode, engine_value in MATCH_MODE_VALUES.items()
+}
+
+
+def resolve_market_data_type(engine_value: object) -> MarketDataType | None:
+    """`MatchMode` 那个 int 反查回行情模式; 未收录或不是整数时回 `None`.
+
+    回 `None` 而不是猜一个: 平台只提交得了 Bar, 库里出现别的取值说明这份配置不是本平台写的
+    (或来自日后放开了 Tick 的版本). 让界面留默认值, 比替用户认领一个撮合规则安全得多.
+    """
+
+    # bool 是 int 的子类, 而 JSON 的 `true` 落到这里只可能是坏数据, 不能当 1 去查表.
+    if isinstance(engine_value, bool) or not isinstance(engine_value, int):
+        return None
+
+    return MARKET_DATA_TYPES_BY_ENGINE_VALUE.get(engine_value)
+
 
 def resolve_match_mode(match_mode: MarketDataType) -> int:
     """行情模式对应的引擎取值.

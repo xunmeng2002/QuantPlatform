@@ -31,16 +31,89 @@ Python 策略**。
 | D.04 | P2b 策略授权共享（`PUT /{id}/grants` / 授权驱动可见性；审核修正见 D.05） |
 | D.05 | P2b 审核修正与测试补强（上限判据 / 可见性回归 / 两处文案订正；**一条残余风险与一处行宽待办**见原文） |
 | D.06 | P3 runner 本体 + `params` schema 定案（`argv[0]` 结论订正 / 两处 CAS 覆盖缺口 / P3 六项已知缺口；短版见 ✅ 区） |
+| D.07 | P4 前端骨架 + 三处后端前置端点（受限用户目录 / 显示名必填 / `manifest_json` 透传 / 产物清单与下载；含 Vite 只绑 `[::1]`、仓根 `.gitignore` 静默吞源码等踩坑记录） |
 | Q.01 | manifest 的 `params` schema 细节未定（**已定案**，见 D.06） |
 | Q.02 | `permission_type` 判定语义未定（**已拍板不判定**，见 D.06） |
 | Q.03 | 归属人从哪儿得知同事的 `user_id`（**已拍板：受限用户目录**） |
 | Q.04 | P4 前端样式 Tailwind 还是纯 CSS（**已拍板 Tailwind**，与 `defect_tools` 有意分叉） |
-| Q.05 | 受限用户目录的泄漏面评审（**已随 P4 落地并收口**，见 D.07） |
+| Q.05 | 受限用户目录的泄漏面评审（**已随 P4 落地并收口**，见归档 D.07） |
 | Q.06 | Tick 三档撮合语义未定（**表单侧已定**＝不显示；引擎侧仍未定，短版见 ❓） |
 
 ---
 
 ## ✅ 已完成
+
+### D.10 · 2026-09-26 （第十批） 提交页按策略预填「上一次提交的参数」
+
+- **起因（用户原话）**：「现在每次新建回测要重新输入好多参数，能否针对每个策略保存上一次使用
+  参数，在新建回测时，自动填充？」——每次回到提交页都要手敲标的、日期区间、初始资金、
+  K 线周期与一整组策略参数，是纯粹的重复劳动。
+- **用户拍板的范围**：记住的 = **策略参数 + 运行级字段**（标的 / 日期 / 初始资金 / 周期）；
+  「上一次」= **最近一次提交**（不论成败、是否还在跑）；另给一个**「重置为默认值」**按钮；
+  粒度 **(用户, 策略)**，**绝不跨用户**（共享策略下也不能把别人的参数填给你）。
+- **不新建表**：`Runs` 提交时本就写了两份渲染好的配置文本（`ParamsJson` = 策略配置、
+  `BacktestConfigJson` = 引擎 `BackTest.json`，见 `run_submission.py`），「上一次用的参数」就是
+  **该用户在该策略下最新那一轮**的这两份文本，派生即可——这也天然满足"不论成败都算"：
+  排在最前的是最近一次提交，与它成没成功无关。（`Base.metadata.create_all` 加不了列，
+  故刻意不碰 schema。）
+- **后端**：新模块 `services/run_prefill.py`（纯读取）+ `catalog/schemas.py` 一个响应模型 +
+  `routers/strategies.py` 一条 `GET /{strategy_id}/last-submitted-parameters`
+  （可见性闸用 `load_visible_strategy`，共享给你的策略也要能用）+ `engine_config.py` 加
+  `resolve_market_data_type`（由 `MATCH_MODE_VALUES` **反查**，int 与枚举的对应关系仍只有一处真相）。
+  四条要点：① 归属过滤经 `build_owned_run_query`（该模块禁止路由自己拼 `where`），排序照调度器的
+  `(submitted_at, id)` **双键兜平局**（Windows 上 `SubmittedAt` 只有毫秒精度，单键不确定）；
+  ② 引擎键名反查——`MatchMode → 行情模式`、**`BarPreces` → `bar_period`（引擎侧既有拼写，
+  不是笔误）**、`StartTradingDay` / `EndTradingDay` / `InitialCapital` 直取，
+  `MatchMode` 与 `InitialCapital` 用 `isinstance` 验类型，**单个坏值只丢自己那一项**；
+  ③ `params` 用**该运行自己那个版本**的 manifest 的 `named_run_field_keys()` 做差集剔掉运行级键
+  （manifest 已保证参数键不与运行级键撞名，故差集精确），**后端不做范围过滤**——前端为渲染控件
+  本就要逐项判可用性，后端再滤一道就是两处真相，还会静默吞键；④ **坏 JSON 记 warning 后回
+  「没有记忆」**，绝不因一轮坏数据让提交页报错。**无历史回 200 而非 404**（`run_id=None` + 空
+  `params`）：404 会与「策略不存在 / 不可见」混为一谈，而首次使用这个策略走的就是这条路。
+- **前端**：`api/types.ts` + `api/strategies.ts` 的取数（URL 挂在 `/api/strategies/...` 下，
+  改地址时两边一起 grep 得到）；两处纯函数——`manifest.createInitialParameterInputs` 扩一个
+  `rememberedValues` 形参（候选值一律**再用既有的 `coerceParameterInput` 过一遍**，越界 / 类型不符 /
+  已不在选项里 / 非有限数一律回落默认值，范围规则因此不必重写）、
+  `run-form.buildPrefilledRunFields`（逐字段复用私有的 `readTradingDay` / `readInitialCapital` /
+  `readRunFieldValue`，故界面上的运行级规则仍**只有一处**）；`RunSubmitView.vue` 接线 + 提示条
+  「已按你上次提交的参数填充（提交时间）」+ 重置按钮。三处值得后人当心：
+  ① **原来的 `watch(descriptors, …)` 已删除**，换成版本下拉的 `@change` 处理器——预填要发一次请求、
+  必然晚于 `descriptors` 变化，**保留 watcher 就一定会把填好的记忆清掉**；
+  ② **运行级字段的回落值是「当前输入」而不是空串**——换版本时参数一定重建（未声明的键会被后端
+  400），而运行级字段与版本无关，只补不改，不静默抹掉用户已经敲进去的东西；`prefill` 为 `null`
+  时结果恒等于当前输入，与没有这个功能时一模一样；
+  ③ **新增竞态保护**（自增 `selectionToken`）：快速连着换两次策略时先发的回包可能后到，
+  会把 A 策略的详情与记忆落进 B 策略的表单——这条对**策略详情**本来就是既有隐患，顺手一起收口。
+- **验证**：后端 **456 项全过**（新增 `tests/test_run_prefill.py` **16 项**：正向那条走
+  through-HTTP 层真提交一轮再读回，其余边界走记录级；覆盖无历史回 200、`BarPreces → bar_period`、
+  `MatchMode 3 → Bar`、运行级键**不出现**在 `params` 里、多轮取最新、`submitted_at` 平局按 `id`
+  兜平局、**别人更新的轮不采纳**、**两个用户各读各的**、坏 JSON 降级、单个坏值只丢自己那一项、
+  不可见 404、匿名 401）；**三次变异检查**（① 去归属过滤 → 2 红；② 去 `id` 兜平局 → 1 红；
+  ③ 去运行级键差集 → 2 红）均只红对应用例，三次都已还原为**逐字节相同**（脚本落在仓库外）；
+  `test_real_engine_acceptance.py` 的真回测块内补了预填断言，**真引擎验收 4 项全过**；
+  前端 `type-check` 无错 + `vitest` **89 项全绿**（`manifest.spec.ts` 补 4 项、`run-form.spec.ts`
+  补 5 项）+ `build` 成功。本轮验收产物在 `backend/_acc_tmp/prefill-20260926/`。
+- **不做 / 已知缺口**（本轮有意不做，非缺陷）：
+  ① **记忆不可删除**——它是从运行历史派生的，不是一份副本，按钮只表示"本轮不套用"；
+  要能真删就得新建一张表。
+  ② **不做「常用参数模板」**（多套参数命名保存复用）——那是计划里 P6 的「配置模板」，
+  本轮的语义只是「上一次」，不提前做。
+  ③ **不预填行情模式**：表单本来就没有这个控件（Tick 不可提交，`MATCH_MODE` 是常量），
+  端点上仍回 `match_mode` 供日后放开 Tick 时用。
+  ④ **manifest 没声明的约束照样能带出**：如跨参数的 `0 < GridStep × GridCount < 1`——
+  manifest 表达不了跨参数约束，引擎构造期会拒并在 `stderr.txt` 写明。
+  ⑤ **不记「上次选的是哪一版」**：版本仍默认最新（用户拍板的粒度是策略不是版本）；
+  按旧版本存的键若不在当前版本里，逐键回落默认。
+- **文档回写**：`platform-plan.md`（§9 新增端点行 + 「提交页预填端点」六条、
+  §10 页面表 `/runs/new` 那行、§11 新增「2026-09-26 增补」段含验收与不做项）、
+  `PROGRESS.md`（本条 + R.01 新增一行；**D.07 整条移入归档**——主文件加本条后越过 50 KB，
+  按 §8.1 把最旧的整条搬走，搬运由脚本对条目边界完成、原文取自 `git HEAD`、
+  正文一字未改，主文件里 11 处 `见 D.07` 一并改写成 `见归档 D.07`）。
+- **待用户手工验收**（浏览器里走一遍）：选策略 → 字段与参数被带出且提示条可见 → 点「重置为默认值」
+  → 回到默认且提示条消失 → 再选一次该策略仍带出（证明记忆没被删）→ 换一个**没跑过**的策略
+  → 纯默认、没有提示条。
+
+---
 
 ### D.09 · 2026-09-26 （第九批） 网格步长由绝对价格改为比例
 
@@ -120,7 +193,7 @@ Python 策略**。
   `test_a_real_bar_backtest_runs_through_the_platform` 的 `async with` 块内补了
   `/equity` 与 `/tables/Trade`、`/tables/Order` 三次请求（该测试原有的断言都在
   块外，而 API 调用必须在块内）。
-- **代理链路冒烟 12 项**（沿用 D.07 的一次性临时库手法，项目自带的
+- **代理链路冒烟 12 项**（沿用归档 D.07 的一次性临时库手法，项目自带的
   `backend/data/` 与 `runs/` 一行未碰）：权益 62 点、首点 `1000000.0`、
   末点 `999377.0899999999`、`Trade` 总 84（本页 5 行、含 `TradingDay` 列）、
   `Order` 总 654、`Position` 116、`PositionDetail` 290，以及
@@ -176,96 +249,6 @@ Python 策略**。
 
 ---
 
-### D.07 · 2026-09-25 （第七批） P4 前端骨架 + 三处后端前置端点
-
-- **交付**：`frontend/` 从零到闭环——47 个源文件 / 约 6850 行。技术栈
-  **Vue 3.5 + TS 6.0 + Vite 8.3 + Tailwind v4 + Pinia 3 + vue-router 4.6**，
-  HTTP 用**原生 `fetch`**（不引 axios），**不引 UI 组件库**（表格、分页、
-  模态框、提示条、表单控件全部自写，共 14 个 `components/`）；
-  依赖只有 `vue`/`vue-router`/`pinia` 三个。目录：`api/`（`client.ts` 单一出入口
-  + `types.ts` 手写契约 + 四个域模块）、`stores/`（session / strategy-catalog /
-  user-directory）、`router/`（懒加载 + 登录守卫）、`domain/`（纯逻辑，
-  六个模块 + 四份 spec）、`components/`、`composables/`、`views/`（8 个页面）。
-- **后端三处前置件**（都是前端做不下去的硬原因，不是顺手加的）：
-  `GET /api/users/directory`（受限用户目录，授权表单选人用）、
-  `POST /api/users` 的 `display_name` **收紧为必填**（空白 → 400
-  「显示名不能为空白」）、`StrategyVersionResponse` 增 `manifest_json`
-  纯透传（提交表单按它生成控件）、`GET /api/runs/{id}/files` 与
-  `/files/{relpath}`（防穿越 + 一律附件下发）。
-- **验收**：后端 **406 项通过 / 4 项 deselect**（真引擎那 4 项默认不跑，
-  新增 26 项含目录、显示名、manifest 透传、产物四条线）；前端
-  `type-check` 无错、`vitest run` **58 项全绿**（5 个 spec，只测纯逻辑，
-  不装 `@vue/test-utils` 与 jsdom）、`vite build` 成功（按路由分包，
-  证明懒加载真的生效）。
-- **代理链路冒烟 13 项**（真后端 + 真 Vite 代理，全程打
-  `http://[::1]:5173/api`；用**一次性临时库**，`QUANT_DATABASE_URL` /
-  `QUANT_RUNS_ROOT` / `QUANT_USER_LIBRARY_ROOT` 都指向 `%TEMP%`，
-  **项目自带的 `backend/data/` 与 `runs/` 一行未碰**）：首页 200、
-  `/api/health` 无令牌 401、未知路径交前端路由、登录换到令牌、
-  建号缺 `display_name` 得 **422 且 `detail` 是数组**、显示名全空白得 400、
-  建两个号 201、目录只回 `id` + `display_name`、`query` 过滤命中、
-  **目录排除了自己**、运行与策略列表回 `{total, offset, limit, records}` 信封。
-- **⚠️ Vite 只绑 `[::1]:5173`**（IPv6 回环），`http://127.0.0.1:5173` 连不上——
-  浏览器用 `http://localhost:5173/` 即可（Windows 上 `localhost` 先解析到 `::1`），
-  但拿 `curl`/脚本探活的人会以为服务没起。**代理目标是显式写死的
-  `http://127.0.0.1:8000`**，故它打后端走的是 IPv4，两边不冲突。
-- **两处「前端比后端更严」的偏差（本批发现的真问题）**：`ManifestParameter`
-  的 `label` / `type` 与 `StrategyManifest.params` 在 TS 里**都写成了必填**，
-  而后端 `StrategyParameter` 给这些字段都写了默认值、`params` 是
-  `default_factory=list`。后果是**一份完全合法的 manifest 会被前端判为"读不动"，
-  参数表单整个不渲染**——这是本项目最忌讳的「界面放行、后端 400」的**反面**
-  （界面拦住、后端放行），且用户对着一个不出现的控件无从下手。已按后端默认值
-  放宽（省 `type` 即 `string`、`label` 空串回落 `key`、`params` 可省），
-  各补一条回归用例。**教训：契约要从后端源码逐字读，不能凭接口形状推。**
-- **错误信封的三处契约在客户端逐条对上**（`api/client.ts`）：422 的 `detail`
-  是**数组**（只读 `loc`/`msg`，**不读 `input`**，免得把提交的取值渲染到界面上）、
-  401 **可能没有 `detail`**（Starlette 层就挡了，回固定文案
-  「登录状态已失效, 请重新登录」）、`fetch` 抛异常归一成 `status === 0`
-  （「无法连接到服务器, 请确认后端已启动」）。三类各有断言。
-- **时间戳必须补 `Z`**：`clock.utc_now()` 回的是**朴素 UTC**（JSON 里没有
-  时区标记），`new Date(...)` 会按本地时区解析，UTC+8 下显示**早 8 小时**。
-  客户端一律经 `domain/format.ts` 的解析函数补 `Z` 再格式化，并给这条专门
-  写了回归用例（用例在 UTC 环境下是盲的，注释已写明这一点）。服务端发的是
-  朴素 UTC 这件事本身没改——改它要动全仓所有时间序列化，不属本批。
-- **表单里没有行情模式选择**（Tick 拍板不给）：`match_mode` 固定 `Bar`，
-  判据是常量 `SUBMITTABLE_MATCH_MODE = 'Bar'`，与后端的
-  `SUBMITTABLE_MATCH_MODES` 同名同值。参数控件的派生规则与后端
-  `validate_parameter_value` **同一套语义，报错文案逐字照抄**
-  （「需为整数」「不得小于 0.1」「必填」…）——界面放行而后端回 400 是本项目
-  最忌讳的「点了有反应但没用」。
-- **版本号照抄本机同族项目的已验证组合，不追最新**：`vue-router` 最新 5.x、
-  `pinia` 4.x、`vitest` 5.x、`typescript` 7.x **全是主版本跳跃**，
-  在 P4 顺带做迁移审查是拿验收换未知数。四处都钉在老主版本上，日后单独评估。
-  **有意不照抄兄弟项目的**：`axios`（改原生 fetch）、`element-plus`（最小集）、
-  `sass`（改 Tailwind）、`unplugin-auto-import`（隐式全局与「名称即意图」相冲）。
-- **`defect_tools`（又名 `amies`）不在本机**（全盘搜过 `D:/Gitee`、`D:/Github`、
-  `D:/Files`、`C:/Users/...`，含 `variables.css` 与 `tailwind.config*` 的文件名
-  搜索；只有两份 PROGRESS 与计划正文提到它、**都不给路径**）。故"与它有意分叉"
-  这句话的可核对依据只能是**本机真实存在的同族项目**
-  `D:/Gitee/ShopKit/frontend-platform` 与 `D:/Gitee/RMS/frontend-admin`
-  （同一作者、同栈）。**注意它们与计划 §8/§10 的描述不同**：样式是
-  **SCSS + Element Plus**、没有 `variables.css`；计划的这两节已按实况回写。
-- **踩到并写进 `frontend/.gitignore` 的一个坑**：仓根 `.gitignore` 是从 Python
-  模板来的，`lib/` `runs/` `users/` `build/` `target/` 等是**无锚点**模式，
-  会匹配任意层级——于是 `frontend/src/lib/x.ts` 或
-  `frontend/src/views/runs/x.vue` 会被**静默忽略**（文件写出来了，
-  `git status` 里什么都没有）。故前端的纯逻辑目录叫 `domain/`、运行页面是扁平的
-  `views/RunListView.vue`。`frontend/.gitignore` 里留了自查命令
-  `git check-ignore -v --no-index <路径>`。
-- **新记的已知缺口**（见 `platform-plan.md` §12.15–12.18）：
-  `display_name` **无唯一约束**（重名时授权表单分不清两个人，选错人等于把策略
-  授权给错的人；修法是加唯一约束，但那会新增一条 409 路径，超出 P4）；
-  授权被撤销后策略从可见列表消失，**运行列表与详情里的策略名回落成显示 id**；
-  生产部署仍靠 Vite 代理（**两个终端**），FastAPI 托管 `dist/` 或反向代理留 P8；
-  前端**无 e2e**，闭环靠手动验收（这也是计划原本的验收方式）。
-- **文档回写**：`platform-plan.md`（§7.5 目录端点的落地与泄漏面收口、§8 目录树
-  与本地开发起法、§9 新增目录端点行并订正 P3/P5 的落地范围、§10 页面表按实况改、
-  §11 的 P4 行、§12 新增缺口、§13 新增拍板表）、`PROGRESS.md`（本条 +
-  **Node 版本由 24.15 订正为 24.16** + 备注），归档（**D.02 与 D.03 整条搬入**
-  ——✅ 区超 5 批且主文件越过 50 KB 目标；Q.05 关闭、Q.06 半关闭）。
-
----
-
 ### D.06 · 2026-09-25 （第六批） P3 runner 本体 + `params` schema 定案
 
 - **已归档**：原文见 [`PROGRESS-archive.md`](PROGRESS-archive.md) 的 `D.06`
@@ -307,11 +290,11 @@ Python 策略**。
   `StrategyGrants` 表 P1 已建、P2b 打通写入路径。
 - **P3 runner 本体 ✅ 已完成**（见上 D.06）：提交 / 队列 / 回收 / 恢复 / cancel。
   验收全部通过，含**强杀后端再启、跑动中的 run 被标 `interrupted`**。
-- **P4 前端骨架 ✅ 已完成**（见上 D.07）：`frontend/` 从零到闭环，
+- **P4 前端骨架 ✅ 已完成**（见归档 D.07）：`frontend/` 从零到闭环，
   含三处后端前置端点（受限用户目录、显示名必填、`manifest_json` 透传、
   产物清单与下载）。**后端与前端两侧的代码至此都能跑通整条闭环**；
   **P4 的验收项（计划 §11 原文的「登录 → 上传策略 → 提交 → 看指标 → 下载」）
-  已由 D.07 的代理冒烟 13 项证明链路成立，剩下的「真引擎一轮真回测走完界面」
+  已由归档 D.07 的代理冒烟 13 项证明链路成立，剩下的「真引擎一轮真回测走完界面」
   属人工验收，须由用户在浏览器里走一遍**（步骤见 `platform-plan.md` §8.1）。
 - **P5 可视化 ✅ 已完成**（见上 D.08）：权益曲线与回撤曲线、5 张结果表的明细分页表。
   两条读端点（`/equity`、`/tables/{table}`）落地在
@@ -321,6 +304,11 @@ Python 策略**。
   **P5 的浏览器人工验收（打开一个 succeeded 的轮看曲线与 5 个页签）
   与 P4 那条一样，须由用户走一遍**（步骤见 `platform-plan.md` §8.3，
   前置与 §8.2 相同）。
+- **提交页预填 ✅ 已完成**（见上 D.10，非分期项，2026-09-26 用户提出）：
+  选中策略即按「该用户在该策略下最近一次提交」填出策略参数与运行级字段，
+  另给「重置为默认值」按钮。**它的手工验收（选策略 → 参数与字段被带出且提示条可见
+  → 点重置回到默认且提示条消失 → 再选一次该策略仍带出 → 换一个没跑过的策略为纯默认、
+  无提示条）与 P4/P5 那两条一样，须由用户在浏览器里走一遍**（前置与 §8.2 相同）。
 - **⚠️ 参数语义变更：网格步长已由绝对价格改为比例**（见上 D.09）：
   `GridStep` 现为**比例**（`0.01 = 1%`），旧值 `10.0` 这种绝对价格写法
   **在构造期就被拒**（合法区间 `0 < GridStep × GridCount < 1`，两侧
@@ -339,7 +327,7 @@ Python 策略**。
   - **前端样式 = Tailwind**（按计划原文，与 `defect_tools` 的纯 CSS 有意分叉），
     P4 首日即用，故 `platform-plan.md` §11 的 P4 那行**不需要改**。
   - **授权表单选人 = 受限用户目录**（只回 `id` 与 `display_name`）。
-    已落地并**随端点一起评审了泄漏面**（收口与已知缺口见 D.07 与
+    已落地并**随端点一起评审了泄漏面**（收口与已知缺口见归档 D.07 与
     `platform-plan.md` §7.5；原文见归档 `Q.03`/`Q.05`）。
   - **Tick 不在表单里出现**，提交侧继续 400；三档撮合语义仍未定但不阻塞 P4。
 - **P1 起须落实的机制**（除第三条外仍有效）：
@@ -364,9 +352,9 @@ Python 策略**。
 | 上云节奏 | 本机跑通再迁 Windows 云主机 | |
 | 上传形态 | `.py` 必需 + manifest 表单或文件 | 不收 zip |
 | 前端样式 | **Tailwind** | 与参考项目 `defect_tools` 的纯 CSS **有意分叉** |
-| 授权选人 | **受限用户目录**（只回 `id` + `display_name`） | 已于 P4 落地并收口，见 D.07 与归档 `Q.05` |
+| 授权选人 | **受限用户目录**（只回 `id` + `display_name`） | 已于 P4 落地并收口，见归档 D.07 与归档 `Q.05` |
 | Tick 选项 | **表单不显示**，提交侧继续 400 | 三档撮合语义仍未定，不阻塞 P4 |
-| 前端依赖 | **最小集**：原生 `fetch`，不引 axios、不引 UI 库 | 表格/分页/模态框等自写，见 D.07 |
+| 前端依赖 | **最小集**：原生 `fetch`，不引 axios、不引 UI 库 | 表格/分页/模态框等自写，见归档 D.07 |
 | 前端测试 | **vitest 只测纯逻辑**（`environment: node`） | 不装 `@vue/test-utils` 与 jsdom；要测组件时再加 |
 | 前端页面范围 | **闭环 + 最小 admin 用户页** | 不含 `/compare`、`/settings`；**权益曲线与明细分页表已于 P5 补齐** |
 | 前端版本号 | **照抄本机同族项目的已验证组合** | router 5 / pinia 4 / vitest 5 / TS 7 都是主版本跳跃，不追 |
@@ -425,7 +413,7 @@ Python 策略**。
 
 - **环境锁定**：Windows + Python **3.14.5**（`.pyd` 是 `cp314-win_amd64`，
   **Linux 无解**）+ 后端与引擎同机；前端 **Node 24.16.0 + npm 11.13.0**
-  （原记 24.15，D.07 实测订正）。**"上云"等于一台 Windows 云主机，
+  （原记 24.15，归档 D.07 实测订正）。**"上云"等于一台 Windows 云主机，
   横向扩展无余地。**（原记 Python 3.11 / `cp311`，为早期误记，D.06 订正。）
 - **本地开发要两个终端**（P4 起，见 `platform-plan.md` §8.1）：一个跑
   `cd backend && python -m app.main`，一个跑 `cd frontend && npm run dev`。
@@ -436,8 +424,8 @@ Python 策略**。
   RuntimeError**（`bootstrap.py` 有意为之，见归档 D.02），不是配置错了。
   手工验收想用一次性库而不碰项目自带的 `backend/data/`，就把
   `QUANT_DATABASE_URL` / `QUANT_RUNS_ROOT` / `QUANT_USER_LIBRARY_ROOT`
-  指到 `%TEMP%` 下（D.07 的冒烟即如此）。
-- **前端技术栈与版本锁定**（D.07，D.08 补两个图表依赖）：Vue 3.5 / TS 6.0 /
+  指到 `%TEMP%` 下（归档 D.07 的冒烟即如此）。
+- **前端技术栈与版本锁定**（归档 D.07，D.08 补两个图表依赖）：Vue 3.5 / TS 6.0 /
   Vite 8.3 / Tailwind v4（CSS 优先，**没有 `tailwind.config.js`**）/ Pinia 3 /
   vue-router 4.6 / vitest 4（`environment: node`）；D.08 起加
   **`echarts ^6.1.0` + `vue-echarts ^8.3.0`**（P5 拍板的一对，按需注册，
@@ -520,7 +508,7 @@ Python 策略**。
   后续不再这么做。）
 - **`.gitignore` 已覆盖全部运行数据**：`runs/`、`users/`、`backend/data/`
   （含 catalog 库与 JWT 密钥）、`node_modules/`、`.vs/`。
-- **⚠️ 仓根 `.gitignore` 的无锚点模式会静默吞掉前端源码**（D.07 踩到）：
+- **⚠️ 仓根 `.gitignore` 的无锚点模式会静默吞掉前端源码**（归档 D.07 踩到）：
   它从 Python 模板来，`lib/` `runs/` `users/` `build/` `target/` `var/` 等
   不带 `/` 锚点，**匹配任意层级**——于是 `frontend/src/lib/x.ts` 或
   `frontend/src/views/runs/x.vue` 写出来了但 `git status` 里什么都没有。

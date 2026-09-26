@@ -400,6 +400,11 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
             params={"limit": RESULT_PAGE_PROBE_LIMIT},
             headers=bearer_headers(owner.token),
         )
+        # 提交页的预填来源 (D.10): 同样是块内请求.
+        prefill_response = await client.get(
+            f"{STRATEGIES_PATH}/{strategy_id}/last-submitted-parameters",
+            headers=bearer_headers(owner.token),
+        )
 
     assert finished.status == RunStatus.SUCCEEDED.value, finished.error_msg
     assert finished.exit_code == 0
@@ -444,6 +449,32 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
     # 三个运行级字段经 `run_field_keys` 落到了策略配置里 (引擎不认识它们, 只有策略订阅用).
     assert strategy_configuration["ExchangeId"] == EXCHANGE_ID
     assert strategy_configuration["InstrumentId"] == INSTRUMENT_ID
+
+    # 提交页预填 (D.10): 读回来的必须是**刚提交的那一份**, 逐字段对上. 这一条落在真回测上, 故它
+    # 同时证明三件事: 提交写库的两份文本解得出原值; `BackTest.json` 里 `MatchMode` 那个 int 反查
+    # 得回枚举; 参数**恰好**是 manifest 声明的五个——三个运行级键名 (`BarPreces` / `ExchangeId` /
+    # `InstrumentId`) 已被按映射剔掉, 不会混进参数控件.
+    assert prefill_response.status_code == 200, prefill_response.text
+
+    prefill = prefill_response.json()
+
+    assert prefill["run_id"] == submitted.id
+    assert prefill["match_mode"] == "Bar"
+    assert prefill["bar_period"] == BAR_PERIOD
+    assert prefill["exchange_id"] == EXCHANGE_ID
+    assert prefill["instrument_id"] == INSTRUMENT_ID
+    assert prefill["start_trading_day"] == START_TRADING_DAY
+    assert prefill["end_trading_day"] == END_TRADING_DAY
+    assert prefill["initial_capital"] == INITIAL_CAPITAL
+    assert prefill["params"][ACCOUNT_ID_PARAMETER_KEY] == read_engine_account_id()
+    assert prefill["params"][GRID_STEP_PARAMETER_KEY] == DEFAULT_GRID_STEP
+    assert set(prefill["params"]) == {
+        LOG_LEVEL_PARAMETER_KEY,
+        ACCOUNT_ID_PARAMETER_KEY,
+        GRID_STEP_PARAMETER_KEY,
+        GRID_COUNT_PARAMETER_KEY,
+        VOLUME_PER_GRID_PARAMETER_KEY,
+    }
 
     # 结果库的两条读端点 (P5). 判据是"图上的曲线"与"列表里的指标"互相对得上, 而不是钉一个常数:
     # 首点 = 引擎的种子行 (初始资金), 末点 = 最后一个交易日的结算权益, 后者与收尾镜像进库的

@@ -597,6 +597,7 @@ npm run dev     # http://localhost:5173/
 | `GET` | `/api/strategies` | 可见策略：本人 + 授权共享 + public |
 | `POST` | `/api/strategies` | 上传策略（`.py` + manifest） |
 | `GET` | `/api/strategies/{id}` | 详情与版本列表 |
+| `GET` | `/api/strategies/{id}/last-submitted-parameters` | 本人对该策略**最近一次提交**的参数（提交页预填；**无历史即 200 + 全空**，不是 404） |
 | `POST` | `/api/strategies/{id}/versions` | 上传新版本 |
 | `PUT` | `/api/strategies/{id}/grants` | 授权共享（owner） |
 | `DELETE` | `/api/strategies/{id}` | 删除（owner；历史 run 不受影响） |
@@ -686,6 +687,35 @@ npm run dev     # http://localhost:5173/
 > 后者破平局使翻页不重不漏；两者都是代码里的字面量，不是入参。分页用
 > `LIMIT ? OFFSET ?` 参数绑定，`total` 由同表 `COUNT(*)` 取。
 
+> **提交页预填端点（2026-09-26 增补）**：`GET /api/strategies/{id}/last-submitted-parameters`
+> 已实现（`backend/app/services/run_prefill.py` + `routers/strategies.py`）。
+> 六条要点：
+>
+> 1. **不新建表**：`Runs` 提交时本就写了两份渲染好的配置文本
+>    （`ParamsJson` = 策略配置、`BacktestConfigJson` = 引擎 `BackTest.json`，见
+>    `run_submission.py`）。「上一次用的参数」就是**该用户在该策略下最新那一轮**的
+>    这两份文本，派生即可——这也天然满足「不论成败都算」：排在最前的就是最近一次
+>    提交，与它成没成功无关。（`Base.metadata.create_all` 加不了列，故刻意不碰 schema。）
+> 2. **归属过滤经 `catalog/visibility.py`**：用 `build_owned_run_query(current_user)`
+>    （该模块禁止路由自己拼 `where`），排序照调度器的 `(submitted_at, id)` **双键兜平局**
+>    ——Windows 上 `SubmittedAt` 只有毫秒精度，单键不确定。**粒度是 (用户, 策略)**，
+>    共享策略下绝不把别人的参数填给你。
+> 3. **引擎键名反查**：`MatchMode` → `engine_config.resolve_market_data_type`
+>    （由 `MATCH_MODE_VALUES` 反查，未收录回 `None`）、`BarPreces` → `bar_period`
+>    （**这是引擎侧既有拼写，不是笔误**）、`StartTradingDay` / `EndTradingDay` /
+>    `InitialCapital` 直取。`MatchMode` 与 `InitialCapital` 用 `isinstance` 验类型，
+>    坏值各自回空，**不整份作废**。
+> 4. **`params` 由运行级键做差集**：用**该运行自己那个版本**的 manifest 的
+>    `named_run_field_keys().values()` 剔除运行级键（manifest 已保证参数键不与运行级键撞名，
+>    故差集精确）。余下的策略参数**原样（含类型）带回，后端不做范围过滤**——
+>    前端为了渲染控件本就要逐项判「这个取值在这个控件上能不能用」，后端再滤一道就是
+>    两处真相，还会静默吞键。
+> 5. **坏 JSON 优雅降级**：`JSONDecodeError` 记 warning 后回 `None`（等价「没有记忆」），
+>    绝不因一轮坏数据让提交页报错。
+> 6. **无历史回 200 而不是 404**：`run_id=None` + 空 `params`。404 会与「策略不存在/
+>    不可见」混为一谈，而首次使用这个策略走的就是这条路。可见性闸用
+>    `load_visible_strategy`（别人共享给你的策略也要能用这个功能）。
+
 **三条安全硬约束**（Harness §6）：
 
 - `tables/{table}` 的表名走**白名单**，不得直接拼进 SQL。
@@ -708,7 +738,7 @@ npm run dev     # http://localhost:5173/
 | `/login` | 登录 | 换取 JWT 存 localStorage；失败文案用后端原文 | ✅ P4 |
 | `/` | —— | 重定向到 `/runs` | ✅ P4 |
 | `/runs` | 运行列表 | 状态徽章 / 引擎判定 / 交易日区间 / 耗时 / 交易笔数 / 余额；按状态与策略筛选、按指标排序、分页；**存在非终态轮时 2 s 轮询** | ✅ P4 |
-| `/runs/new` | 新建回测 | 选策略 → 选版本（缺省最新）→ **按 manifest 动态生成参数表单** → 提交；`match_mode` 固定 `Bar` | ✅ P4 |
+| `/runs/new` | 新建回测 | 选策略 → 选版本（缺省最新）→ **按 manifest 动态生成参数表单** → 提交；`match_mode` 固定 `Bar`。**选中策略时按「你上次提交的那一份」预填**（策略参数 + 标的/日期/初始资金/周期），并给一个**「重置为默认值」**按钮（见 §11 的增补段） | ✅ P4（预填 2026-09-26 增补） |
 | `/runs/:id` | 运行详情 | 概览 / 绩效指标 / 引擎数据镜像 / **权益曲线与回撤曲线** / **5 张结果表的明细分页表** / 提交参数与引擎配置 / stdout·stderr 尾巴 / 产物清单与下载 / 取消；未结束时 2 s 轮询 | ✅ P5（**结果库两节只在终态挂载**：未结束时后端回 409，前端干脆不请求，翻成终态由既有的 `watch(isTerminal)` 自动接上） |
 | `/strategies` | 策略管理 | 列表 + 上传面板 + 可见性 + 归属（经用户目录映显示名） | ✅ P4 |
 | `/strategies/:id` | 策略详情 | 版本列表（含该版本 manifest 的参数预览）+ 传新版本 + **授权编辑器（目录选人）** + 软删 | ✅ P4 |
@@ -773,6 +803,40 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
 `999257.8562340003`，无种子库变体；`BarMarketDataCount` 不变仍是 2928）——数字出处见
 [`job-workspace.md`](job-workspace.md) §6.3，旧值只在 §6.1 / §6.2 的历史记录里保留。
 本行的 `84 / 654 / 116 / 290` 是重取前的值，与 §6.3 的 `34 / 629 / 116 / 282` 不可混用。
+
+**2026-09-26 增补：提交页按策略预填「上一次提交的参数」**（用户提出，不属任何分期）。
+动机是纯重复劳动：每次回到提交页都要手敲标的、日期区间、初始资金、K 线周期与一整组策略参数。
+**范围经用户拍板**：记住的 = **策略参数 + 运行级字段**；「上一次」= **最近一次提交**
+（不论成败、是否还在跑）；另给一个**「重置为默认值」**按钮；粒度 **(用户, 策略)**，
+绝不跨用户。端点契约见 §9 的增补段，**无新表、无 DB 变更、无新依赖**。
+
+前端落点在 `RunSubmitView.vue` 与两个纯函数模块（`domain/manifest.createInitialParameterInputs`
+扩一个 `rememberedValues` 形参、`domain/run-form.buildPrefilledRunFields`），判据一律**复用既有校验器**
+（`coerceParameterInput` / `readTradingDay` / `readInitialCapital` / `readRunFieldValue`），
+故「界面放行什么」这件事仍然只有一处真相。三处值得后人当心：
+
+- **原来的 `watch(descriptors, …)` 已被删除**，换成版本下拉的 `@change` 处理器。预填要发一次请求、
+  必然晚于 `descriptors` 变化，**保留 watcher 就一定会把填好的记忆清掉**。
+- **运行级字段的回落值是「当前输入」而不是空串**：换版本时参数一定重建（未声明的键会被后端 400），
+  而运行级字段只补不改——不静默抹掉用户已经敲进去的东西。`prefill` 为 `null` 时结果恒等于当前输入。
+- 新增**竞态保护**（自增 `selectionToken`）：快速连着换两次策略时，先发的回包可能后到；
+  这条今天对**策略详情**也是既有的隐患，顺手一起收口。
+
+**验收（2026-09-26 通过）**：后端 **456 项全过**（新增 `test_run_prefill.py` 16 项：无历史回 200、
+`BarPreces → bar_period`、`MatchMode 3 → Bar`、运行级键不出现在 `params`、多轮取最新、
+`submitted_at` 平局按 `id`、别人的更新轮不采纳、两个用户各读各的、坏 JSON 降级、单个坏值只丢自己那一项、
+不可见 404、匿名 401）；**三次变异检查**（去归属过滤 → 2 红、去 `id` 兜平局 → 1 红、
+去运行级键差集 → 2 红）各自转红且只红对应用例，均已还原为逐字节相同；
+`test_real_engine_acceptance.py` 的真回测里补了预填断言，**真引擎验收 4 项全过**；
+前端 `type-check` 无错 + `vitest` **89 项全绿** + `build` 成功。本轮验收产物在
+`backend/_acc_tmp/prefill-20260926/`。
+
+**不做 / 已知缺口**：① **记忆不可删除**——它是从运行历史派生的，不是一份副本，按钮只表示"本轮不套用"；
+要能真删就得新建一张表。② 不做「常用参数模板」（多套参数命名保存复用），那是 P6 的语义，
+本轮只是「上一次」。③ **不预填行情模式**：表单本来就没有这个控件（Tick 不可提交），
+端点上仍回 `match_mode` 供日后放开 Tick 时用。④ **manifest 没声明的约束照样能带出**：
+如跨参数的 `0 < GridStep × GridCount < 1`——manifest 表达不了跨参数约束，
+引擎构造期会拒并在 `stderr.txt` 写明。⑤ **不记「上次选的是哪一版」**：版本仍默认最新。
 
 ---
 
