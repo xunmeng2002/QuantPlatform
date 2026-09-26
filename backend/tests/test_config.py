@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,8 @@ from app.config import (
     DEFAULT_HTTP_PORT,
     MAXIMUM_PORT,
     PlatformSettings,
+    load_environment_file,
+    parse_environment_file,
     read_integer_environment,
     resolve_jwt_secret_key,
 )
@@ -22,6 +26,9 @@ from app.config import (
 
 ENVIRONMENT_NAME = "QUANT_TEST_INTEGER"
 JWT_SECRET_ENVIRONMENT_NAME = "QUANT_JWT_SECRET_KEY"
+ENVIRONMENT_FILE_KEY = "QUANT_TEST_FROM_FILE"
+ENVIRONMENT_FILE_SECOND_KEY = "QUANT_TEST_FROM_FILE_SECOND"
+NON_PREFIXED_KEY = "PLATFORM_TEST_WITHOUT_PREFIX"
 
 ABSOLUTE_TEST_ROOT = Path(__file__).resolve().parent
 
@@ -290,3 +297,134 @@ def test_blank_initial_admin_password_becomes_unset(
     monkeypatch.setenv("QUANT_INITIAL_ADMIN_PASSWORD", "")
 
     assert PlatformSettings.from_environment().initial_admin_password is None
+
+
+def _write_environment_file(tmp_path: Path, text: str) -> Path:
+    environment_file = tmp_path / "test.env"
+    environment_file.write_text(text, encoding="utf-8")
+
+    return environment_file
+
+
+def _clear_environment_file_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """先记录"这些键本来没设", 用例跑完由 monkeypatch 复原.
+
+    `load_environment_file` 直接写 `os.environ`, 不经 monkeypatch, 故只有"先删一次"才能让
+    复位生效——不先删的话, 复原的是用例自己写进去的那个值, 键会漏给同 worker 的其它用例.
+    """
+
+    for name in (
+        ENVIRONMENT_FILE_KEY,
+        ENVIRONMENT_FILE_SECOND_KEY,
+        NON_PREFIXED_KEY,
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_environment_file_parses_assignments_and_skips_comments_and_blanks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """注释与空行要跳过, 取值两侧空白与成对引号要剥掉."""
+
+    _clear_environment_file_keys(monkeypatch)
+
+    environment_file = _write_environment_file(
+        tmp_path,
+        "\n".join(
+            [
+                "# 整行注释",
+                "",
+                "   ",
+                f'{ENVIRONMENT_FILE_KEY}="quoted value"',
+                f"{ENVIRONMENT_FILE_SECOND_KEY} =  spaced  ",
+                f"{NON_PREFIXED_KEY}=1",
+            ]
+        ),
+    )
+
+    assert load_environment_file(environment_file) == 3
+    assert os.environ[ENVIRONMENT_FILE_KEY] == "quoted value"
+    assert os.environ[ENVIRONMENT_FILE_SECOND_KEY] == "spaced"
+    assert os.environ[NON_PREFIXED_KEY] == "1"
+
+
+def test_environment_file_keeps_a_hash_inside_the_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """取值里的 `#` 不是注释起点: 把它当注释会静默截断口令."""
+
+    _clear_environment_file_keys(monkeypatch)
+    monkeypatch.setenv(ENVIRONMENT_FILE_KEY, "占位")
+
+    environment_file = _write_environment_file(
+        tmp_path, f"{ENVIRONMENT_FILE_KEY}=pa#ssword\n"
+    )
+
+    # 该键已被真实环境变量占用, 故文件里的取值不生效——这条断言同时也是"不覆盖"的证据.
+    load_environment_file(environment_file)
+
+    assert os.environ[ENVIRONMENT_FILE_KEY] == "占位"
+    assert parse_environment_file(environment_file.read_text(encoding="utf-8")) == {
+        ENVIRONMENT_FILE_KEY: "pa#ssword"
+    }
+
+
+def test_environment_file_does_not_override_real_environment_variables(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """命令行上临时给的那一个必须赢过文件里写的那个."""
+
+    _clear_environment_file_keys(monkeypatch)
+    monkeypatch.setenv(ENVIRONMENT_FILE_KEY, "命令行上的口令")
+
+    environment_file = _write_environment_file(
+        tmp_path, f"{ENVIRONMENT_FILE_KEY}=文件里的口令\n"
+    )
+
+    assert load_environment_file(environment_file) == 0
+    assert os.environ[ENVIRONMENT_FILE_KEY] == "命令行上的口令"
+
+
+def test_missing_environment_file_is_a_no_op(tmp_path: Path) -> None:
+    """没配这个文件是正常情况, 不是错误."""
+
+    assert load_environment_file(tmp_path / "not-there.env") == 0
+
+
+@pytest.mark.parametrize(
+    "malformed_line",
+    ["QUANT_TEST_BARE_KEY", "export QUANT_TEST_EXPORTED=1", "=无键名"],
+)
+def test_malformed_environment_file_lines_are_rejected(
+    tmp_path: Path, malformed_line: str
+) -> None:
+    """非法行当场抛错而不是跳过: 静默降级会让人以为配置已经生效.
+
+    `export KEY=VALUE` 那条是有意拒绝的——它看着像 shell, 而键名会变成 `export KEY`,
+    程序永远不会去读; 与其让写文件的人对着"口令没生效"查很久, 不如报出来.
+    """
+
+    environment_file = _write_environment_file(
+        tmp_path, f"{malformed_line}\n"
+    )
+
+    with pytest.raises(ValueError):
+        parse_environment_file(environment_file.read_text(encoding="utf-8"))
+
+
+def test_non_prefixed_environment_file_keys_are_warned_about(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """没有 `QUANT_` 前缀的键会被记一条 warning——多半是名字打错了."""
+
+    _clear_environment_file_keys(monkeypatch)
+
+    environment_file = _write_environment_file(
+        tmp_path, f"{NON_PREFIXED_KEY}=1\n{ENVIRONMENT_FILE_KEY}=2\n"
+    )
+
+    with caplog.at_level(logging.WARNING):
+        load_environment_file(environment_file)
+
+    assert NON_PREFIXED_KEY in caplog.text
+    assert ENVIRONMENT_FILE_KEY not in caplog.text

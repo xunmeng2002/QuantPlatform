@@ -595,4 +595,14 @@ Python 策略**。
   拿不准某路径时用 `git check-ignore -v --no-index <路径>` 自查
   （未被忽略时不输出、退出码 1）。**这条不只对前端成立**，后端日后加同名
   目录同样会中招。
-- **AI 不推送**（按既有约定）：提交由 AI 做，推送由用户执行。
+- **本地配置走 `backend/.env`**（2026-09-26 加）：`python -m app.main` 启动期读它，
+  `KEY=VALUE` 一行一条，故初始管理员口令这类"每次都要带"的取值不必再写在命令行上。
+  三条规则：**命令行上的真实环境变量优先**（文件只填还没设过的键）、键名一律
+  `QUANT_` 前缀（别的名字记一条 warning 并忽略）、非法行当场抛错而不跳过。
+  `backend/.env` 被仓根 `.gitignore` 的 `.env` 模式覆盖，**口令因此不入库**
+  （取值只在那一个文件里，不入库的文档、提交信息也不抄；本机放的是开发用弱口令，
+  **不得带到云上**）。`backend/.env.example` 是入库模板。**读盘只发生在启动路径**
+  （`resolve_platform_settings()`），`PlatformSettings.from_environment()` 仍是纯环境
+  变量解析——否则 `test_from_environment_applies_documented_defaults` 那条断言
+  「未设环境变量时初始口令为 None」会变成"本机有 .env 则红、别处则绿"。
+  排查看启动日志那一行 `已从 …\.env 读入 N 项配置 (取值不打印)`。

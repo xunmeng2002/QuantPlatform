@@ -502,13 +502,30 @@ frontend/
 ```shell
 # 终端 1：后端。空库首启必须给初始管理员口令，否则启动即 RuntimeError
 cd backend
-QUANT_INITIAL_ADMIN_PASSWORD=<口令> python -m app.main    # 127.0.0.1:8000
+python -m app.main                            # 127.0.0.1:8000
 
 # 终端 2：前端
 cd frontend
 npm install     # 首次
 npm run dev     # http://localhost:5173/
 ```
+
+**本地配置走 `backend/.env`**（该文件名已被仓根 `.gitignore` 覆盖，故口令不入库）：
+`python -m app.main` 在启动期读它，`KEY=VALUE` 一行一条，`#` 只能在行首当注释
+（取值里的 `#` 不算注释起点，免得口令被半个井号截断）。三条规则：
+
+- **命令行上的真实环境变量优先**，文件只填还没设过的键——临时换一个口令不必改文件。
+- 键名一律 `QUANT_` 前缀；别的名字会被记一条 `warning` 并忽略（多半是打错了）。
+- 非法行**当场抛错**而不是跳过；文件不存在是正常情况（全部走默认值）。
+
+排查时的两个现象：启动日志里有一行
+`已从 …\.env 读入 N 项配置: … (取值不打印)`，看到它才说明文件真的被读了；
+没有这一行而口令又没生效，先看是不是键名打错。
+
+`backend/.env.example` 是**入库**的模板（`.env` 被忽略而它不被忽略），列了全部可配键
+与默认值，另抄一份即可。**启动路径才读这个文件**：
+`PlatformSettings.from_environment()` 仍是纯环境变量解析，测试直接调它、不受本机
+`.env` 影响。
 
 - 后端**没有 CORS 中间件**（`add_middleware` 全仓只出现在上传体积闸上），
   故 dev 期必须靠 Vite 的 `server.proxy` 把 `/api` 转发到

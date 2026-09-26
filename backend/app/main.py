@@ -20,7 +20,7 @@ import uvicorn
 
 from .bootstrap import ensure_initial_admin
 from .catalog.database import PlatformDatabase
-from .config import PlatformSettings
+from .config import PlatformSettings, resolve_platform_settings
 from .errors import (
     ConflictError,
     InvalidRequestError,
@@ -221,9 +221,9 @@ def _register_routers(application: FastAPI) -> None:
 
 
 def create_application(settings: PlatformSettings | None = None) -> FastAPI:
-    """构造应用. 未传配置时按环境变量解析."""
+    """构造应用. 未传配置时读环境文件再按环境变量解析."""
 
-    resolved_settings = settings if settings is not None else PlatformSettings.from_environment()
+    resolved_settings = settings if settings is not None else resolve_platform_settings()
 
     application = FastAPI(
         title=APPLICATION_TITLE,
@@ -251,7 +251,9 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 
-    settings = PlatformSettings.from_environment()
+    # 配置在 basicConfig 之后解析: 环境文件读了哪几项要能被日志看见, 否则打错键名时
+    # 唯一的现象是"口令没生效", 而看不到任何提示.
+    settings = resolve_platform_settings()
 
     uvicorn.run(create_application(settings), host=settings.http_host, port=settings.http_port)
 

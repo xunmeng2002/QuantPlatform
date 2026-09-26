@@ -5,11 +5,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
+
+logger = logging.getLogger(__name__)
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PLATFORM_ROOT = BACKEND_ROOT.parent
@@ -30,6 +34,17 @@ SEED_DATABASE_FILENAME = "BackTestInit.db"
 # 本机布局的默认值, 与 engine_root 的默认值同一性质: 换机器必须由环境变量覆盖.
 DEFAULT_MARKET_DATA_ROOT = Path("D:/MdBaoStock")
 DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES = 8 * 1024
+
+# 本地环境文件: 固定的几个 QUANT_* 取值写在里面, 免得每次启动都在命令行上带一串.
+# 该文件名已被仓根 .gitignore 覆盖 (`.env`), 口令类取值因此不入库.
+ENVIRONMENT_FILE_NAME = ".env"
+ENVIRONMENT_ASSIGNMENT_SEPARATOR = "="
+ENVIRONMENT_COMMENT_PREFIX = "#"
+ENVIRONMENT_QUOTE_CHARACTERS = "\"'"
+ENVIRONMENT_KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+# 平台自己的环境变量一律这个前缀. 别的键不是错, 但代码里没有一处会去读它, 而写文件的人
+# 多半是打错了名字——静默忽略会让人对着"口令没生效"查很久, 故记一条 warning.
+ENVIRONMENT_KEY_PREFIX = "QUANT_"
 
 
 def read_integer_environment(name: str, fallback: int) -> int:
@@ -52,6 +67,92 @@ def read_integer_environment(name: str, fallback: int) -> int:
         raise ValueError(f"环境变量 {name} 需为整数, 实际为 {raw_value!r}")
 
     return int(stripped_value)
+
+
+def strip_surrounding_quotes(value: str) -> str:
+    """去掉成对包裹的引号.
+
+    资源管理器"复制文件地址"那类粘贴会带上引号, 而 `KEY="value"` 里的引号若不剥掉, 取值
+    本身就变成 `"value"`——口令带着一对引号去登录, 报的是"用户名或密码不正确", 看不出
+    多了一对引号.
+    """
+
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ENVIRONMENT_QUOTE_CHARACTERS:
+        return value[1:-1]
+
+    return value
+
+
+def parse_environment_file(text: str) -> dict[str, str]:
+    """把环境文件文本解析成键值对.
+
+    支持 `KEY=VALUE`、整行注释 (以 `#` 开头) 与空行; 取值两侧空白与成对引号会被剥掉.
+    行内注释**不支持** (`#` 只在行首才算注释)——口令里出现 `#` 是常事, 把它当注释起点会
+    静默截断口令. 非法行当场抛错而不是跳过: 静默降级会让人以为"配置已生效".
+    """
+
+    assignments: dict[str, str] = {}
+
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        stripped_line = raw_line.strip()
+
+        if not stripped_line or stripped_line.startswith(ENVIRONMENT_COMMENT_PREFIX):
+            continue
+
+        key, separator, raw_value = stripped_line.partition(ENVIRONMENT_ASSIGNMENT_SEPARATOR)
+        stripped_key = key.strip()
+
+        if not separator or not ENVIRONMENT_KEY_PATTERN.match(stripped_key):
+            raise ValueError(
+                f"环境文件第 {line_number} 行不是 KEY=VALUE 形式: {raw_line!r}"
+            )
+
+        assignments[stripped_key] = strip_surrounding_quotes(raw_value.strip())
+
+    return assignments
+
+
+def load_environment_file(environment_file: Path) -> int:
+    """把环境文件里的键值对灌进 `os.environ`, 返回真正生效的条数.
+
+    文件不存在是正常情况 (没配也能起), 返回 0. **已被真实环境变量占用的键一律不覆盖**:
+    临时换一个口令时, 命令行上那一个必须赢过文件里写的那个.
+    """
+
+    if not environment_file.is_file():
+        return 0
+
+    assignments = parse_environment_file(environment_file.read_text(encoding="utf-8"))
+    loaded_keys: list[str] = []
+
+    for key, value in assignments.items():
+        if key in os.environ:
+            continue
+
+        os.environ[key] = value
+        loaded_keys.append(key)
+
+    if loaded_keys:
+        logger.info(
+            "已从 %s 读入 %d 项配置: %s (取值不打印)",
+            environment_file,
+            len(loaded_keys),
+            ", ".join(sorted(loaded_keys)),
+        )
+
+    unknown_keys = sorted(
+        key for key in assignments if not key.startswith(ENVIRONMENT_KEY_PREFIX)
+    )
+
+    if unknown_keys:
+        logger.warning(
+            "%s 里的这些键没有 %s 前缀, 程序不会读取它们 (名字是不是打错了?): %s",
+            environment_file,
+            ENVIRONMENT_KEY_PREFIX,
+            ", ".join(unknown_keys),
+        )
+
+    return len(loaded_keys)
 
 
 def resolve_jwt_secret_key(secret_file: Path) -> str:
@@ -175,3 +276,16 @@ class PlatformSettings:
                 "QUANT_MAXIMUM_OUTPUT_TAIL_BYTES", DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES
             ),
         )
+
+
+def resolve_platform_settings() -> PlatformSettings:
+    """进程启动期的配置入口: 先读环境文件, 再按环境变量解析.
+
+    环境文件只在**启动路径**上读, 不放进 `PlatformSettings.from_environment()`: 那个方法是
+    纯环境变量解析, 测试直接调它 (有一条用例断言"未设环境变量时初始口令为 None"), 一旦它
+    顺带读盘, 那条用例就会"本机有 .env 则红、别处则绿".
+    """
+
+    load_environment_file(BACKEND_ROOT / ENVIRONMENT_FILE_NAME)
+
+    return PlatformSettings.from_environment()
