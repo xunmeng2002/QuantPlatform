@@ -101,7 +101,16 @@ cd frontend && npm run dev                # http://localhost:5173/
 
 ## 9. 后端（D.13）
 
-- [ ] 打开 `/docs`：描述是「薪火量化: 包裹 QuantTrading 引擎…」，标题仍是 `QuantPlatform`。
+这一节在**后端**上，不在前端页面上：`/docs` 是 FastAPI 自带的接口文档，地址是
+`http://127.0.0.1:8000/docs`，**与前端那个端口无关**。
+
+- [ ] 打开 `http://127.0.0.1:8000/docs`：页首标题是 `QuantPlatform`，下面那句描述以
+      「薪火量化: 包裹 QuantTrading 引擎」开头。
+
+> **注意**：`http://localhost:5173/docs` 会 404，而**那个 404 是本站自己的 404 页**——
+> `vite.config.ts` 里只代理了 `/api` 一条，`/docs` 于是落到前端路由的通配规则上，被渲染成
+> 「没有这个页面」。想在命令行上核对也可以：`curl http://127.0.0.1:8000/openapi.json`
+> 里 `info.title` 与 `info.description` 就是这两个字串。
 
 ## 10. 更早的欠账（D.10 / D.11）
 
