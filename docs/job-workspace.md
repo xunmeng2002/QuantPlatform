@@ -62,7 +62,8 @@ P3 实测（2026-09-25，目录里只有那四个输入文件）引擎会自己�
 
 **策略配置文件里的运行级字段**（P3 新增）：策略配置（`TestStrategyGrid.json` 一类）
 除 `params` 之外还要拿到 `exchange_id` / `instrument_id` / `bar_period` 三个字段，
-键名由 manifest 的 `run_field_keys` 声明（见 `platform-plan.md` §6.1）。
+键名由 manifest 的 `run_field_keys` 声明（见 `platform-plan.md` §7.2；策略作者那一份说明见
+[`strategy-manifest.md`](strategy-manifest.md)）。
 其中 `bar_period` **两处都要写**：`BackTest.json` 的 `BarPreces` 是引擎实际聚合周期，
 策略配置里那个是 `declare_bar_period` 的期望周期，**两者不一致时策略收不到 bar、
 静默 0 成交**（P0 记的那类失效）。有映射时由平台写同一个值，一致性因此是结构性的；

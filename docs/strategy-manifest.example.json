@@ -1,0 +1,50 @@
+{
+  "entry_filename": "grid_strategy.py",
+  "config_filename": "TestStrategyGrid.json",
+  "supported_match_modes": ["Bar"],
+  "run_field_keys": {
+    "exchange_id": "ExchangeId",
+    "instrument_id": "InstrumentId",
+    "bar_period": "BarPreces"
+  },
+  "params": [
+    {
+      "key": "LogLevel",
+      "label": "日志级别",
+      "type": "integer",
+      "default": 2,
+      "minimum": 0,
+      "group": "运行"
+    },
+    {
+      "key": "AccountId",
+      "label": "引擎账号",
+      "type": "string",
+      "group": "运行"
+    },
+    {
+      "key": "GridStep",
+      "label": "网格步长(比例, 0.01=1%)",
+      "type": "number",
+      "default": 0.01,
+      "minimum": 0.0001,
+      "group": "网格"
+    },
+    {
+      "key": "GridCount",
+      "label": "单向格数",
+      "type": "integer",
+      "default": 5,
+      "minimum": 1,
+      "group": "网格"
+    },
+    {
+      "key": "VolumePerGrid",
+      "label": "每格手数",
+      "type": "integer",
+      "default": 1,
+      "minimum": 1,
+      "group": "网格"
+    }
+  ]
+}

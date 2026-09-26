@@ -299,6 +299,10 @@ Runs(
 
 ### 7.2 manifest 内容
 
+> **2026-09-27 增补**：本节是 manifest 的**实现口径**（平台怎么读它）。策略作者要的那份
+> 「怎么填、哪里容易踩坑、文件放哪」在 [`strategy-manifest.md`](strategy-manifest.md)，
+> 配一份可直接用的 [`strategy-manifest.example.json`](strategy-manifest.example.json)。
+
 | 字段 | 说明 |
 | ---- | ---- |
 | `entry_filename` | 入口文件名，决定 job 目录里的裸文件名与 `argv[0]` |
