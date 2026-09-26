@@ -5,9 +5,9 @@
  * 全站唯一"不需要登录也能看"的内容页: 讲清这是什么, 能做什么, 一轮回测怎么走, 引擎与运行环境
  * 是什么, 以及**当前边界在哪**. 内容全是静态文案, 因此这一页没有请求, 没有加载态, 也不碰任何反馈通道.
  *
- * 主视觉自绘而不是套 `PageHeader`: 那个组件是"工作页页头"原语 (它的 `h1` 是 `text-xl`, 布局是
- * "标题 + 右侧动作"), 而落地页的主视觉要更大的排版重心, 且这一页有五个同级分节. 全页仍只有一个
- * `h1`.
+ * 主视觉自绘而不是套 `PageHeader`: 那个组件是"工作页页头"原语 (布局是"标题 + 右侧动作"的
+ * `justify-between`, 字号是工作页那一档), 而落地页的主视觉要更大的排版重心, 且这一页有五个同级
+ * 分节 —— 套五个 `PageHeader` 会得到五处空位与五个"页头"语义. 全页仍只有一个 `h1`.
  *
  * 三处措辞上的自我约束, 改文案时别越过去:
  *   - 不写"云上": 上云是部署节奏 (本机先跑通, 再迁 Windows 云主机), 不是今天的能力;
@@ -200,7 +200,7 @@ const boundaryNotes: readonly string[] = [
     </section>
 
     <section>
-      <h2 class="text-lg font-semibold text-slate-900">
+      <h2 class="text-xl font-semibold text-slate-900">
         平台能做什么
       </h2>
       <p class="mt-1 text-sm text-slate-500">
@@ -223,7 +223,7 @@ const boundaryNotes: readonly string[] = [
     </section>
 
     <section>
-      <h2 class="text-lg font-semibold text-slate-900">
+      <h2 class="text-xl font-semibold text-slate-900">
         一次回测的完整流程
       </h2>
       <p class="mt-1 text-sm text-slate-500">

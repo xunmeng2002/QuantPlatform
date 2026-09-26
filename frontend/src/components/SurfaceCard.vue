@@ -5,6 +5,9 @@
  * 本批之前 `rounded-lg border border-line bg-surface` 这一串在 17 处出现、9 种变体, 内边距更有
  * p-3/p-4/p-5/p-6 四种并存. 抽成组件的全部价值在"改一处, 全站跟着变".
  *
+ * 卡片只靠**描边**, 不叠 `shadow-sm`: 描边与极浅阴影同时上会互相削弱, 边缘看着发糊. 阴影留给真正
+ * 浮起来的东西 (下拉 / 弹窗 / toast, 见 `style.css` 里那几档 `--el-box-shadow*`).
+ *
  * 两个 prop 是为了不把语义元素硬掰成 `section`:
  *   - `tag`: 卡片本体渲染成什么元素. 信息栏是 `dl` (它的 `grid` 类必须落在**根**上), 深色输出
  *     面板是 `pre`, 表单分组是 `fieldset` (它的 `legend` 必须是直接子节点) —— 一律套 `<section>`
@@ -43,7 +46,7 @@ const hasHeader = computed(
 <template>
   <component
     :is="tag"
-    class="rounded-lg border border-line bg-surface shadow-sm"
+    class="rounded-lg border border-line bg-surface"
     :class="!hasHeader && isBodyPadded ? 'p-5' : undefined"
   >
     <div

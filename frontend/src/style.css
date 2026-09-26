@@ -140,6 +140,13 @@ body {
  *
  * 每族 7 档的口径与 EP 自己的 SCSS 一致: light-N = N 成白 + (10-N) 成本色, dark-2 = 两成黑.
  * 这一整块是本项目**唯一**的换肤入口; 各模板里不再出现硬编码色值.
+ *
+ * 覆盖的不只是颜色族. 只桥"品牌色"时, EP 控件里的字与线仍用它的出厂值 —— 文字是中性灰
+ * `#606266`, 表格内线是 `#ebeef5`; 而手写的正文是偏蓝的 slate-600 `#475569`, 卡片描边是
+ * `#e2e8f0`. 两者恰好并排出现 (表格单元格紧挨同一张卡里的标题), 于是"两套灰 + 两种线深 +
+ * 两种表头"同时可见, 而人眼说不出是哪一条不对. 故这里把**文字阶 / 填充阶 / 边框阶 / 表格 /
+ * 阴影 / 小圆角**一并指回同一套刻度 (文字与填充取 slate 的刻度, 与模板里的 `text-slate-*`
+ * 逐档同值).
  */
 html:root {
   --el-color-primary: var(--color-brand);
@@ -184,7 +191,67 @@ html:root {
 
   --el-border-color: var(--color-line);
   --el-border-color-light: var(--color-line);
+  /* 表格内线的出处就是这一档 (`--el-table-border-color` 出厂指向它): 让表里的线与卡片描边同色,
+     而不是浅一档. extra-light 是更细的分隔线 (EP 内部用), 退半格保持层次. */
+  --el-border-color-lighter: var(--color-line);
+  --el-border-color-extra-light: color-mix(in srgb, var(--color-line) 60%, white);
+  /* 小圆角由出厂 2px 提到 4px: 与 base 的 6px、方块标的 8px 构成 4/6/8 一档, 而不是两种体系. */
+  --el-border-radius-small: 4px;
   --el-bg-color: var(--color-surface);
+
+  /* 文字阶. 逐档对齐模板里的 slate 刻度, 于是"EP 控件里的字"与"手写的字"是同一套灰. */
+  --el-text-color-primary: #0f172a;
+  --el-text-color-regular: #475569;
+  --el-text-color-secondary: #64748b;
+  --el-text-color-placeholder: #94a3b8;
+  --el-text-color-disabled: #cbd5e1;
+
+  /* 填充阶. 同样取 slate 刻度, 于是悬停底 / 选中底与 `--color-page` 是同一支. */
+  --el-fill-color: #f1f5f9;
+  --el-fill-color-light: #f8fafc;
+  --el-fill-color-lighter: #f8fafc;
+  --el-fill-color-dark: #e2e8f0;
+  --el-fill-color-darker: #cbd5e1;
+
+  /* 阴影. 出厂那套是全向模糊 (`0 0 12px`), 与卡片不是一套语言; 这里换成向下投的三步海拔, 色相取
+     slate-900 而不是纯黑 —— 与文字同一个色系. 卡片自己不用阴影 (它靠描边), 这几档是留给浮层
+     (下拉 / 弹窗 / toast) 的. */
+  --el-box-shadow-lighter: 0 1px 2px rgb(15 23 42 / 0.05);
+  --el-box-shadow-light: 0 1px 2px rgb(15 23 42 / 0.06), 0 4px 12px rgb(15 23 42 / 0.08);
+  --el-box-shadow: 0 4px 8px rgb(15 23 42 / 0.06), 0 12px 32px rgb(15 23 42 / 0.12);
+  --el-box-shadow-dark: 0 6px 12px rgb(15 23 42 / 0.08), 0 16px 40px rgb(15 23 42 / 0.16);
+
   --el-border-radius-base: 6px;
   --el-font-family: inherit;
+}
+
+/**
+ * 表格与骨架屏这两组**不能**写在 `html:root` 里.
+ *
+ * EP 把 `--el-table-*` 声明在 `.el-table` 上、把 `--el-skeleton-*` 声明在 `.el-skeleton` 上, 而不是
+ * `:root`. 自定义属性是**就近取胜**: 表格元素自己带着值, 从 `html` 继承下来的那一份永远轮不到 ——
+ * 写在 `html:root` 里的这六条会**静默失效**, 页面不报错, 只是没生效 (这六个变量名在 EP 的
+ * `:root` 块里 grep 得到, 所以"看起来桥过去了", 实际没有).
+ *
+ * 故选择器取 `html:root .el-table` (0,2,1), 压过 EP 的 `.el-table` (0,1,0), 与源序无关, 与上面那
+ * 一整块的思路一致. 只写 `.el-table` 不写 `.el-table-v2`: 本仓没有虚拟表格.
+ */
+html:root .el-table {
+  /* 表里的线与卡片描边同色, 而不是浅一档 (出厂走 `--el-border-color-lighter` = #ebeef5). */
+  --el-table-border-color: var(--color-line);
+  /* 表头出厂是"白底 + #909399 小字", 是全站对比度最低的一块: 给它一层底色. */
+  --el-table-header-bg-color: var(--el-fill-color);
+  --el-table-row-hover-bg-color: var(--el-fill-color);
+  /* 表头字色**点名**取 regular 而不是让它跟着 secondary 走: slate-500 落在表头那层浅底上是
+     4.34:1, 差一点没过 AA 的 4.5:1 (出厂的中性灰 #909399 更低, 只有 3.0:1). 取 regular 是
+     6.9:1; 表头与表体同色也不打架 —— th 本身是 500 字重, 底色又不同一层. */
+  --el-table-header-text-color: var(--el-text-color-regular);
+}
+
+html:root .el-skeleton {
+  /* 骨架屏的流光正好由 `--el-fill-color` 与 `--el-fill-color-darker` 两档出场 (出厂是 #f0f2f5 →
+     #e6e8eb, 只差一格). 上面那套填充刻度里 darker 是 slate-300, 跟着走会让流光变成原来三倍的
+     强度 —— 四个列表页的首屏都在动, 那不是想要的. 故这两条点名取紧邻的一格, 与出厂强度相当. */
+  --el-skeleton-color: #f1f5f9;
+  --el-skeleton-to-color: #e2e8f0;
 }

@@ -131,7 +131,7 @@ onMounted(() => {
            EP 永远显示不出它的标签 (空串被判为"未选中"), 改用 placeholder + 右上角的 × 清空;
            value-on-clear 必须显式写 '' (EP 的清空默认值是 undefined, 与 domain 的判据不符). -->
       <div class="grid gap-3 sm:grid-cols-3">
-        <label class="flex flex-col gap-1 text-sm text-slate-600">
+        <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
           状态
           <ElSelect
             v-model="statusFilter"
@@ -149,7 +149,7 @@ onMounted(() => {
           </ElSelect>
         </label>
 
-        <label class="flex flex-col gap-1 text-sm text-slate-600">
+        <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
           策略
           <ElSelect
             v-model="strategyFilter"
@@ -170,7 +170,7 @@ onMounted(() => {
         <!-- 排序**没有**空值: 清空它会让 sort_by 变成空串, 后端直接判非法. 所以它不 clearable,
              也就不需要 placeholder. 「每页」不在这一格里了 —— 它搬到了表格下面那条工具条上,
              与另外两个列表页同一处. -->
-        <label class="flex flex-col gap-1 text-sm text-slate-600">
+        <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
           排序
           <ElSelect
             v-model="sortBy"

@@ -54,7 +54,10 @@ describe('SurfaceCard', () => {
 
     expect(wrapper.element.tagName).toBe('DL');
     expect(wrapper.classes()).toContain('rounded-lg');
-    expect(wrapper.classes()).toContain('shadow-sm');
+    expect(wrapper.classes()).toContain('border-line');
+    // 卡片**只**靠描边: 描边与极浅阴影同时上会互相削弱, 阴影留给浮层. 这条断言是防止有人
+    // "顺手加一点阴影" —— 那会同时回来 17 处卡片的质感, 而不是一处.
+    expect(wrapper.classes()).not.toContain('shadow-sm');
   });
 
   it('isBodyPadded 为 false 时根上不带内边距', () => {

@@ -145,7 +145,7 @@ watch([activeTable, offset, pageSize], loadTablePage, { immediate: true });
         </button>
       </div>
 
-      <label class="flex items-center gap-2 text-sm text-slate-600">
+      <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
         每页
         <select
           v-model.number="pageSize"

@@ -378,7 +378,7 @@ onMounted(() => {
         </legend>
 
         <div class="grid gap-4 sm:grid-cols-2">
-          <label class="flex flex-col gap-1 text-sm text-slate-600">
+          <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
             策略
             <ElSelect
               v-model="selectedStrategyId"
@@ -398,7 +398,7 @@ onMounted(() => {
             >{{ visibleFieldErrors.strategy_id }}</span>
           </label>
 
-          <label class="flex flex-col gap-1 text-sm text-slate-600">
+          <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
             版本
             <ElSelect
               v-model="selectedVersionId"
@@ -481,7 +481,7 @@ onMounted(() => {
         </legend>
 
         <div class="grid gap-4 sm:grid-cols-2">
-          <label class="flex flex-col gap-1 text-sm text-slate-600">
+          <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
             开始交易日
             <ElInput
               v-model="runFields.startTradingDay"
@@ -500,7 +500,7 @@ onMounted(() => {
             >8 位数字</span>
           </label>
 
-          <label class="flex flex-col gap-1 text-sm text-slate-600">
+          <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
             结束交易日
             <ElInput
               v-model="runFields.endTradingDay"
@@ -519,7 +519,7 @@ onMounted(() => {
             >8 位数字</span>
           </label>
 
-          <label class="flex flex-col gap-1 text-sm text-slate-600">
+          <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
             初始资金
             <!-- 仍是 type="text": `initialCapitalText` 是"以文本承载的数值", `domain/run-form.ts`
                  按字符串读它. 改成 number 会让浏览器放行 `1e5` 一类并弹原生校验气泡, 与 domain 的
@@ -535,7 +535,7 @@ onMounted(() => {
             >{{ visibleFieldErrors.initial_capital }}</span>
           </label>
 
-          <label class="flex flex-col gap-1 text-sm text-slate-600">
+          <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
             K 线周期 (bar_period)
             <ElInput
               v-model="runFields.barPeriod"
@@ -553,7 +553,7 @@ onMounted(() => {
 
           <label
             v-if="runFieldRequirements.exchangeId"
-            class="flex flex-col gap-1 text-sm text-slate-600"
+            class="flex flex-col gap-1 text-sm font-medium text-slate-700"
           >
             交易所 (exchange_id)
             <ElInput
@@ -572,7 +572,7 @@ onMounted(() => {
 
           <label
             v-if="runFieldRequirements.instrumentId"
-            class="flex flex-col gap-1 text-sm text-slate-600"
+            class="flex flex-col gap-1 text-sm font-medium text-slate-700"
           >
             合约 (instrument_id)
             <ElInput
