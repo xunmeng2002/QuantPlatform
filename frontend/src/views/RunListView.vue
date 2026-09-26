@@ -10,7 +10,6 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { ElButton, ElCheckbox, ElOption, ElSelect, ElTable, ElTableColumn } from 'element-plus';
 import { RouterLink } from 'vue-router';
 
-import { ApiError } from '../api/client';
 import { DEFAULT_RUN_SORT_COLUMN, RUN_SORT_COLUMNS, fetchRuns } from '../api/runs';
 import type { RunSortColumn } from '../api/runs';
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, RUN_STATUSES } from '../api/types';
@@ -20,6 +19,7 @@ import ErrorBanner from '../components/ErrorBanner.vue';
 import LoadingNotice from '../components/LoadingNotice.vue';
 import PaginationBar from '../components/PaginationBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import { describeApiFailure } from '../composables/use-feedback';
 import { usePolling } from '../composables/usePolling';
 import {
   formatAmount,
@@ -69,7 +69,7 @@ async function refreshRuns(): Promise<void> {
       limit: limit.value,
     });
   } catch (error) {
-    errorMessage.value = error instanceof ApiError ? error.detail : '加载运行列表失败';
+    errorMessage.value = describeApiFailure(error, '加载运行列表失败');
   } finally {
     isLoading.value = false;
   }

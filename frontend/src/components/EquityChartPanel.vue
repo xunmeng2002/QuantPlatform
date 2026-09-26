@@ -18,9 +18,9 @@ import type { EChartsOption } from 'echarts';
 import { computed, onMounted, ref } from 'vue';
 import VChart from 'vue-echarts';
 
-import { ApiError } from '../api/client';
 import { fetchRunEquity } from '../api/runs';
 import type { EquityPoint } from '../api/types';
+import { describeApiFailure } from '../composables/use-feedback';
 import { buildEquitySeries, summarizeEquity } from '../domain/equity';
 import { ABSENT_PLACEHOLDER, formatAmount, formatPercentRatio, formatTradingDay } from '../domain/format';
 import EmptyNotice from './EmptyNotice.vue';
@@ -132,7 +132,7 @@ async function loadEquity(): Promise<void> {
     // 失败/取消/超时的轮没有结果库 (后端回 404), 未结束的轮回 409: 两种都不是页面级失败,
     // 一句话说清并给一次重试就够了.
     equityPoints.value = [];
-    errorMessage.value = error instanceof ApiError ? error.detail : '加载权益曲线失败';
+    errorMessage.value = describeApiFailure(error, '加载权益曲线失败');
   } finally {
     isLoading.value = false;
   }

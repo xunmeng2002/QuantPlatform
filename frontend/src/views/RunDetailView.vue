@@ -7,22 +7,32 @@
  *
  * 指标行由 `metricSections` 一次性算好: 这些列是引擎结果文件的镜像, 逐行写死在模板里的话, 加一列
  * 就要改三处对齐.
+ *
+ * 反馈分流: 两个 `ErrorBanner` 各管各的 —— `errorMessage` 是页面级加载失败, `artifactErrorMessage`
+ * 是产物清单加载失败, 两者都带重试、都留在页上. 用户**动作**的得失走 toast (b 类): 取消运行、下载
+ * 产物都成败各弹一次 —— 下载成功的 toast 不是多余的, 浏览器自己的下载提示在窗口最底下, 大文件还要
+ * 等一会儿才出现, 「点了有没有反应」这句话得在这里回. 特别注意 `artifactErrorMessage` 是**被轮询
+ * 驱动**的 (每 2 秒 `loadArtifacts` 清一次), 整条转成 toast 会让一次失败的清单加载每 2 秒弹一次.
  */
 
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 
-import { ApiError } from '../api/client';
 import { cancelRun as cancelRunRequest, fetchRunArtifacts, fetchRunArtifactBlob, fetchRunDetail } from '../api/runs';
 import type { JobArtifact, RunDetail } from '../api/types';
 import ArtifactList from '../components/ArtifactList.vue';
-import ConfirmDialog from '../components/ConfirmDialog.vue';
 import EmptyNotice from '../components/EmptyNotice.vue';
 import EquityChartPanel from '../components/EquityChartPanel.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
 import LoadingNotice from '../components/LoadingNotice.vue';
 import ResultTablePanel from '../components/ResultTablePanel.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import {
+  confirmAction,
+  describeApiFailure,
+  showFailureToast,
+  showSuccessToast,
+} from '../composables/use-feedback';
 import { usePolling } from '../composables/usePolling';
 import { artifactFilename, saveBlobAsFile } from '../domain/download';
 import {
@@ -43,10 +53,12 @@ const strategyCatalog = useStrategyCatalogStore();
 
 const run = ref<RunDetail | null>(null);
 const artifacts = ref<JobArtifact[]>([]);
+/** 页面级加载失败 (c 类). 取消失败走 toast, 不再往这里写. */
 const errorMessage = ref<string | null>(null);
+/** 产物清单加载失败 (c 类). 下载失败走 toast, 不再往这里写. */
 const artifactErrorMessage = ref<string | null>(null);
 const isLoading = ref(true);
-const isCancelDialogOpen = ref(false);
+/** 取消期间禁用那个按钮 (弹窗里的忙碌态没有了, 挪到这里). */
 const isCancelling = ref(false);
 const downloadingPath = ref<string | null>(null);
 
@@ -128,7 +140,7 @@ async function loadRunDetail(): Promise<void> {
   try {
     run.value = await fetchRunDetail(props.id);
   } catch (error) {
-    errorMessage.value = error instanceof ApiError ? error.detail : '加载运行详情失败';
+    errorMessage.value = describeApiFailure(error, '加载运行详情失败');
   } finally {
     isLoading.value = false;
   }
@@ -143,8 +155,7 @@ async function loadArtifacts(): Promise<void> {
   } catch (error) {
     // 作业目录可能还没建出来 (排队中) 或已被清掉, 这不是页面级失败: 指标照常显示.
     artifacts.value = [];
-    artifactErrorMessage.value =
-      error instanceof ApiError ? error.detail : '加载产物清单失败';
+    artifactErrorMessage.value = describeApiFailure(error, '加载产物清单失败');
   }
 }
 
@@ -153,30 +164,45 @@ async function refreshRun(): Promise<void> {
 }
 
 async function downloadArtifact(artifact: JobArtifact): Promise<void> {
-  artifactErrorMessage.value = null;
+  // 这里**不碰** `artifactErrorMessage`: 清单加载失败与这一次下载是两件事, 顺手清掉前者等于
+  // 把一条还成立的信息抹了.
   downloadingPath.value = artifact.relative_path;
 
   try {
     const artifactBlob = await fetchRunArtifactBlob(props.id, artifact.relative_path);
-    saveBlobAsFile(artifactBlob, artifactFilename(artifact.relative_path));
+    const filename = artifactFilename(artifact.relative_path);
+
+    saveBlobAsFile(artifactBlob, filename);
+    showSuccessToast(`已开始下载 ${filename}.`);
   } catch (error) {
-    artifactErrorMessage.value = error instanceof ApiError ? error.detail : '下载失败';
+    showFailureToast(describeApiFailure(error, '下载失败'));
   } finally {
     downloadingPath.value = null;
   }
 }
 
-async function confirmCancellation(): Promise<void> {
+async function cancelRunWithConfirmation(): Promise<void> {
+  const isConfirmed = await confirmAction({
+    title: '取消这次运行',
+    message: '引擎进程会被终止, 该轮将标记为已中断。已写出的产物会保留。',
+    confirmLabel: '取消运行',
+    isDangerous: true,
+  });
+
+  if (!isConfirmed) {
+    return;
+  }
+
   isCancelling.value = true;
-  artifactErrorMessage.value = null;
 
   try {
     await cancelRunRequest(props.id);
-    isCancelDialogOpen.value = false;
+    // 后端的取消是异步的 (先杀进程再回写状态), 故文案是"已请求"而不是"已取消"; 下面的 refreshRun
+    // 会立刻把状态拉回来 —— 那一刻它多半还是 running, 这正是为什么文案不能写死成"已停止".
+    showSuccessToast('已请求取消这次运行.');
     await refreshRun();
   } catch (error) {
-    errorMessage.value = error instanceof ApiError ? error.detail : '取消失败';
-    isCancelDialogOpen.value = false;
+    showFailureToast(describeApiFailure(error, '取消失败'));
   } finally {
     isCancelling.value = false;
   }
@@ -231,11 +257,11 @@ onMounted(async () => {
       <button
         v-if="run && !isTerminal"
         type="button"
-        class="rounded border border-rose-300 px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50"
+        class="rounded border border-rose-300 px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
         :disabled="isCancelling"
-        @click="isCancelDialogOpen = true"
+        @click="cancelRunWithConfirmation"
       >
-        取消运行
+        {{ isCancelling ? '取消中…' : '取消运行' }}
       </button>
     </header>
 
@@ -394,16 +420,5 @@ onMounted(async () => {
         </div>
       </section>
     </template>
-
-    <ConfirmDialog
-      :is-open="isCancelDialogOpen"
-      title="取消这次运行"
-      message="引擎进程会被终止, 该轮将标记为已中断。已写出的产物会保留。"
-      confirm-label="取消运行"
-      is-dangerous
-      :is-busy="isCancelling"
-      @confirm="confirmCancellation"
-      @cancel="isCancelDialogOpen = false"
-    />
   </section>
 </template>

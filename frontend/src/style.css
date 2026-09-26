@@ -7,6 +7,10 @@
  *
  * 引入 Element Plus 之后本文件多了一层职责: 把 EP 的 `--el-*` 变量指回上面这套令牌 (见文末),
  * 于是"一个 danger 标签是什么颜色"仍然只有一处答案.
+ *
+ * 观感层那一批起, 这里还是全站**动效与焦点**的唯一出处: 手写控件与 EP 控件共用同一组过渡时长、
+ * 同一圈 `:focus-visible` 描边. 各模板里不再出现 `transition-*` / `focus-visible:` 工具类 ——
+ * 那两端各写一套就等于没统一.
  */
 
 @import "tailwindcss";
@@ -27,6 +31,94 @@
 
 body {
   background-color: var(--color-page);
+}
+
+/**
+ * 交互基元一: 过渡节奏.
+ *
+ * 选择器一律套 `:where()` —— 它把括号内的特异性压成 0, 于是这几条**永远不会**跟 EP 抢特异性,
+ * 只靠"源序在后"覆盖它的默认值 (`main.ts` 先 import EP 的 CSS, 再 import 本文件).
+ */
+:where(a, button, summary, input, select, textarea) {
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    color 150ms,
+    box-shadow 150ms;
+}
+
+/**
+ * 把 EP 按钮拉进同一节奏、同一圈焦点色.
+ *
+ * 它自带 `transition: all .1s` (100ms) 与一圈 `--el-button-outline-color` 焦点环, 出厂值是
+ * `primary-light-5` (品牌色掺五成白), 在白底上对比度不足 —— 于是"两种速度 + 两种焦点环"会同时
+ * 出现, 方向还和想要的相反. 两条覆盖都靠源序: `.el-button` 与按类型给的 `.el-button--primary`
+ * 等**同为 (0,1,0) 且都直接声明在按钮元素上**, 后声明的那条赢, 故这一条对所有类型 (含 danger)
+ * 一并生效.
+ */
+.el-button {
+  transition-duration: 150ms;
+  --el-button-outline-color: var(--color-brand);
+}
+
+/**
+ * 交互基元二: 焦点可见性 (全站首次).
+ *
+ * 排除 EP 已经自己画了焦点标识的内部元素. `el-input` / `el-textarea` 靠 (0,2,0) 的
+ * `:focus{outline:none}` 自保, 但 `.el-select__input{outline:none}` 只有 (0,1,0) —— 与下面这条
+ * 打平后由源序判我们赢, 结果是每一个 `el-select` 里都会多出一圈被裁的蓝环. 复选框/单选框的原生
+ * input 是 0×0 的隐藏元素, 描边会在那儿画出一个孤立小方点.
+ */
+:where(a, button, summary, input, select, textarea):where(
+    :not(
+      .el-input__inner,
+      .el-textarea__inner,
+      .el-select__input,
+      .el-checkbox__original,
+      .el-radio__original
+    )
+  ):focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+/**
+ * 路由切换: 150ms 淡入 + 4px 上移. 类名与 `App.vue` 的 `<Transition name="page">` 成对.
+ *
+ * 不给任何祖先加 `transform` / `filter`: 过渡期间这类属性会成为 `position: fixed` 的包含块.
+ * 这里也不写 `position: absolute` —— 离场瞬间脱离文档流会让页面高度塌陷、滚动条猛跳.
+ */
+.page-enter-active,
+.page-leave-active {
+  transition:
+    opacity 150ms ease,
+    transform 150ms ease;
+}
+
+.page-enter-from,
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+/**
+ * 系统开了"减少动态效果"时: 关掉**装饰性**动效 (路由过渡、骨架屏的流光), 保留 EP 的忙碌转圈
+ * —— 那个转圈是"还在处理"唯一的动态线索, 停掉只剩一个不动的图标, 反而更难读.
+ *
+ * 必须逐条点名, 不能写 `* { animation-duration: .01ms !important }`: EP 那 361 KB CSS 里
+ * `prefers-reduced-motion` 出现 0 次, 通配符会把它的 loading 动画一并停掉.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active,
+  .page-leave-active,
+  :where(a, button, summary, input, select, textarea),
+  .el-button {
+    transition-duration: 1ms;
+  }
+
+  .el-skeleton.is-animated .el-skeleton__item {
+    animation: none;
+  }
 }
 
 /**

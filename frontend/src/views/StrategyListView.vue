@@ -11,7 +11,6 @@
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 
-import { ApiError } from '../api/client';
 import { fetchStrategies } from '../api/strategies';
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../api/types';
 import type { PageResponse, Strategy } from '../api/types';
@@ -21,6 +20,7 @@ import LoadingNotice from '../components/LoadingNotice.vue';
 import PaginationBar from '../components/PaginationBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import StrategyUploadForm from '../components/StrategyUploadForm.vue';
+import { describeApiFailure, showSuccessToast } from '../composables/use-feedback';
 import { formatDateTime } from '../domain/format';
 import { describeStrategyVisibility } from '../domain/labels';
 import { useStrategyCatalogStore } from '../stores/strategy-catalog';
@@ -52,7 +52,9 @@ async function refreshStrategies(): Promise<void> {
     // 新出现的一页里可能有没见过的归属人, 顺手补齐名字.
     await directoryStore.ensureKnown(page.records.map((record) => record.owner_user_id));
   } catch (error) {
-    errorMessage.value = error instanceof ApiError ? error.detail : '加载策略列表失败';
+    // 页面级 (c 类) 失败: 留在 ErrorBanner 上, 带重试. 不走 toast —— 这里没有"用户刚点的那个动作"
+    // 可以回话, 而下一轮轮询/翻页还会再试.
+    errorMessage.value = describeApiFailure(error, '加载策略列表失败');
   } finally {
     isLoading.value = false;
   }
@@ -70,6 +72,10 @@ function handlePageSizeChange(): void {
 
 async function handleCreated(strategyId: string): Promise<void> {
   isUploadPanelOpen.value = false;
+  // 先弹再跳: toast 挂在 body 上, 不随路由重建, 于是它会跟着用户落到详情页 —— 上传的反馈正好
+  // 在"东西真的在那儿"的那一页上. 失败**不在这里报**: 它就是上传表单自己的失败 (名字重复之类),
+  // 留在表单里与出错的字段同屏 (a 类).
+  showSuccessToast('策略已上传.');
   // 列表缓存与当前页都要失效: 新建的策略按更新时间倒序排在最前, 若停在第二页, 它在上一页.
   await strategyCatalog.refresh();
   offset.value = 0;

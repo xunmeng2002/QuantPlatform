@@ -7,11 +7,16 @@
  *
  * 停用管理员要过「还剩几个启用的管理员」这一关, 最后一个启用管理员被停用后端回 409; 界面不预先
  * 猜这条规则, 直接把后端的话显示出来 (规则在服务端, 前端再实现一遍就是两份会漂移的规则).
+ *
+ * 两条反馈通道在这里分得很清楚, 别把它们的 ref 合并:
+ *   - 建号是本页第一个表单 (a 类) —— 失败**就地**留在表单上方的 `ErrorBanner` 里, 因为那句话的
+ *     读者是正在填这个表单的人; 成功走 toast (账号已经建出来了, 提示条没有"下一步"可指);
+ *   - 改账号状态是表单之外的页面级动作 (b 类) —— 成败都走 toast. 它原先也往建号那条 banner 上写,
+ *     于是"建号失败"和"停用失败"共用一条消息位, 后者还会覆盖前者.
  */
 
 import { computed, onMounted, ref } from 'vue';
 
-import { ApiError } from '../api/client';
 import { createUser, fetchUsers, updateUserStatus } from '../api/users';
 import {
   DEFAULT_PAGE_SIZE,
@@ -24,12 +29,17 @@ import {
   USER_TYPES,
 } from '../api/types';
 import type { PageResponse, User, UserStatus, UserType } from '../api/types';
-import ConfirmDialog from '../components/ConfirmDialog.vue';
 import EmptyNotice from '../components/EmptyNotice.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
 import LoadingNotice from '../components/LoadingNotice.vue';
 import PaginationBar from '../components/PaginationBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import {
+  confirmAction,
+  describeApiFailure,
+  showFailureToast,
+  showSuccessToast,
+} from '../composables/use-feedback';
 import { formatDateTime } from '../domain/format';
 import { describeUserStatus, describeUserType } from '../domain/labels';
 import { useSessionStore } from '../stores/session';
@@ -38,8 +48,8 @@ const session = useSessionStore();
 
 const usersPage = ref<PageResponse<User> | null>(null);
 const errorMessage = ref<string | null>(null);
-const actionErrorMessage = ref<string | null>(null);
-const actionMessage = ref<string | null>(null);
+/** 只管建号失败 (a 类); 改账号状态的失败走 toast. */
+const createErrorMessage = ref<string | null>(null);
 const isLoading = ref(true);
 const isCreatePanelOpen = ref(false);
 
@@ -52,9 +62,11 @@ const newDisplayName = ref('');
 const newUserType = ref<UserType>('user');
 const isCreating = ref(false);
 
-const pendingStatusUser = ref<User | null>(null);
-const pendingStatus = ref<UserStatus>('disabled');
-const isUpdatingStatus = ref(false);
+/**
+ * 正在改状态的那一行. 既是行内按钮的忙碌态, 也是"防重复点击"的闸: 请求在飞的时候它非空, 那一行
+ * 的按钮因此是禁用的.
+ */
+const statusChangingUser = ref<User | null>(null);
 
 const users = computed(() => usersPage.value?.records ?? []);
 const totalCount = computed(() => usersPage.value?.total ?? 0);
@@ -67,26 +79,22 @@ const isCreateDisabled = computed(
     newPassword.value.length < MINIMUM_PASSWORD_LENGTH,
 );
 
-const isPendingStatusSelf = computed(
-  () =>
-    pendingStatusUser.value !== null &&
-    session.currentUser !== null &&
-    pendingStatusUser.value.id === session.currentUser.id,
-);
+function isCurrentUser(user: User): boolean {
+  return session.currentUser !== null && session.currentUser.id === user.id;
+}
 
-const statusChangeDialogMessage = computed(() => {
-  const isDisabling = pendingStatus.value === 'disabled';
-  const targetName =
-    pendingStatusUser.value?.display_name || pendingStatusUser.value?.username || '';
+/** 停用的后果按「是不是你自己」分两说 —— 这条措辞是本页最需要读清楚的一句话. */
+function describeStatusChangeConsequence(user: User, nextStatus: UserStatus): string {
+  const targetName = user.display_name || user.username;
 
-  if (!isDisabling) {
+  if (nextStatus === 'active') {
     return `启用后 ${targetName} 可以立即登录.`;
   }
 
-  return isPendingStatusSelf.value
-    ? `这是你自己的账号. 停用后你手上的令牌立即失效, 下一个请求就会被登出, 且你再也看不到这个页面.`
+  return isCurrentUser(user)
+    ? '这是你自己的账号. 停用后你手上的令牌立即失效, 下一个请求就会被登出, 且你再也看不到这个页面.'
     : `停用后 ${targetName} 的令牌立即失效, 无法登录; 已有的策略与运行记录不受影响.`;
-});
+}
 
 async function refreshUsers(): Promise<void> {
   isLoading.value = true;
@@ -95,7 +103,7 @@ async function refreshUsers(): Promise<void> {
   try {
     usersPage.value = await fetchUsers(offset.value, limit.value);
   } catch (error) {
-    errorMessage.value = error instanceof ApiError ? error.detail : '加载用户列表失败';
+    errorMessage.value = describeApiFailure(error, '加载用户列表失败');
   } finally {
     isLoading.value = false;
   }
@@ -123,8 +131,7 @@ async function submitCreateUser(): Promise<void> {
     return;
   }
 
-  actionErrorMessage.value = null;
-  actionMessage.value = null;
+  createErrorMessage.value = null;
   isCreating.value = true;
 
   try {
@@ -138,42 +145,43 @@ async function submitCreateUser(): Promise<void> {
     resetCreateForm();
     offset.value = 0;
     await refreshUsers();
-    actionMessage.value = `已创建账号 ${createdUser.display_name}.`;
+    // 成功但不收起表单: 连着建几个号是常态, 收起反而要多点一次.
+    showSuccessToast(`已创建账号 ${createdUser.display_name}.`);
   } catch (error) {
-    actionErrorMessage.value = error instanceof ApiError ? error.detail : '建号失败';
+    createErrorMessage.value = describeApiFailure(error, '建号失败');
   } finally {
     isCreating.value = false;
   }
 }
 
-function requestStatusChange(user: User): void {
-  pendingStatusUser.value = user;
-  pendingStatus.value = user.status === 'active' ? 'disabled' : 'active';
-}
+async function changeUserStatus(user: User): Promise<void> {
+  const nextStatus: UserStatus = user.status === 'active' ? 'disabled' : 'active';
 
-async function confirmStatusChange(): Promise<void> {
-  const targetUser = pendingStatusUser.value;
+  const isConfirmed = await confirmAction({
+    title: nextStatus === 'active' ? '启用账号' : '停用账号',
+    message: describeStatusChangeConsequence(user, nextStatus),
+    confirmLabel: nextStatus === 'active' ? '启用' : '停用',
+    isDangerous: nextStatus === 'disabled',
+  });
 
-  if (targetUser === null) {
+  if (!isConfirmed) {
     return;
   }
 
-  const nextStatus = pendingStatus.value;
-
-  actionErrorMessage.value = null;
-  actionMessage.value = null;
-  isUpdatingStatus.value = true;
+  statusChangingUser.value = user;
 
   try {
-    await updateUserStatus(targetUser.id, nextStatus);
-    pendingStatusUser.value = null;
+    await updateUserStatus(user.id, nextStatus);
     await refreshUsers();
-    actionMessage.value = `${targetUser.display_name || targetUser.username} 已${nextStatus === 'active' ? '启用' : '停用'}.`;
+    showSuccessToast(
+      `${user.display_name || user.username} 已${nextStatus === 'active' ? '启用' : '停用'}.`,
+    );
   } catch (error) {
-    actionErrorMessage.value = error instanceof ApiError ? error.detail : '更新账号状态失败';
-    pendingStatusUser.value = null;
+    // 后端那条「最后一个启用的管理员不能被停用」的规则会在这里以 409 的原文出现 —— 照抄后端的话,
+    // 前端不重写一遍规则.
+    showFailureToast(describeApiFailure(error, '更新账号状态失败'));
   } finally {
-    isUpdatingStatus.value = false;
+    statusChangingUser.value = null;
   }
 }
 
@@ -304,17 +312,11 @@ onMounted(async () => {
       @retry="refreshUsers"
     />
 
+    <!-- 建号失败 (a 类) 就地显示: 这句话的读者正是正在填这张表单的人. 改账号状态的失败不在这里. -->
     <ErrorBanner
-      :message="actionErrorMessage"
+      :message="createErrorMessage"
       :is-retry-visible="false"
     />
-
-    <p
-      v-if="actionMessage"
-      class="mb-4 rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
-    >
-      {{ actionMessage }}
-    </p>
 
     <LoadingNotice v-if="isLoading" />
 
@@ -375,8 +377,9 @@ onMounted(async () => {
               <td class="px-3 py-2 text-right">
                 <button
                   type="button"
-                  class="rounded border border-line px-2 py-1 text-xs hover:bg-slate-50"
-                  @click="requestStatusChange(user)"
+                  class="rounded border border-line px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-50"
+                  :disabled="statusChangingUser !== null"
+                  @click="changeUserStatus(user)"
                 >
                   {{ user.status === 'active' ? '停用' : '启用' }}
                 </button>
@@ -411,16 +414,5 @@ onMounted(async () => {
         />
       </div>
     </template>
-
-    <ConfirmDialog
-      :is-open="pendingStatusUser !== null"
-      :title="pendingStatus === 'active' ? '启用账号' : '停用账号'"
-      :message="statusChangeDialogMessage"
-      :confirm-label="pendingStatus === 'active' ? '启用' : '停用'"
-      :is-dangerous="pendingStatus === 'disabled'"
-      :is-busy="isUpdatingStatus"
-      @confirm="confirmStatusChange"
-      @cancel="pendingStatusUser = null"
-    />
   </section>
 </template>

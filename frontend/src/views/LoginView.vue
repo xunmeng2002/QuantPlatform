@@ -9,9 +9,9 @@
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
-import { ApiError } from '../api/client';
 import { MAXIMUM_USERNAME_LENGTH } from '../api/types';
 import ErrorBanner from '../components/ErrorBanner.vue';
+import { describeApiFailure } from '../composables/use-feedback';
 import { useSessionStore } from '../stores/session';
 
 const route = useRoute();
@@ -56,7 +56,7 @@ async function submit(): Promise<void> {
     await session.login(username.value.trim(), password.value);
     await router.push(redirectTarget.value ?? { name: 'runs' });
   } catch (error) {
-    errorMessage.value = error instanceof ApiError ? error.detail : '登录失败';
+    errorMessage.value = describeApiFailure(error, '登录失败');
     password.value = '';
   } finally {
     isSubmitting.value = false;

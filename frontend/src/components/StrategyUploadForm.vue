@@ -11,7 +11,6 @@
 
 import { computed, ref, watch } from 'vue';
 
-import { ApiError } from '../api/client';
 import { createStrategy } from '../api/strategies';
 import {
   MAXIMUM_STRATEGY_DESCRIPTION_LENGTH,
@@ -19,6 +18,7 @@ import {
   STRATEGY_VISIBILITIES,
 } from '../api/types';
 import type { StrategyVisibility } from '../api/types';
+import { describeApiFailure } from '../composables/use-feedback';
 import { useManifestTextSource } from '../composables/useManifestTextSource';
 import { describeStrategyVisibility } from '../domain/labels';
 import ErrorBanner from './ErrorBanner.vue';
@@ -93,7 +93,7 @@ async function submit(): Promise<void> {
     resetForm();
     emit('created', createdStrategy.strategy.id);
   } catch (error) {
-    errorMessage.value = error instanceof ApiError ? error.detail : '上传失败';
+    errorMessage.value = describeApiFailure(error, '上传失败');
   } finally {
     isSubmitting.value = false;
   }

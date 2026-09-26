@@ -22,6 +22,12 @@ declare module 'vue-router' {
 
 export const router = createRouter({
   history: createWebHistory(),
+
+  // 没有它时导航会沿用上一页的滚动位置 —— 从长列表底部点进详情页, 新页停在半空中. 页面过渡
+  // (App.vue 的 `<Transition name="page" mode="out-in">`) 会让这件事更显眼: 离场那一拍里旧页
+  // 已经不在 DOM, 高度塌到只剩顶栏, 浏览器顺手把滚动位置截到顶部, 于是"先跳一下再落回中间".
+  // `savedPosition` 只在浏览器前进/后退时才有值, 那时恢复原位, 其余一律回到顶部.
+  scrollBehavior: (_to, _from, savedPosition) => savedPosition ?? { top: 0 },
   routes: [
     {
       path: '/login',

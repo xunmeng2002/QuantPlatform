@@ -7,12 +7,14 @@
  *
  * manifest 的每个版本都留一份可展开的**参数预览** —— 提交表单是按它生成的, 在这里就能看出来
  * 下一轮回测会长出哪些控件.
+ *
+ * 三个写操作都走 `use-feedback.ts`: 删除与保存授权是表单之外的页面级动作 (b 类), 成败都弹 toast;
+ * 上传新版本的成功提示也在这一层 (`handleVersionUploaded`) —— 它那一支失败留在上传表单自己身上.
  */
 
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 
-import { ApiError } from '../api/client';
 import { deleteStrategy, fetchStrategyDetail, replaceStrategyGrants } from '../api/strategies';
 import { GRANT_PERMISSIONS } from '../api/types';
 import type {
@@ -22,13 +24,18 @@ import type {
   StrategyVersion,
   UserDirectoryEntry,
 } from '../api/types';
-import ConfirmDialog from '../components/ConfirmDialog.vue';
 import DirectoryPicker from '../components/DirectoryPicker.vue';
 import EmptyNotice from '../components/EmptyNotice.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
 import LoadingNotice from '../components/LoadingNotice.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import StrategyVersionUploadForm from '../components/StrategyVersionUploadForm.vue';
+import {
+  confirmAction,
+  describeApiFailure,
+  showFailureToast,
+  showSuccessToast,
+} from '../composables/use-feedback';
 import { formatDateTime } from '../domain/format';
 import { describeGrantPermission, describeStrategyVisibility } from '../domain/labels';
 import { deriveParameterDescriptors, parseStrategyManifest } from '../domain/manifest';
@@ -43,11 +50,13 @@ const session = useSessionStore();
 const directoryStore = useUserDirectoryStore();
 
 const strategyDetail = ref<StrategyDetail | null>(null);
+/** 只剩页面级加载失败 (c 类); 删除失败已经改走 toast —— 两件事共用一个 ref 会让提示互相覆盖. */
 const errorMessage = ref<string | null>(null);
+/** 只剩「这个人已经在名单里了」这一条就地提示; 保存授权的得失走 toast. */
 const grantErrorMessage = ref<string | null>(null);
 const isLoading = ref(true);
 const isSavingGrants = ref(false);
-const isDeleteDialogOpen = ref(false);
+/** 删除期间禁用右上角那个按钮 (弹窗里的「处理中…」没有了, 忙碌态挪到这里). */
 const isDeleting = ref(false);
 const grantDraft = ref<StrategyGrantPayload[]>([]);
 
@@ -121,13 +130,14 @@ async function loadStrategyDetail(): Promise<void> {
       ...detail.grants.map((grant) => grant.grantee_user_id),
     ]);
   } catch (error) {
-    errorMessage.value = error instanceof ApiError ? error.detail : '加载策略详情失败';
+    errorMessage.value = describeApiFailure(error, '加载策略详情失败');
   } finally {
     isLoading.value = false;
   }
 }
 
 async function handleVersionUploaded(): Promise<void> {
+  showSuccessToast('新版本已上传.');
   await loadStrategyDetail();
 }
 
@@ -177,24 +187,39 @@ async function saveGrants(): Promise<void> {
 
   try {
     strategyDetail.value = await replaceStrategyGrants(props.id, grantDraft.value);
+    showSuccessToast('授权名单已保存.');
   } catch (error) {
-    grantErrorMessage.value = error instanceof ApiError ? error.detail : '保存授权失败';
+    // 保存授权是表单之外的页面级动作 (b 类): 失败走 toast, 不再占 `grantErrorMessage` —— 那个 ref
+    // 留给「这个人已经在名单里了」这条就地提示, 两件事共用会让后者被覆盖掉.
+    showFailureToast(describeApiFailure(error, '保存授权失败'));
   } finally {
     isSavingGrants.value = false;
   }
 }
 
-async function confirmDeletion(): Promise<void> {
+async function deleteStrategyWithConfirmation(): Promise<void> {
+  const isConfirmed = await confirmAction({
+    title: '删除这个策略',
+    message: '策略会被标记为已删除, 不再出现在列表与提交页; 已有的运行记录仍指向它。这一步不可撤销。',
+    confirmLabel: '删除策略',
+    isDangerous: true,
+  });
+
+  if (!isConfirmed) {
+    return;
+  }
+
   isDeleting.value = true;
-  errorMessage.value = null;
 
   try {
     await deleteStrategy(props.id);
-    isDeleteDialogOpen.value = false;
+    // 先弹再跳: toast 挂在 body 上, 不随路由重建, 于是它跟着用户落到列表页 ——
+    // 那句话的读者正好在「那一条不见了」的那一页上.
+    showSuccessToast('策略已删除.');
     await router.push({ name: 'strategies' });
   } catch (error) {
-    errorMessage.value = error instanceof ApiError ? error.detail : '删除失败';
-    isDeleteDialogOpen.value = false;
+    // 失败留在本页: 策略还在, 页面也还在, 用户能重试.
+    showFailureToast(describeApiFailure(error, '删除失败'));
   } finally {
     isDeleting.value = false;
   }
@@ -227,10 +252,11 @@ onMounted(() => {
       <button
         v-if="isOwner"
         type="button"
-        class="rounded border border-rose-300 px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50"
-        @click="isDeleteDialogOpen = true"
+        class="rounded border border-rose-300 px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+        :disabled="isDeleting"
+        @click="deleteStrategyWithConfirmation"
       >
-        删除策略
+        {{ isDeleting ? '删除中…' : '删除策略' }}
       </button>
     </header>
 
@@ -504,16 +530,5 @@ onMounted(() => {
         </div>
       </section>
     </template>
-
-    <ConfirmDialog
-      :is-open="isDeleteDialogOpen"
-      title="删除这个策略"
-      message="策略会被标记为已删除, 不再出现在列表与提交页; 已有的运行记录仍指向它。这一步不可撤销。"
-      confirm-label="删除策略"
-      is-dangerous
-      :is-busy="isDeleting"
-      @confirm="confirmDeletion"
-      @cancel="isDeleteDialogOpen = false"
-    />
   </section>
 </template>

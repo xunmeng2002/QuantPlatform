@@ -11,9 +11,9 @@
 
 import { computed, ref, watch } from 'vue';
 
-import { ApiError } from '../api/client';
 import { uploadStrategyVersion } from '../api/strategies';
 import type { StrategyVersion } from '../api/types';
+import { describeApiFailure } from '../composables/use-feedback';
 import { useManifestTextSource } from '../composables/useManifestTextSource';
 import ErrorBanner from './ErrorBanner.vue';
 import FilePicker from './FilePicker.vue';
@@ -77,7 +77,7 @@ async function submit(): Promise<void> {
     resetForm();
     emit('uploaded', uploadedVersion);
   } catch (error) {
-    errorMessage.value = error instanceof ApiError ? error.detail : '上传失败';
+    errorMessage.value = describeApiFailure(error, '上传失败');
   } finally {
     isSubmitting.value = false;
   }

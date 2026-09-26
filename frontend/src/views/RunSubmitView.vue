@@ -13,13 +13,17 @@
  *
  * 表单里**没有行情模式选择**: 提交侧当前只收 Bar (`run_submission.MATCH_MODE_NOT_SUBMITTABLE_MESSAGE`),
  * 给了 Tick 也只是让用户点一个必然被拒的选项.
+ *
+ * 反馈分流: 提交失败是**表单自己的失败** (a 类) —— 参数不合法、标的没填, 那句话的读者正在这张表单上,
+ * 所以它就地留在 `submitErrorMessage` 里, 不弹 toast. 成功才弹: 回包之后立刻跳运行详情页, 提示条会
+ * 跟着这次跳转一起消失, 而 toast 挂在 body 上, 正好落在"东西真的在跑"的那一页.
+ * 版本加载失败是 c 类, 留在 `loadErrorMessage` 的 banner 上.
  */
 
 import { computed, onMounted, ref } from 'vue';
 import { ElAlert, ElButton, ElInput, ElOption, ElSelect } from 'element-plus';
 import { RouterLink, useRouter } from 'vue-router';
 
-import { ApiError } from '../api/client';
 import { submitRun } from '../api/runs';
 import { fetchLastSubmittedParameters, fetchStrategyDetail } from '../api/strategies';
 import { SUBMITTABLE_MATCH_MODE } from '../api/types';
@@ -27,6 +31,7 @@ import type { LastSubmittedParameters, MarketDataType, RunSubmitPayload, Strateg
 import EmptyNotice from '../components/EmptyNotice.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
 import ParameterForm from '../components/ParameterForm.vue';
+import { describeApiFailure, showSuccessToast } from '../composables/use-feedback';
 import { parseStrategyManifest, createInitialParameterInputs, deriveParameterDescriptors, deriveParameterValues, deriveRunFieldRequirements } from '../domain/manifest';
 import type { ParameterInput, RunFieldRequirements } from '../domain/manifest';
 import { EMPTY_RUN_FIELDS, buildPrefilledRunFields, validateRunForm } from '../domain/run-form';
@@ -238,8 +243,7 @@ async function loadStrategyDetail(strategyId: string): Promise<void> {
       return;
     }
 
-    loadErrorMessage.value =
-      error instanceof ApiError ? error.detail : '加载策略版本失败';
+    loadErrorMessage.value = describeApiFailure(error, '加载策略版本失败');
   } finally {
     if (requestToken === selectionToken) {
       isLoadingVersions.value = false;
@@ -288,9 +292,11 @@ async function submit(): Promise<void> {
   try {
     const submittedRun = await submitRun(payload);
 
+    // 先弹再跳: 这一页马上就要被卸载, 就地写的任何东西都看不到.
+    showSuccessToast('回测已提交.');
     await router.push({ name: 'run-detail', params: { id: submittedRun.id } });
   } catch (error) {
-    submitErrorMessage.value = error instanceof ApiError ? error.detail : '提交失败';
+    submitErrorMessage.value = describeApiFailure(error, '提交失败');
   } finally {
     isSubmitting.value = false;
   }

@@ -8,7 +8,6 @@
 
 import { computed, ref, watch } from 'vue';
 
-import { ApiError } from '../api/client';
 import { fetchRunResultTable } from '../api/runs';
 import {
   DEFAULT_PAGE_SIZE,
@@ -21,6 +20,7 @@ import type {
   ResultTableRecord,
   ResultTableValue,
 } from '../api/types';
+import { describeApiFailure } from '../composables/use-feedback';
 import { ABSENT_PLACEHOLDER, formatAmount, formatCount, formatFlag, formatTradingDay } from '../domain/format';
 import EmptyNotice from './EmptyNotice.vue';
 import ErrorBanner from './ErrorBanner.vue';
@@ -62,7 +62,7 @@ async function loadTablePage(): Promise<void> {
     columns.value = [];
     records.value = [];
     total.value = 0;
-    errorMessage.value = error instanceof ApiError ? error.detail : '加载结果表失败';
+    errorMessage.value = describeApiFailure(error, '加载结果表失败');
   } finally {
     isLoading.value = false;
   }

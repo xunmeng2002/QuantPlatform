@@ -9,8 +9,8 @@
 
 import { onMounted, ref } from 'vue';
 
-import { ApiError } from '../api/client';
 import type { UserDirectoryEntry } from '../api/types';
+import { describeApiFailure } from '../composables/use-feedback';
 import { useUserDirectoryStore } from '../stores/user-directory';
 
 const emit = defineEmits<{
@@ -32,8 +32,7 @@ async function runSearch(): Promise<void> {
   try {
     await directoryStore.search(searchQuery.value.trim());
   } catch (error) {
-    errorMessage.value =
-      error instanceof ApiError ? error.detail : '查询用户失败';
+    errorMessage.value = describeApiFailure(error, '查询用户失败');
   }
 }
 
