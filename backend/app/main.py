@@ -35,7 +35,7 @@ from .scheduler.scheduler import RunScheduler
 
 
 APPLICATION_TITLE = "QuantPlatform"
-APPLICATION_DESCRIPTION = "量化回测平台: 包裹 QuantTrading 引擎, 运行用户上传的 Python 策略"
+APPLICATION_DESCRIPTION = "薪火量化: 包裹 QuantTrading 引擎, 运行用户上传的 Python 策略"
 APPLICATION_VERSION = "0.1.0"
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"

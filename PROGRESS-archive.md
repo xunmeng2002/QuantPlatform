@@ -736,6 +736,115 @@
 
 ---
 
+## D.11 · 2026-09-26 （第十一批） 引入 Element Plus：地基 4 件 + 两个最脏页
+
+> 归档于 2026-09-26（加 D.13 后主文件越过 50 KB 上限，按 Harness §8.1
+> 把 ✅ 区最旧的整条移出）。**下列原文一字未改。**
+
+- **起因（用户原话）**：「现在的 UI 太原始了，是不是应该考虑引入 UI 组件库了？」——前端 14 个
+  自写组件 + 8 个页面，全仓 `.vue` 里**一个 `<style>` 块都没有**、**零动画、零 toast 通道**，
+  表格 / 分页 / 模态框 / 提示条 / 表单控件全用 Tailwind 手写。功能齐了（89 项纯函数测试兜底），
+  但观感是「能用」而不是「像个平台」。
+- **开工前用户拍板七条**：库 = **Element Plus `^2.14.6`**；范围 = **地基 + 两个最脏页**
+  （`/runs` 列表、`/runs/new` 提交）；测试工具**一并装**；引入方式 = **显式 import + 全量 CSS**
+  （不入 `unplugin-vue-components` / `unplugin-auto-import`——与归档 D.07 有意拒绝隐式全局的取向
+  一致）；换肤 = **`--el-*` 变量，不引 sass**；主题 = **五族色阶全对齐**；地基只换**纯展示共用件
+  的内部实现**（对外 props/emits 一字不变）。完整表见 `platform-plan.md` §13。
+- **与既有记录的显式处理（不静默覆盖）**：① `platform-plan.md` §12.18 早就预判过这一步
+  （「若日后要换 Element Plus，那批里只有布局件需要留」），本批照此执行，布局件
+  （`AppLayout` / `FilePicker` / `DirectoryPicker` / `ResultTablePanel` / `EquityChartPanel`）**留下**；
+  ② 拍板表「前端依赖」「前端测试」两行**保留原文 + 注明取代日期**（见 🔄 区）；
+  ③ ❓「前端组件测试的 DOM 环境未定」**本批结清**，原文搬入归档 `Q.07`。
+- **地基四件**（对外契约逐字未变）：`StatusBadge` → `el-tag`（5 个 tone → `type` 全覆盖映射；
+  **文字色仍由我们自己的嵌套 `<span>` 给**——EP 浅色 tag 用它自己的基色，配出厂调色板对比度只有
+  2.0–2.6:1，今天是 5.3–6.8:1）；`EmptyNotice` → `el-empty`（`:image-size="72"`；
+  **两行都进 `#description` 插槽**——默认插槽渲染在描述**下方**的 `.el-empty__bottom`，是第三个
+  层级，主句与注解会被拆开）；`ErrorBanner` → 保留自有 flex 包裹层、把 `el-alert` 放进去
+  （el-alert 只有 `title` / default 两个插槽，**没有 action 位**）；`PaginationBar` → `el-pagination`
+  （**显式钉 `layout="prev, next"`**——默认值会多长出跳页框与**第二条**条数文案）。
+- **两条跨层契约原样存活**：① `ParameterField` 的选项下标仍是**字符串**（`''` = 未选）、
+  取值恒为 `string | boolean`，转换仍只在 `domain/manifest.coerceParameterInput` 一处；
+  ② `PaginationBar` 上报的仍是 **offset 不是页码**（`currentPage` 是 1 起、offset 是 0 起，
+  `(page - 1) * limit` 这处换算是全批唯一会静默算错的地方，已由新 spec 两个方向钉住）。
+  **参数校验的语义与文案仍全在 `domain/`**——本批**不引 `el-form` / `el-form-item`**，
+  不用它的 rules（那会造出与 `visibleFieldErrors` 并列的第二处真相），标签/错误/提示的接线仍手写。
+- **`/runs` 五处**：四个筛选/排序下拉 + 页大小换 `el-select`、倒序换 `el-checkbox`、
+  表格换 `el-table` + `el-table-column`（两列 `align="right"`、操作列省略 `label`、**不加
+  `row-key`**——本表不用选中/展开/树形）、主行动换 `el-button` 套在
+  `<RouterLink custom v-slot="{ navigate, href }">` 里**保住真锚点**（中键开新标签页是真实用法）。
+  **轮询 / `reloadFromFirstPage` / 六个查询参数 / `hasActiveFilter` 一行未动。**
+- **`/runs/new`**：**保留原生 `<form @submit.prevent>`**（回车提交与原生语义不动），只换控件——
+  策略/版本与六个运行级字段换 `el-input` / `el-select`（**六个字段仍全是 `type="text"`**，
+  「交易日」与「初始资金」靠 `inputmode` 给移动端键盘；改成 `type="number"` 会让浏览器接受 `1e5`
+  并弹原生校验气泡，与 `domain/` 的判据打架）、提示条换 `el-alert type="info"`、提交换
+  `el-button`。`ParameterForm.vue` **未改**（`updateParameter(descriptor.key, $event)` 那行本来就对）。
+- **主题换肤走 `html:root` 而不是 `:root`**：我们的覆盖与 EP 自己的 `:root` 同为**无层样式**、
+  同权重 (0,1,0)，同权重下靠源序决胜而源序取决于 Vite 打产物的先后（未实测，不该押）。
+  `html:root` 特异性 (0,1,1) 压过 EP 的，**与顺序无关**；`main.ts` 里的 import 顺序仍写对，
+  当深度防御。**换肤块是本批唯一新增的 `style.css` 内容**，五族 7 档色阶用 `color-mix()` 生成，
+  新写的模板里不再出现硬编码色值。
+- **两处与计划的偏差（有意为之，非疏漏）**：① §五原写排序与页大小两个下拉照抄「同上」（可清空），
+  但**清空会把排序或页大小的模型置空**（EP 默认回 `undefined`，写 `:value-on-clear="''"`
+  则送出一个后端不认的空 `sort_by` → 422），故这两个**不 `clearable`**、恒有值；
+  ② 策略/版本两个下拉**失去了「取消选择」这条路**（原生那个空 `<option>` 被 placeholder 取代，
+  且不加 `clearable`）——计划里已明确同意。
+- **一处可访问性净损失，已记在案**：`aria-describedby`（错误文案 `<p :id>` 的关联）在三分支里
+  **只有 `el-input` 那一支能保住**——`el-input` 把非 `class`/`style` 的属性透传落到内层原生
+  `<input>`；而 `el-select` 只声明了 `id` 与 `ariaLabel`（`aria-describedby` 落到根 `<div>` 上）、
+  `el-checkbox` 只声明了 `ariaControls`（落到根 `<label>` 上）。**同一件事曾是自写控件里天然成立的，
+  换库后对下拉与复选框不再成立。**
+- **两处计划断言被实物推翻（已按实物改）**：① 计划说「`el-alert` 根节点**没有** `role="alert"`」——
+  实测 2.14.6 的源码里是**硬编码**的，故包裹层上**不能**再加（嵌套两块 live region 会重复播报），
+  已删除并改用「恰好一处 `role="alert"`，且是 el-alert 自己那个」的断言钉住；
+  ② **`ErrorBanner` 的重试按钮此前从未渲染过**——`isRetryVisible?: boolean` 传参缺省时 Vue 会落成
+  `false` 而不是 `undefined`，于是「没传」与「明确要隐藏」成了同一件事，**每个调用点都静默丢了
+  重试按钮**（`git show HEAD` 确认是既有缺陷，非本批引入）。已用
+  `withDefaults(…, { isRetryVisible: true })` 修掉并由新 spec 钉住。
+- **验证**：`vue-tsc -b` 退出码 0；`vitest` **121 项全绿 / 12 个文件**（既有 89 项不受影响 +
+  新增 **32 项**：`ParameterForm` 4（**复活归档 D.10 那份 parked spec**，含「选项下标必须以字符串上抛」）、
+  `StatusBadge` 8、`PaginationBar` 6、`ErrorBanner` 8、`EmptyNotice` 4，逐个在文件顶部写
+  `// @vitest-environment jsdom`，全局 `environment: node` 未动）；`build` 成功（452 ms）。
+  **体积账（本批的主要代价）**：主 CSS **17,372 B → 382,097 B**（gzip 约 **52.5 kB**），
+  ECharts 那块 559.35 kB **未变**（基线 559,451 B），JS 合计 1,023,443 B、assets 合计 1,405,540 B
+  （**JS 增量未取到 like-for-like 基线**——为取它要先 stash，而工作区里有 12 改 + 6 新共 18 个文件，
+  不值当，故只报绝对值不报差）。产物自检三项：① EP 片段进了产物；
+  ② **Tailwind 的层原样进了产物**（`grep -c '@layer'` = **5**，此前只校验过源文件）；
+  ③ **换肤块在位**——`--el-color-primary` 恰好 **2** 处（EP 出厂的 `#409eff` 与我们的
+  `var(--color-brand)`），且后者带 `html:root` 选择器。另注：`color-mix()` 在**构建期**就被折算了
+  （`--el-color-primary-light-5` 落成字面量 `#8ea7ec`，因为 `--color-brand` 有字面值），
+  所以**运行期换肤对 light-N 那几档不成立**，改品牌色要重新构建；剩下 64 处 `color-mix` 是
+  Tailwind 自己的 lab/oklab。
+- **不做 / 留后**：`ConfirmDialog` → `ElMessageBox`（**形状不匹配**：今天是声明式
+  `isOpen` prop + `confirm`/`cancel` emit + `isBusy`，MessageBox 是命令式 + Promise，
+  换过去要把每个调用点的 `v-if` 控制反转成 `await` 流程，另一种迁移）；`ElMessage` toast
+  （全站今天**没有** toast 通道，这是产品决策不是迁移）；页码按钮；`FilePicker` /
+  `DirectoryPicker` / `ArtifactList` / `ResultTablePanel` / `EquityChartPanel`（布局件，
+  §12.18 已预判）；其余 5 个页面（后续批次）；`app.use(ElementPlus)` 全量注册 / sass /
+  响应式 / 深色模式；把散落的 `text-rose-600` 之类改成语义令牌 `text-danger`（全仓重命名，
+  与本批边界冲突）。**`LoadingNotice` 不动**——EP 没有等价物（`v-loading` 是遮罩指令），
+  它留在原地也正是 `role="status"` 不丢的原因。
+- **文档回写**：`platform-plan.md`（§10 两行加「EP 化 2026-09-26」、P4 依赖那段补日期与现状、
+  §12.18 加增补小节含实测代价、§13 新增十行拍板表）、`PROGRESS.md`（本条 + 拍板表两行注明取代 +
+  归档索引三行 + R.01 加手工验收待办；**D.08 与 D.09 两条整条移入归档**——主文件加本条后
+  越过 50 KB，按 §8.1 把 ✅ 区最旧的整条搬走（搬 D.08 后仍差一点，接着搬 D.09，
+  最终 48,709 B），搬运由脚本对条目边界完成、原文取自 `git HEAD`、正文一字未改，
+  主文件里 5 处 `见 D.08` 与 4 处 `见 D.09` 一并改写成 `见归档 D.xx`）、两处过期注释
+  （`vite.config.ts` 的「不装 jsdom」、`ConfirmDialog.vue` 的「因为最小集里没有组件库」）。
+- **待用户手工验收**（浏览器里走一遍，本批验收主体）：
+  ① `/runs`——四个下拉与倒序能改、**筛选能被 × 清回「全部」**（本批唯一改动操作方式的地方，
+  专看这条）、表格九列对齐（两列右对齐）、徽章配色与可读性、翻页、筛选后回第一页、
+  「新建回测」**中键能开新标签页**（验证锚点没丢）；
+  ② `/runs/new`——**选策略 → 参数与字段被带出且提示条可见 → 点「重置为默认值」→ 回到默认且
+  提示条消失 → 再选一次该策略仍带出 → 换个没跑过的策略为纯默认、无提示条**（这是归档 D.10 欠着的
+  手工验收，本批一并走）；参数项的必填/越界提示仍是 domain 那几句中文；回车能提交；
+  ③ **换肤是否生效**——EP 按钮/标签应是品牌蓝 `#1d4ed8`，若仍是出厂亮蓝 `#409eff` 说明换肤没吃到；
+  ④ 顺带回归四个共用页面（`/strategies`、`/strategies/:id`、`/users`、`/runs/:id`）：
+  徽章/空态/错误条/分页条变了样，功能应不变——**空态的居中与灰阶是这批里最可能想调回来的地方**。
+
+---
+
+---
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型

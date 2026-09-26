@@ -8,7 +8,7 @@
 
 import { computed, ref } from 'vue';
 import { ElButton, ElInput } from 'element-plus';
-import { useRoute, useRouter } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 
 import { MAXIMUM_USERNAME_LENGTH } from '../api/types';
 import ErrorBanner from '../components/ErrorBanner.vue';
@@ -68,12 +68,22 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <!-- 这是全站唯一"没有外壳"的页面 (未登录时 AppLayout 不挂载), 所以它自己那张卡要窄 -->
+  <!-- 这是全站唯一"没有外壳"的页面 (登录页不挂顶栏), 所以它自己那张卡要窄 -->
   <SurfaceCard class="mx-auto mt-16 max-w-sm">
     <PageHeader
-      title="量化回测平台"
+      title="薪火量化"
       description="请登录后继续"
-    />
+    >
+      <!-- 顶栏在这页不渲染, 主页也公开了: 没有这条链接, 从主页翻过来的人只能靠浏览器后退. -->
+      <template #leading>
+        <RouterLink
+          class="text-sm text-brand hover:underline"
+          :to="{ name: 'home' }"
+        >
+          ← 回到主页
+        </RouterLink>
+      </template>
+    </PageHeader>
 
     <form
       class="space-y-4"

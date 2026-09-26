@@ -22,7 +22,7 @@ const app = createApp(App);
 app.use(createPinia());
 app.use(router);
 
-/** 令牌失效时清会话并回登录页; 已在公开页 (登录页 / 404) 上就不再跳一次. */
+/** 令牌失效时清会话并回登录页; 已在公开页 (主页 / 登录页 / 404) 上就不再跳一次. */
 function handleUnauthorized(): void {
   const session = useSessionStore();
   const currentRoute = router.currentRoute.value;

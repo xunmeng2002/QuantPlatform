@@ -27,6 +27,13 @@ export const useSessionStore = defineStore('session', () => {
   const isAdmin = computed(() => currentUser.value?.user_type === 'admin');
   const displayName = computed(() => currentUser.value?.display_name ?? '');
 
+  /**
+   * 「己方身份已就绪」. 与 `isAuthenticated` 的区别在于它要求用户真的取回来了 —— 只有令牌时
+   * 显示名与角色都画不出来. 凡是要**渲染身份**的地方 (顶栏用户区, 主页的两态入口) 都读它,
+   * 于是「半登录」这个状态在界面上不可能出现, 这条判断也只有一个出处.
+   */
+  const hasCurrentUser = computed(() => currentUser.value !== null);
+
   watch(
     accessToken,
     (token) => {
@@ -76,6 +83,7 @@ export const useSessionStore = defineStore('session', () => {
     isAuthenticated,
     isAdmin,
     displayName,
+    hasCurrentUser,
     login,
     loadCurrentUser,
     clear,

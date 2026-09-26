@@ -2,8 +2,12 @@
 /**
  * 页面外壳: 顶栏 + 内容区.
  *
- * 顶栏在 `meta.isPublic` 的页面 (登录页、404 页) 上整个不渲染: 那里既没有身份可显示, 也没有
- * 可以安全点过去的链接.
+ * 顶栏在 `meta.hidesHeader` 的页面 (登录页、404 页) 上整个不渲染: 那里既没有身份可显示, 也没有
+ * 可以安全点过去的链接. 判据刻意**不是** `meta.isPublic` —— 主页是公开的但要看得到顶栏 (访客
+ * 要从那里登录), 而"不需要登录"与"不挂外壳"本来就是两件事.
+ *
+ * 用户区按"身份已就绪"二选一: 拿到用户才渲染头像与显示名, 否则渲染「登录」. 只按令牌判断的话,
+ * 公开页上的访客会看到一个空名字加一个 `?` 头像, 旁边还挂着一个点了只会跳登录页的「退出登录」.
  *
  * 内容宽度 `max-w-7xl` (1280px) 与内边距 `px-6` 是全站的统一口径: 表格此前挤在 1152px 里是
  * 观感显旧的主因之一.
@@ -28,7 +32,7 @@ interface NavigationLink {
   label: string;
 }
 
-const isHeaderVisible = computed(() => route.meta.isPublic !== true);
+const isHeaderVisible = computed(() => route.meta.hidesHeader !== true);
 
 /** 用户管理是管理员专属, 故链接也跟着身份走 —— 普通用户看到一个点了会被弹回来的入口没有意义. */
 const navigationLinks = computed<NavigationLink[]>(() => {
@@ -82,16 +86,18 @@ async function signOut(): Promise<void> {
       class="sticky top-0 z-40 border-b border-line bg-surface"
     >
       <div class="mx-auto flex max-w-7xl flex-wrap items-center gap-4 px-6 py-3">
+        <!-- 品牌区指回主页: 它是"回首页"这个惯例语义, 而导航项表达的是"你在哪个工作面".
+             两者在这份模板里本来就不重叠 —— 品牌区没有 `active-class`, <nav> 才有. -->
         <RouterLink
-          :to="{ name: 'runs' }"
+          :to="{ name: 'home' }"
           class="flex items-center gap-2"
         >
           <span
             class="flex h-7 w-7 items-center justify-center rounded-md bg-brand text-sm font-semibold text-white"
           >
-            量
+            薪
           </span>
-          <span class="text-sm font-semibold text-slate-900">量化回测平台</span>
+          <span class="text-sm font-semibold text-slate-900">薪火量化</span>
         </RouterLink>
 
         <nav class="flex flex-1 flex-wrap gap-1">
@@ -106,27 +112,48 @@ async function signOut(): Promise<void> {
           </RouterLink>
         </nav>
 
-        <StatusBadge
-          v-if="adminRoleBadge"
-          v-bind="adminRoleBadge"
-        />
+        <template v-if="session.hasCurrentUser">
+          <StatusBadge
+            v-if="adminRoleBadge"
+            v-bind="adminRoleBadge"
+          />
 
-        <span class="flex items-center gap-2">
-          <span
-            class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700"
-            aria-hidden="true"
-          >
-            {{ avatarInitial }}
+          <span class="flex items-center gap-2">
+            <span
+              class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700"
+              aria-hidden="true"
+            >
+              {{ avatarInitial }}
+            </span>
+            <span class="text-sm text-slate-600">{{ session.displayName }}</span>
           </span>
-          <span class="text-sm text-slate-600">{{ session.displayName }}</span>
-        </span>
 
-        <ElButton
-          size="small"
-          @click="signOut"
+          <ElButton
+            size="small"
+            @click="signOut"
+          >
+            退出登录
+          </ElButton>
+        </template>
+
+        <!-- tag="a" + href 而不是 @click="router.push": 与 404 页「回到回测运行」同一写法, 中键 /
+             右键「在新标签页打开」是真实用法, 丢掉真锚点就没了. -->
+        <RouterLink
+          v-else
+          v-slot="{ navigate, href }"
+          custom
+          :to="{ name: 'login' }"
         >
-          退出登录
-        </ElButton>
+          <ElButton
+            tag="a"
+            size="small"
+            type="primary"
+            :href="href"
+            @click="navigate"
+          >
+            登录
+          </ElButton>
+        </RouterLink>
       </div>
     </header>
 
