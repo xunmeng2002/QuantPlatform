@@ -124,6 +124,19 @@ python grid_strategy.py
 （`BackTest.dll`、`Core.dll`、`Network.dll` 等）——CPython 在 Windows 以
 `LOAD_WITH_ALTERED_SEARCH_PATH` 加载扩展模块，依赖随之解析。Phase 0 已实测。
 
+**注意**：`MysqlWrapper` / `MariadbWrapper` 两项已改为**按配置 `DbType` 运行时装载**，
+不在 `.pyd` 的导入表里，故引擎包可以不发运它们；只有 `DbType` 取 `2` / `3` 时才需要
+把对应模块摆在**引擎根目录**下。`SqliteWrapper` / `DuckdbWrapper` 仍是硬依赖，缺一不可。
+
+**取不到适配器时（模块缺失，或 `DbType` 是个不认识的取值）引擎的收场方式**：写一条点名
+`DbType`、并列明全部合法取值的 ERROR，然后交出**空适配器**，由引擎既有的判空通路接管 ——
+`SimExchange::Init()` 返回失败，宿主以 `ExitCodeHostInitFailed`（实测 `1`）收场。
+**不是**进程终止，也**不是**抛异常：适配器是在 `SimExchange` 构造函数里建的，抛出点不在宿主的
+`try` 作用域内，异常会以 `std::terminate` 收场；而 Windows 上的 `abort` 既不 flush stdio 缓冲、
+也不走日志器线程的 `ThreadExit`（日志器是后台线程 + 缓冲，落盘在 `ThreadExit`），
+**写在抛出前的那条日志会随进程一起消失**（实测退出码 `0xC0000409`、日志 0 字节）。
+故这里只剩「日志 + 失败退出」一条路，本节 Python 宿主与四个 `.exe` 宿主行为一致。
+
 ---
 
 ## 4. 退出码

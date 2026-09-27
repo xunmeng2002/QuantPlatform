@@ -19,7 +19,11 @@ from app.catalog.database import PlatformDatabase
 from app.catalog.enums import RunStatus
 from app.catalog.models import RunModel
 from app.config import PlatformSettings
-from app.scheduler.engine_config import RELATIVE_DATABASE_HOST, RELATIVE_DUMP_PATH
+from app.scheduler.engine_config import (
+    RELATIVE_DATABASE_HOST,
+    RELATIVE_DUMP_PATH,
+    SQLITE_DATABASE_TYPE,
+)
 from app.scheduler.result import RESULT_MIRROR_COLUMN_NAMES
 from app.scheduler.runner import (
     HOST_STARTUP_FAILURE_MESSAGE,
@@ -210,7 +214,7 @@ async def test_the_job_directory_matches_the_launch_contract(
     assert engine_configuration["RunId"] == run.id
     assert engine_configuration["MatchMode"] == 3
     assert engine_configuration["BarPreces"] == "5m"
-    assert engine_configuration["DbType"] == "1"
+    assert engine_configuration["DbType"] == SQLITE_DATABASE_TYPE
     assert engine_configuration["StartTradingDay"] == DEFAULT_START_TRADING_DAY
     assert engine_configuration["EndTradingDay"] == DEFAULT_END_TRADING_DAY
     assert engine_configuration["InitialCapital"] == DEFAULT_INITIAL_CAPITAL
