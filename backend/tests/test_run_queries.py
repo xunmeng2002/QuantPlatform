@@ -37,6 +37,7 @@ MEMBER_USERNAME = "runs-member"
 EARLY_BALANCE = 100.5
 LATE_BALANCE = 300.25
 FAILED_BALANCE = 200.75
+EARLY_ENGINE_VERSION = "build-2026.09.26"
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,7 @@ async def run_board(
         status=RunStatus.SUCCEEDED,
         trade_count=1,
         balance=EARLY_BALANCE,
+        engine_version=EARLY_ENGINE_VERSION,
         submitted_at=submitted_base,
     )
     late_success_run = await create_run_record(
@@ -321,5 +323,26 @@ async def test_reading_a_run_detail_exposes_the_full_mirrored_row(
     assert payload["status"] == RunStatus.SUCCEEDED.value
     assert payload["balance"] == EARLY_BALANCE
     assert payload["workspace_path"] == run_board.early_success_run.workspace_path
+    assert payload["engine_version"] == EARLY_ENGINE_VERSION
     assert "basic_data_loaded" in payload
     assert "commission_zero_rate_key_count" in payload
+
+
+async def test_a_run_list_row_does_not_carry_the_engine_version(
+    client: AsyncClient, run_board: RunBoard
+) -> None:
+    """引擎版本只进详情, 与 `hostname` 同形.
+
+    它是"这一轮由哪个构建跑的"的取证依据, 既不是排序维度也不是筛选维度; 列表页多带一个字段,
+    就是每个列表请求里多一份永远用不上的字节. 钉住它是为了把"只进详情"这个决定固定下来——
+    顺手写进 `RunSummaryResponse` 是个很容易发生的改动.
+    """
+
+    response = await client.get(RUNS_PATH, headers=bearer_headers(run_board.token))
+
+    assert response.status_code == 200
+
+    list_rows = response.json()["records"]
+
+    assert list_rows
+    assert all("engine_version" not in row for row in list_rows)

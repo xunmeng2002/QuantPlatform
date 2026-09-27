@@ -23,6 +23,7 @@ from app.catalog.enums import (
 from app.catalog.models import RunModel
 from app.config import PlatformSettings
 from app.scheduler.runner import MAXIMUM_ERROR_MESSAGE_LENGTH
+from app.services.engine_probe import ENGINE_VERSION_FILENAME, read_engine_version
 from app.services.run_submission import (
     MARKET_DATA_MISSING_MESSAGE,
     MATCH_MODE_NOT_SUBMITTABLE_MESSAGE,
@@ -56,6 +57,7 @@ from .run_helpers import (
     create_runnable_strategy,
     post_run,
     read_job_json,
+    read_run_record,
     run_directory_names,
     running_client,
     settings_with,
@@ -84,6 +86,10 @@ UNKNOWN_PARAMETER_VALUE = "某个取值"
 UNDECLARED_BEHAVIOR_VALUE = "not-a-declared-behavior"
 ABSENT_MARKET_DATA_DIRECTORY_NAME = "absent-market-data"
 ABSENT_SESSION_FILENAME = "AbsentSessions.json"
+
+# 引擎包自己带的版本号长这样; 测试里给出一个具体取值, 好让"行里那一列究竟来自哪里"无可
+# 抵赖——而非与一个同样恒为空串的取值相比.
+ENGINE_VERSION_TEXT = "build-2026.09.27"
 
 RESULT_LONG_TAIL_KEY = "MissingRateKeys"
 
@@ -661,6 +667,42 @@ async def test_a_submitted_run_is_readable_from_another_session(
         assert stored_run is not None
         assert stored_run.status == RunStatus.QUEUED.value
         assert stored_run.workspace_path == stored_run.id
+
+
+async def test_a_submitted_run_freezes_the_engine_version_it_will_launch(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    run_owner: SignedInAccount,
+) -> None:
+    """提交那一刻就把"用哪个引擎跑"冻进行里.
+
+    不冻的话, 引擎原地换版之后历史轮与新轮在库里长得一模一样; `StrategyVersionId` 那条"供逐字
+    复现"的承诺便少了引擎这一半——策略与参数都复现得出来, 跑它们的机器复现不出来. 这与 D.06
+    是同一类事: 口径变了而库里没有线索, 旧数字就再也不能与新数字相减.
+
+    断言有意走两路: 一路对着 `read_engine_version` 这份同一处真相, 一路对着写进引擎根的那个
+    字面量. 只对前者的话, 若两边都恒返回空串, 这条用例照样是绿的.
+    """
+
+    (platform_settings.engine_root / ENGINE_VERSION_FILENAME).write_text(
+        f"{ENGINE_VERSION_TEXT}\n", encoding="utf-8"
+    )
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    submitted = await submit_run(client, run_owner.token, runnable.strategy.id)
+
+    await await_run_terminal(database, submitted.id, RUNNING_ELAPSED_LIMIT_SECONDS)
+
+    stored_run = await read_run_record(database, submitted.id)
+
+    assert stored_run.engine_version == read_engine_version(
+        platform_settings.engine_root
+    )
+    assert stored_run.engine_version == ENGINE_VERSION_TEXT
 
 
 async def test_submitting_without_a_token_is_rejected(

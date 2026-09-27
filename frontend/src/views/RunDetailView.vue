@@ -101,6 +101,7 @@ const metricSections = computed<MetricSection[]>(() => {
         { label: '宿主退出码', value: formatCount(runDetail.exit_code) },
         { label: '宿主进程号', value: formatCount(runDetail.runner_pid) },
         { label: '执行主机', value: runDetail.hostname || '—' },
+        { label: '引擎版本', value: runDetail.engine_version || '—' },
       ],
     },
     {

@@ -243,6 +243,11 @@ class RunModel(Base):
 
     hostname: Mapped[str] = mapped_column("Hostname", String(128), default="")
 
+    # "这一轮跑的是哪个引擎构建", 与 `Hostname` 同形: 提交时冻结, 取不到时为空串 (不是 NULL).
+    # 它与 `StrategyVersionId` 一起才凑得齐"逐字复现"的两个前提——策略是哪个版本、引擎是哪个
+    # 构建; 缺了后者, 引擎换版之后历史轮与新轮在库里不可分辨.
+    engine_version: Mapped[str] = mapped_column("EngineVersion", String(64), default="")
+
     exit_code: Mapped[int | None] = mapped_column("ExitCode", Integer, default=None)
 
     params_json: Mapped[str] = mapped_column("ParamsJson", Text, default="{}")

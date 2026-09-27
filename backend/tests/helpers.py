@@ -352,6 +352,7 @@ async def create_run_record(
     submitted_at: datetime | None = None,
     params_json: str = "{}",
     backtest_config_json: str = "{}",
+    engine_version: str = "",
     run_id: str | None = None,
 ) -> RunModel:
     """直接落库建一个运行.
@@ -360,6 +361,9 @@ async def create_run_record(
 
     两份配置文本默认为空对象 (与列默认值一致), 需要断言"读回提交时那份配置"的用例自己给文本.
     `run_id` 只在断言次序时给: 排序若以主键兜平局, 就得先把主键捏在手里.
+
+    `engine_version` 默认空串, 与列默认值一致: 真实提交路径在引擎根读不出标识时写的也是空串,
+    而"这一列到底有没有从库里读出来"必须拿一个非空取值才验得了——两边都为空时断言恒成立.
     """
 
     resolved_run_id = run_id if run_id is not None else generate_identifier()
@@ -375,6 +379,7 @@ async def create_run_record(
         balance=balance,
         params_json=params_json,
         backtest_config_json=backtest_config_json,
+        engine_version=engine_version,
         # 工作目录名就是主键, 二者是同一件事: 调度侧按 `runs_root / <WorkspacePath>` 找它, 而
         # 提交侧写的正是 `RunId`. 这里写成 `runs/<id>` 会让作业目录嵌进 `runs/runs/<id>`, 与
         # 真实作业对不上——造出来的行于是走不完"目录已存在"以外的任何一条真实路径.

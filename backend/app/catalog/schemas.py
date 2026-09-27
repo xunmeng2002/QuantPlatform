@@ -244,6 +244,7 @@ class RunDetailResponse(RunSummaryResponse):
 
     runner_pid: int | None
     hostname: str
+    engine_version: str
     params_json: str
     backtest_config_json: str
     workspace_path: str

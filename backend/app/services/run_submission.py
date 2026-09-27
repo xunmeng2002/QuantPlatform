@@ -40,6 +40,7 @@ from ..scheduler.engine_config import (
     render_engine_config,
     serialize_configuration,
 )
+from .engine_probe import read_engine_version
 
 
 logger = logging.getLogger(__name__)
@@ -138,6 +139,11 @@ async def submit_run(
         status=RunStatus.QUEUED.value,
         params_json=strategy_configuration_text,
         backtest_config_json=engine_configuration_text,
+        # 与两份配置文本同一形态: 提交时冻结. 这一轮"将用哪个引擎跑"在落行那一刻就定了, 与
+        # `StrategyVersionId` 一起凑齐"逐字复现"的两个前提. 已知限制: 入队后、起进程前若引擎
+        # 被换掉, 记下的版本会与实际不符——而"作业在跑时换 .pyd"本就不受支持 (Windows 上已加载
+        # 的扩展模块处于锁定状态, 覆盖会失败), 故这条窗口在实践中关着.
+        engine_version=read_engine_version(settings.engine_root),
         # 工作目录名就是主键, 二者是同一件事: 引擎按 RunId 派生结果库名, 平台按它找结果文件,
         # 库里再存一份相对路径只是让"这一轮落在哪"不必靠约定去推.
         workspace_path=run_id,

@@ -29,6 +29,7 @@ from ..services.engine_probe import (
     find_python_binding,
     interpreter_tag,
     missing_runtime_filenames,
+    read_engine_version,
 )
 
 
@@ -45,6 +46,9 @@ class EngineHealthResponse(BaseModel):
     python_version: str
     engine_root: str
     engine_root_exists: bool
+    # "跑的是哪一版", 与上面几项"能不能跑"不是一回事: 引擎根坏了它是空串, 引擎根好好的它也
+    # 可能只是个内容摘要. 平台不收引擎包, 故这里报的是**探测到的**标识, 不是校验过的版本号.
+    engine_version: str
     python_binding_filename: str | None
     missing_runtime_filenames: list[str]
     runs_root: str
@@ -98,6 +102,7 @@ async def read_health_handler(
         python_version=".".join(str(part) for part in sys.version_info[:3]),
         engine_root=str(settings.engine_root),
         engine_root_exists=settings.engine_root.is_dir(),
+        engine_version=read_engine_version(settings.engine_root),
         python_binding_filename=python_binding.name if python_binding else None,
         missing_runtime_filenames=absent_runtime_filenames,
         runs_root=str(settings.runs_root),

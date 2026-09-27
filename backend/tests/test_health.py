@@ -20,7 +20,10 @@ from app.main import UNEXPECTED_ERROR_DETAIL
 from app.routers.health import EngineHealthResponse
 from app.services.engine_probe import (
     ENGINE_RUNTIME_FILENAMES,
+    ENGINE_VERSION_FILENAME,
+    VERSION_DIGEST_PREFIX,
     interpreter_tag,
+    read_engine_version,
 )
 
 from .conftest import TEST_BASE_URL, TEST_ADMIN_PASSWORD, TEST_ADMIN_USERNAME
@@ -119,6 +122,51 @@ async def test_health_reports_ready_when_engine_is_complete(
     assert health.missing_runtime_filenames == []
     assert health.python_binding_filename is not None
     assert health.runs_root_writable is True
+
+
+async def test_health_reports_the_engine_version_it_will_launch(
+    client: AsyncClient, application: FastAPI, health_token: str
+) -> None:
+    """"跑的是哪一版"与"能不能跑"是两件事: 前者即使在后者的判据齐备时也未必是人读得懂的版本号."""
+
+    settings = _settings(application)
+
+    _write_binding(settings.engine_root, interpreter_tag())
+    _write_runtime_libraries(settings.engine_root)
+
+    health = await _read_health(client, health_token)
+
+    assert health.engine_version == read_engine_version(settings.engine_root)
+    assert health.engine_version.startswith(VERSION_DIGEST_PREFIX)
+
+
+async def test_health_prefers_a_declared_engine_version_over_the_digest(
+    client: AsyncClient, application: FastAPI, health_token: str
+) -> None:
+    """引擎包自己带版本号时以它为准——那才是精确口径, 摘要是盖不住整个包的."""
+
+    settings = _settings(application)
+
+    _write_binding(settings.engine_root, interpreter_tag())
+    _write_runtime_libraries(settings.engine_root)
+    (settings.engine_root / ENGINE_VERSION_FILENAME).write_text(
+        "build-2026.09.26\n", encoding="utf-8"
+    )
+
+    health = await _read_health(client, health_token)
+
+    assert health.engine_version == "build-2026.09.26"
+
+
+async def test_health_reports_an_empty_engine_version_when_there_is_nothing_to_read(
+    client: AsyncClient, health_token: str
+) -> None:
+    """空串是"不知道", 不是错误: 这个端点的其余判据照常给出, 由调用方分辨."""
+
+    health = await _read_health(client, health_token)
+
+    assert health.engine_version == ""
+    assert health.ready is False
 
 
 async def test_health_reports_not_ready_without_the_extension_module(

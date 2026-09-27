@@ -236,6 +236,14 @@ export interface RunSummary {
 export interface RunDetail extends RunSummary {
   runner_pid: number | null;
   hostname: string;
+  /**
+   * 提交时冻结的引擎标识: 引擎包自带版本号时是它, 否则是 `.pyd` 与运行时库的内容摘要
+   * (`sha256:` 前缀), 读不出时是空串.
+   *
+   * 两种形态**不可比较**: 一个是人写的版本号, 一个是内容哈希. 换版之后新旧两轮在这一列上
+   * 长得一样的话, 说明引擎的标识口径没变——而不是引擎没换.
+   */
+  engine_version: string;
   params_json: string;
   backtest_config_json: string;
   workspace_path: string;
