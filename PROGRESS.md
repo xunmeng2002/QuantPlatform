@@ -62,6 +62,15 @@ Python 策略**。
 
 ## ✅ 已完成
 
+### D.22 · 2026-09-28 （第二十二批） 引擎侧四个后端收成一条装载路 + Linux 链接补齐
+
+- **跨两仓的一批**（DBAdapters / QuantTrading），**本仓零代码、零文档改动**。四个后端现在
+  **全部**经 `LoadDatabaseBackend` 按配置装载（不再有 DuckDB / SQLite 直连的分叉），平台写入点
+  `SQLITE_DATABASE_TYPE = 1` 仍是合法取值；另把 Linux 那份 `libMysqlWrapper.so` 缺
+  OpenSSL / zlib / resolv 链接修掉 —— **Windows 侧不受影响**（那份 connector 是 SHARED
+  IMPORTED，符号由它自己带），上云的引擎包无变化。
+- **大小账**: 主文件约 **49.9 KB**，已无余量；按 D.21 留下的教训，**下一批开工前先做一次压缩**。
+
 ### D.21 · 2026-09-27 （第二十一批） 取不到数据库适配器时的收场口径订正：不是进程终止，而是 ERROR + 失败退出
 
 - **跨两仓的一批**（DBAdapters / QuantTrading），本仓只落一句文档订正。承接 D.20 留下的「⚠️ 订正」，
@@ -374,6 +383,9 @@ Python 策略**。
   故**引擎目录**与 **`RUNPATH` 覆盖的目录**两条路都成立，不需改代码；**但上云的 clean 引擎包到底带不带这两个模块、
   带的话放哪一层，需用户拍板**（两个模块各 11–15 MB，而上云后只有 Windows 一台主机）。
   与上条"上云前要由用户给出 clean 的引擎发布包"同一时点落实。
+  **补记（2026-09-28，第二十二批）**：Linux 下 `$<TARGET_RUNTIME_DLLS>` 不把适配器模块
+  拷到引擎目录旁，装载器靠消费方 `RUNPATH` 落到 `DBAdapters` 的安装树（上云是 Windows，
+  这条只在做 Linux 包时成立）。
 
 ---
 
