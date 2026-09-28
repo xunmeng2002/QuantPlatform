@@ -84,7 +84,8 @@ Python 策略**。
   的两轮指标并列且曲线叠加」已由 `test_run_comparison.py` 与 `RunCompareView.spec.ts` 各钉一条。**
 - **仍未决 —— 待用户手工验收**：浏览器与磁盘上的走查（对比页两列并排、模板套用往返、
   删除后目录消失、开保留策略跑 N+2 轮只剩 N 轮），清单见
-  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §11/§12。**提交未做**——等用户发话。
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §11/§12。
+- **提交状态**：已提交（`32441b1`），49 个文件（31 改 + 18 新）。
 - **顺带订正一处越批文案**：主页「当前边界」卡里"多轮对比与设置页尚未提供"删掉前半句
   （现为"设置页尚未提供"），页面落地后那句话就不该再挂着。
 
