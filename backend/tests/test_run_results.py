@@ -47,7 +47,7 @@ from .helpers import (
     login,
     update_record_by_id,
 )
-from .run_helpers import job_directory
+from .run_helpers import job_directory, open_result_database_for_writing
 
 
 RUNS_PATH = "/api/runs"
@@ -235,12 +235,16 @@ def expected_table_records(table_name: str) -> list[dict[str, object]]:
 
 
 def write_result_database(settings: PlatformSettings, run_id: str) -> None:
-    """在作业目录里建一个真的结果库, 表名列名与引擎一致 (列是子集)."""
+    """在作业目录里建一个真的结果库, 表名列名与引擎一致 (列是子集).
+
+    连接一律经 `open_result_database_for_writing` 开关: `with sqlite3.connect(...)` 只提交、
+    **不关连接**, Windows 上那份库会被本进程一直占着, 后续任何"移走它"的动作都是 `WinError 32`.
+    """
 
     database_file = result_database_file(settings, run_id)
     database_file.parent.mkdir(parents=True, exist_ok=True)
 
-    with sqlite3.connect(database_file) as connection:
+    with open_result_database_for_writing(database_file) as connection:
         for table_name, fixture in RESULT_TABLE_FIXTURES.items():
             column_definitions = ", ".join(
                 f"{column_name} {column_type}"

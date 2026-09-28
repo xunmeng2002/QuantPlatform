@@ -69,6 +69,13 @@ export const router = createRouter({
       props: true,
     },
     {
+      // 顶层而不是 `/runs/compare`: 对比页与运行列表是**两个工作面** (一个是"看这次跑得怎么样", 一个
+      // 是"看这几次差在哪"), 地址上不必套一层. 也因此与 `/runs/:id` 没有先后之争.
+      path: '/compare',
+      name: 'compare',
+      component: () => import('../views/RunCompareView.vue'),
+    },
+    {
       path: '/strategies',
       name: 'strategies',
       component: () => import('../views/StrategyListView.vue'),

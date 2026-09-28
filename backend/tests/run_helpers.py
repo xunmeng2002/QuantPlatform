@@ -13,8 +13,9 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
-from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+import sqlite3
+from collections.abc import AsyncIterator, Iterator, Sequence
+from contextlib import asynccontextmanager, closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -55,6 +56,12 @@ ENGINE_CONFIGURATION_FILENAME = "BackTest.json"
 RESULT_FILENAME = "result.json"
 ARGV0_FILENAME = "argv0.txt"
 SPAN_FILENAME = "span.txt"
+
+# 一份"目录里有一棵带嵌套的树"用到的名字. 只求像真的, 不求与引擎逐字一致——用它写的作业目录
+# 不参与任何端到端的断言, 断言的是"整棵树被移走 / 整棵树还在".
+DUMP_DIRECTORY_NAME = "Dump"
+STDOUT_FILENAME = "stdout.log"
+TRADE_FILENAME = "t_trade.csv"
 
 BEHAVIOR_PARAMETER_KEY = "Behavior"
 SLEEP_SECONDS_PARAMETER_KEY = "SleepSeconds"
@@ -365,6 +372,19 @@ async def read_run_record(database: PlatformDatabase, run_id: str) -> RunModel:
         return run
 
 
+async def read_run_or_none(
+    database: PlatformDatabase, run_id: str
+) -> RunModel | None:
+    """同上, 但行不在时返回 None.
+
+    "行真的没了"是一整类用例的主结果 (删除、保留清理都是), 而拿一个会抛错的读取器去问它, 那些
+    用例会死在与结论无关的 LookupError 上.
+    """
+
+    async with database.session_scope() as session:
+        return await session.get(RunModel, run_id)
+
+
 async def await_run_status(
     database: PlatformDatabase,
     run_id: str,
@@ -422,6 +442,45 @@ def job_directory(settings: PlatformSettings, run_id: str) -> Path:
     """一个作业的工作目录 (可能不存在)."""
 
     return settings.runs_root / run_id
+
+
+def write_job_directory(settings: PlatformSettings, run_id: str) -> Path:
+    """写一份作业目录: 顶层两个文件 + `Dump/<RunId>/` 一层嵌套, 返回那个目录.
+
+    与 `test_run_artifacts.write_job_files` 的分工: 那边按引擎的真实布局写, 断言的是"产物清单与
+    下载取到什么"; 这里的契约只是"目录里有一棵**带嵌套**的树", 用于断言"整棵树被移走"或"整棵树
+    还在"——不带嵌套的话, `rmtree` 与"只删顶层文件"这两种实现分不开.
+    """
+
+    directory = job_directory(settings, run_id)
+    (directory / DUMP_DIRECTORY_NAME / run_id).mkdir(parents=True)
+    (directory / RESULT_FILENAME).write_text(
+        f'{{"RunId": "{run_id}"}}', encoding="utf-8"
+    )
+    (directory / STDOUT_FILENAME).write_text("engine started\n", encoding="utf-8")
+    (directory / DUMP_DIRECTORY_NAME / run_id / TRADE_FILENAME).write_text(
+        "index,price\n1,10.5\n", encoding="utf-8"
+    )
+
+    return directory
+
+
+@contextmanager
+def open_result_database_for_writing(
+    database_file: Path,
+) -> Iterator[sqlite3.Connection]:
+    """以可写方式打开一份结果库, 出块即**关闭并提交**.
+
+    直接用 `with sqlite3.connect(...)` 是不行的: `Connection.__exit__` 只提交或回滚, **不关闭
+    连接**. 连接不关, Windows 上那个文件就被本进程占着——用例随后要移走它 (对比端点的曲线降级、
+    保留清理) 会拿到 `WinError 32`, 而报错指向"删不掉", 与真正的原因隔着两层.
+
+    出块时才提交: 块里抛异常就整段回滚, 不留一份半建的库.
+    """
+
+    with closing(sqlite3.connect(database_file)) as connection:
+        yield connection
+        connection.commit()
 
 
 async def await_process_started(

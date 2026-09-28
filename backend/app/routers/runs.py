@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
 
 from fastapi import APIRouter, Query, status
@@ -26,21 +28,37 @@ from ..catalog.schemas import (
     EquityPointResponse,
     JobArtifactListResponse,
     JobArtifactResponse,
+    MessageResponse,
     PageResponse,
     ResultTableResponse,
+    RunComparisonEntryResponse,
+    RunComparisonResponse,
     RunDetailResponse,
     RunEquityResponse,
     RunSubmitRequest,
     RunSummaryResponse,
 )
-from ..catalog.visibility import build_owned_run_query, load_owned_run
+from ..catalog.visibility import (
+    RUN_NOT_FOUND_MESSAGE,
+    build_owned_run_query,
+    load_owned_run,
+)
 from ..clock import utc_now
 from ..config import PlatformSettings
 from ..dependencies import SchedulerDependency, SessionDependency, SettingsDependency
-from ..errors import ConflictError, ResourceNotFoundError
+from ..errors import ConflictError, InvalidRequestError, ResourceNotFoundError
 from ..scheduler.registry import JobHandle
 from ..scheduler.runner import CANCEL_MESSAGE
-from ..services.result_database import read_capital_series, read_result_table_page
+from ..services.result_database import (
+    CapitalPointRecord,
+    read_capital_series,
+    read_result_table_page,
+)
+from ..services.run_storage import (
+    ROW_DELETABLE_OUTCOMES,
+    remove_run_directory,
+    resolve_run_directory,
+)
 from ..services.run_submission import submit_run
 
 
@@ -52,12 +70,23 @@ CANCEL_CONFIRMATION_SECONDS = 2
 CANCEL_ATTEMPT_LIMIT = 3
 
 RUN_ALREADY_FINISHED_MESSAGE = "运行已结束, 无法取消"
+RUN_DELETED_MESSAGE = "运行已删除"
+RUN_DIRECTORY_NOT_REMOVED_MESSAGE = "该运行的作业目录无法删除, 运行记录已保留"
 
 JOB_DIRECTORY_MISSING_MESSAGE = "该运行的作业目录不存在"
 ARTIFACT_NOT_FOUND_MESSAGE = "产物不存在"
 
 RESULT_NOT_READY_MESSAGE = "运行尚未结束, 结果库还在被引擎写入"
 RESULT_DATABASE_MISSING_MESSAGE = "该运行没有结果库"
+
+# 一次对比的上限: 三条独立的理由各自都够 —— ECharts 默认调色板 9 色 (再多就靠撞色区分),
+# `ids` 走在 query string 上, 以及每一轮都要开一次结果库 (开销随轮数线性增长).
+MAXIMUM_COMPARISON_RUNS = 6
+
+COMPARISON_IDS_REQUIRED_MESSAGE = "至少给一个运行号"
+COMPARISON_TOO_MANY_RUNS_MESSAGE = f"一次最多对比 {MAXIMUM_COMPARISON_RUNS} 轮"
+COMPARISON_EQUITY_FILE_MISSING_MESSAGE = "该运行的结果库文件已不在"
+COMPARISON_EQUITY_UNREADABLE_MESSAGE = "该运行的结果库读不出来"
 
 ARTIFACT_MEDIA_TYPE = "application/octet-stream"
 
@@ -104,6 +133,138 @@ async def list_runs_handler(
     return await fetch_page(
         session, owned_query, RunSummaryResponse, offset, limit, order_by=ordering
     )
+
+
+@router.get("/compare", response_model=RunComparisonResponse)
+async def compare_runs_handler(
+    session: SessionDependency,
+    settings: SettingsDependency,
+    current_user: CurrentUserDependency,
+    ids: str = Query(..., description="逗号分隔的运行号, 最多 6 个"),
+) -> RunComparisonResponse:
+    """多轮并列: 每轮一份列表列 + 它自己的权益曲线. 响应列序 = 请求序.
+
+    **本路由必须声明在 `@router.get("/{run_id}")` 之前**: `/compare` 与 `/{run_id}` 的形状
+    完全一样, 声明晚了就被当成 `run_id="compare"` 吞掉, 且不会报任何错——只会得到一句
+    "运行不存在".
+
+    归属与不存在**一起**判, 粒度是整请求: 一次 `IN` 取件, 有任何一个 id 取不到就整请求 404,
+    文案与单轮详情逐字相同. 不降级成"少一列"——那正是多租户要求消除的可分辨信号: 越权与不存在
+    一旦在响应形状上留下差别, 拿一组 id 去试就能问出"这个运行号存不存在".
+
+    曲线逐轮降级 (未结束 / 没有结果库 / 库文件不在 / 库读不出来), 只把**那一列**的曲线置空并
+    附一句原因, 指标与其余列照常出——一条曲线画不出来不该让整页变白. 曲线上限之外的部分不在
+    这里做: 断线、缺日、对齐都交给前端 (`domain/equity.ts`), 后端多回一列就等于把图表形状钉进
+    接口 (同单轮权益端点的理由).
+    """
+
+    comparison_run_ids = _parse_comparison_run_ids(ids)
+
+    owned_query = build_owned_run_query(current_user).where(
+        RunModel.id.in_(comparison_run_ids)
+    )
+    runs_by_id = {
+        run.id: run for run in (await session.scalars(owned_query)).all()
+    }
+
+    if any(run_id not in runs_by_id for run_id in comparison_run_ids):
+        raise ResourceNotFoundError(RUN_NOT_FOUND_MESSAGE)
+
+    ordered_runs = [runs_by_id[run_id] for run_id in comparison_run_ids]
+
+    equity_results = await asyncio.gather(
+        *(_read_comparison_equity(settings, run) for run in ordered_runs)
+    )
+
+    return RunComparisonResponse(
+        runs=[
+            RunComparisonEntryResponse(
+                summary=RunSummaryResponse.model_validate(run),
+                equity_points=equity_points,
+                equity_unavailable_reason=unavailable_reason,
+            )
+            for run, (equity_points, unavailable_reason) in zip(
+                ordered_runs, equity_results
+            )
+        ]
+    )
+
+
+def _parse_comparison_run_ids(raw_ids: str) -> list[str]:
+    """把 query 里的一串运行号切成有序、去重的列表.
+
+    两处必须这么做. **保序**: 响应列的次序就是用户勾选的次序, 而 `IN (...)` 的返回序是未定义的,
+    不收口的话界面上的列序会在驱动之间随机跳. **去重**: 重复的 id 会让同一轮出现两列, 而它在
+    库里只有一行——取件那一步的字典会把它合并, 于是响应体与请求对不上, 报的是"少了一列".
+
+    上限按去重**之后**判: 传 8 个 id 而其中 3 个重复, 实际要画的是 5 列, 没有理由拒.
+    """
+
+    comparison_run_ids = list(
+        dict.fromkeys(part.strip() for part in raw_ids.split(",") if part.strip())
+    )
+
+    if not comparison_run_ids:
+        raise InvalidRequestError(COMPARISON_IDS_REQUIRED_MESSAGE)
+
+    if len(comparison_run_ids) > MAXIMUM_COMPARISON_RUNS:
+        raise InvalidRequestError(COMPARISON_TOO_MANY_RUNS_MESSAGE)
+
+    return comparison_run_ids
+
+
+async def _read_comparison_equity(
+    settings: PlatformSettings, run: RunModel
+) -> tuple[list[EquityPointResponse], str | None]:
+    """读一轮的权益曲线; 读不出来就回一句原因, **绝不抛**.
+
+    与单轮权益端点的差别只有这一点: 那边读不出来即 404/409, 这边是"整页里少一条线", 逐轮降级
+    必须由这里接住, 否则一条读不出来的曲线会让整个对比请求 500——而那与"少一条线"的代价差着
+    一个数量级.
+
+    结果库文件一律经 `_resolve_result_database_path` 解析 (作业目录守卫与"必须是文件"两条都在
+    里面): 这里换一条不经守卫的路径去读, 等于新开一个穿越读口子. 空 `DbPath` 单列一档文案——
+    它与"文件被删了"在界面上的下一步动作不同.
+    """
+
+    if run.status not in TERMINAL_RUN_STATUSES:
+        return [], RESULT_NOT_READY_MESSAGE
+
+    if not run.db_path.removeprefix("./"):
+        return [], RESULT_DATABASE_MISSING_MESSAGE
+
+    try:
+        database_file = _resolve_result_database_path(settings, run)
+    except ResourceNotFoundError:
+        return [], COMPARISON_EQUITY_FILE_MISSING_MESSAGE
+
+    try:
+        capital_points = await asyncio.to_thread(read_capital_series, database_file)
+    except (OSError, sqlite3.Error) as error:
+        # 库文件在、但读不出来 (半份文件、被独占、表结构不对): 原因只进日志且**不带路径**.
+        logger.warning("对比读权益曲线失败 run_id=%s: %s", run.id, error)
+        return [], COMPARISON_EQUITY_UNREADABLE_MESSAGE
+
+    return _to_equity_point_responses(capital_points), None
+
+
+def _to_equity_point_responses(
+    capital_points: Sequence[CapitalPointRecord],
+) -> list[EquityPointResponse]:
+    """把结果库的权益行翻成对外视图.
+
+    单轮权益端点与对比端点共用. 各写一遍的话, 将来多出一列只会加在其中一边, 而那种偏差在界面上
+    表现为"对比页的曲线与详情页不一样"——两处都不报错, 只有并排看才发现.
+    """
+
+    return [
+        EquityPointResponse(
+            trading_day=point.trading_day,
+            balance=point.balance,
+            available=point.available,
+        )
+        for point in capital_points
+    ]
 
 
 @router.post(
@@ -226,6 +387,47 @@ async def _interrupt_unstarted_run(session: AsyncSession, run_id: str) -> bool:
     return bool(interrupted.rowcount)
 
 
+@router.delete("/{run_id}", response_model=MessageResponse)
+async def delete_run_handler(
+    run_id: str,
+    session: SessionDependency,
+    settings: SettingsDependency,
+    current_user: CurrentUserDependency,
+) -> MessageResponse:
+    """删除一个已结束的运行: **先删作业目录, 后删行**. 非本人提交即 404.
+
+    顺序不能反. 行是那个目录**唯一**的句柄 (目录名就是 `RunId`, 而知道它的只有这一列), 行先
+    没了就再没有任何东西能找到那个目录, 磁盘泄漏变成永久且不可观测的. 反过来, 目录删干净了而
+    行还在, 只是一行指向空目录的记录, 下一次删除会幂等地把它收掉.
+
+    权限只走 `load_owned_run`: 运行只有提交人本人可见, **管理员也没有旁路**——与列表、详情、
+    取消同一条口径.
+
+    状态闸复用 `_require_finished_run` (未结束即 409, 文案与读结果库那句相同): 运行中的轮其
+    目录正被引擎占着, 删它要么失败、要么留下一个半死的作业. 想让排队轮消失请走取消端点.
+
+    幂等: 目录已经不在 (或这一行本就没记目录) 而行还在时, 照常删行并回 200; 行也没了 (重复
+    调用) 即 404, 同 `delete_strategy_handler` 的先例.
+
+    目录删不掉时返回 **409 且保留行**, 文案不带路径: 行在, 下次还能再试; 而报成功等于把磁盘
+    泄漏变成看不见的. `shutil.rmtree` 是阻塞调用, 故走 `asyncio.to_thread`.
+    """
+
+    run = await load_owned_run(session, current_user, run_id)
+    _require_finished_run(run)
+
+    removal = await asyncio.to_thread(remove_run_directory, settings, run)
+
+    if removal not in ROW_DELETABLE_OUTCOMES:
+        logger.warning("运行 %s 的作业目录未能移除: %s", run.id, removal.value)
+        raise ConflictError(RUN_DIRECTORY_NOT_REMOVED_MESSAGE)
+
+    await session.delete(run)
+    await session.commit()
+
+    return MessageResponse(message=RUN_DELETED_MESSAGE)
+
+
 @router.get("/{run_id}", response_model=RunDetailResponse)
 async def read_run_handler(
     run_id: str,
@@ -334,14 +536,7 @@ async def read_run_equity_handler(
 
     return RunEquityResponse(
         run_id=run.id,
-        points=[
-            EquityPointResponse(
-                trading_day=point.trading_day,
-                balance=point.balance,
-                available=point.available,
-            )
-            for point in capital_points
-        ],
+        points=_to_equity_point_responses(capital_points),
     )
 
 
@@ -422,36 +617,19 @@ def _resolve_result_database_path(settings: PlatformSettings, run: RunModel) -> 
 
 
 def _resolve_job_directory(settings: PlatformSettings, run: RunModel) -> Path:
-    """由运行行还原它的作业目录, 并确认它确实落在运行根之内.
+    """由运行行还原它的作业目录, 且要求它此刻真的存在.
 
-    目录名就是 `RunId` (`scheduler/workspace.py` 的 `runs_root / job_files.run_id`), 而
-    `WorkspacePath` 列记的正是这个值 (`services/run_submission` 落行时写入), 故**从库里重建
-    即可**, 不必去翻调度器的内存 (那个 `job_directory` 只是运行期属性, 重启后就没了).
-
-    两道校验都不能省: `WorkspacePath` 的列缺省是空串, 空串拼出来的路径**就是运行根本身**,
-    于是 `../../<别人的 RunId>/result.json` 这类请求会一路通过"在运行根之内"的判断, 变成
-    跨租户读产物. 空值与非严格子路径一律当作"这份运行没有目录".
+    路径判定本身在 `services/run_storage`, 与删除路径**共用同一份**; 这里只补读路径独有的那条
+    前置——目录必须真在. 删除路径不能复用它正是因为这个前置: 删一个已经不在的目录是幂等成功,
+    读一个不存在的目录才是 404.
     """
 
-    runs_root = settings.runs_root.resolve()
+    resolution = resolve_run_directory(settings, run)
 
-    if not run.workspace_path:
+    if resolution.directory is None or not resolution.directory.is_dir():
         raise ResourceNotFoundError(JOB_DIRECTORY_MISSING_MESSAGE)
 
-    try:
-        job_directory = (runs_root / run.workspace_path).resolve()
-    except (OSError, ValueError) as error:
-        logger.warning("作业目录名不合法 run_id=%s: %s", run.id, error)
-        raise ResourceNotFoundError(JOB_DIRECTORY_MISSING_MESSAGE) from error
-
-    if job_directory == runs_root or not job_directory.is_relative_to(runs_root):
-        logger.warning("作业目录越出运行根 run_id=%s", run.id)
-        raise ResourceNotFoundError(JOB_DIRECTORY_MISSING_MESSAGE)
-
-    if not job_directory.is_dir():
-        raise ResourceNotFoundError(JOB_DIRECTORY_MISSING_MESSAGE)
-
-    return job_directory
+    return resolution.directory
 
 
 def _resolve_artifact_path(job_directory: Path, file_path: str) -> Path:

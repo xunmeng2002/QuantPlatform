@@ -18,10 +18,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping
 from pathlib import Path
 
 from ..catalog.enums import MarketDataType
+
+
+logger = logging.getLogger(__name__)
 
 
 ENGINE_CONFIG_FILENAME = "BackTest.json"
@@ -90,6 +94,31 @@ def serialize_configuration(configuration: Mapping[str, object]) -> str:
     """
 
     return json.dumps(dict(configuration), indent=2) + "\n"
+
+
+def parse_configuration_object(
+    source_id: str, configuration_text: str
+) -> dict[str, object] | None:
+    """把一份落库的配置文本解回字典; 读不动只记日志并回 `None`.
+
+    与 `serialize_configuration` 成对放在这里: 同一个形状的读写各写一份的话, 改了一侧而另一侧
+    没跟上, 症状是"写进去的配置读不回来", 而那正是配置文本唯一的用途.
+
+    **回 `None` 而不抛**: 调用方拿到的都是"本来能读到"的数据 (提交页预填、模板列表), 一行坏
+    数据不该把整页变成 500. `source_id` 只进日志, 不进响应.
+    """
+
+    try:
+        parsed_configuration = json.loads(configuration_text)
+    except json.JSONDecodeError as error:
+        logger.warning("配置文本不是合法 JSON source=%s: %s", source_id, error)
+        return None
+
+    if not isinstance(parsed_configuration, dict):
+        logger.warning("配置文本不是 JSON 对象 source=%s", source_id)
+        return None
+
+    return parsed_configuration
 
 
 def render_engine_config(

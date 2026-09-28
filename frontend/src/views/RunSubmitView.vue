@@ -11,23 +11,30 @@
  * 解出来 (`GET /api/strategies/{id}/last-submitted-parameters`), 前端只按当前 manifest 判一判
  * 能不能用 (见 `domain/manifest.createInitialParameterInputs`)——那份记忆可能来自旧版本.
  *
+ * 「配置模板」是同一件事的**第二份取值来源**: 命名的取值集合存在库里, 随时套用. 两条路在下面
+ * `applyFormForCurrentSelection` 里合流 (模板的字段与记忆逐字对齐, 见 `domain/run-form.RunFormPrefill`),
+ * 故套用不是另一套填表逻辑, 而只是换一个 `appliedPrefill`. 模板只存"能提交出去的那部分", 且
+ * **不存版本**: 它挂在策略上, 换版本后仍该能用.
+ *
  * 表单里**没有行情模式选择**: 提交侧当前只收 Bar (`run_submission.MATCH_MODE_NOT_SUBMITTABLE_MESSAGE`),
  * 给了 Tick 也只是让用户点一个必然被拒的选项.
  *
  * 反馈分流: 提交失败是**表单自己的失败** (a 类) —— 参数不合法、标的没填, 那句话的读者正在这张表单上,
  * 所以它就地留在 `submitErrorMessage` 里, 不弹 toast. 成功才弹: 回包之后立刻跳运行详情页, 提示条会
  * 跟着这次跳转一起消失, 而 toast 挂在 body 上, 正好落在"东西真的在跑"的那一页.
- * 版本加载失败是 c 类, 留在 `loadErrorMessage` 的 banner 上.
+ * 版本加载失败是 c 类, 留在 `loadErrorMessage` 的 banner 上; 模板列表加载失败同理, 但只留在模板区
+ * 自己的 banner 上 —— 它是取值的第二个来源, 不该把整张表单挡掉.
  */
 
 import { computed, onMounted, ref } from 'vue';
-import { ElAlert, ElButton, ElInput, ElOption, ElSelect } from 'element-plus';
+import { ElAlert, ElButton, ElDialog, ElInput, ElOption, ElSelect } from 'element-plus';
 import { RouterLink, useRouter } from 'vue-router';
 
 import { submitRun } from '../api/runs';
+import { createRunTemplate, fetchRunTemplates } from '../api/run-templates';
 import { fetchLastSubmittedParameters, fetchStrategyDetail } from '../api/strategies';
 import { SUBMITTABLE_MATCH_MODE } from '../api/types';
-import type { LastSubmittedParameters, MarketDataType, RunSubmitPayload, StrategyDetail } from '../api/types';
+import type { LastSubmittedParameters, MarketDataType, RunSubmitPayload, RunTemplate, StrategyDetail } from '../api/types';
 import EmptyNotice from '../components/EmptyNotice.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
 import PageHeader from '../components/PageHeader.vue';
@@ -36,8 +43,8 @@ import SurfaceCard from '../components/SurfaceCard.vue';
 import { describeApiFailure, showSuccessToast } from '../composables/use-feedback';
 import { parseStrategyManifest, createInitialParameterInputs, deriveParameterDescriptors, deriveParameterValues, deriveRunFieldRequirements } from '../domain/manifest';
 import type { ParameterInput, RunFieldRequirements } from '../domain/manifest';
-import { EMPTY_RUN_FIELDS, buildPrefilledRunFields, validateRunForm } from '../domain/run-form';
-import type { RunFieldInputs } from '../domain/run-form';
+import { EMPTY_RUN_FIELDS, buildPrefilledRunFields, buildTemplateDraft, validateRunForm } from '../domain/run-form';
+import type { RunFieldInputs, RunFormInput, RunFormPrefill } from '../domain/run-form';
 import { formatDateTime } from '../domain/format';
 import { useStrategyCatalogStore } from '../stores/strategy-catalog';
 
@@ -65,8 +72,34 @@ const hasAttemptedSubmit = ref(false);
 const runFields = ref<RunFieldInputs>({ ...EMPTY_RUN_FIELDS });
 const parameterInputs = ref<Record<string, ParameterInput>>({});
 
-/** 当前这份表单套用的记忆; `null` 即没有 (提示条据此显隐). */
-const appliedPrefill = ref<LastSubmittedParameters | null>(null);
+/**
+ * 当前这份表单套用的那份取值, 以及它从哪来.
+ *
+ * 两个来处 (上次提交的记忆 / 保存过的模板) 在下面 `applyFormForCurrentSelection` 眼里**没有区别**
+ * ——字段口径本就是同一套 (见 `domain/run-form.RunFormPrefill`), 只有提示条上那句话不同, 故这里
+ * 多带一句. `null` 即"什么都没套用", 提示条据此显隐.
+ */
+interface AppliedPrefill {
+  /** 喂给 `createInitialParameterInputs` / `buildPrefilledRunFields` 的取值集合. */
+  prefill: RunFormPrefill;
+  /** 提示条上那句来源说明. */
+  bannerText: string;
+}
+
+const appliedPrefill = ref<AppliedPrefill | null>(null);
+
+/** 该策略下本人保存的模板 (最近创建的在前). 取值的第二个来源, 与记忆并列. */
+const runTemplates = ref<RunTemplate[]>([]);
+const selectedTemplateId = ref('');
+/** 模板列表加载失败 (c 类). 只有模板区受影响, 表单照常可用. */
+const templateErrorMessage = ref<string | null>(null);
+const isLoadingTemplates = ref(false);
+
+/** 「存为模板」的弹窗: 名字与它自己的失败文案 (a 类, 就地显示在弹窗里). */
+const isTemplateDialogVisible = ref(false);
+const templateNameInput = ref('');
+const templateDialogErrorMessage = ref<string | null>(null);
+const isSavingTemplate = ref(false);
 
 /**
  * 选择切换的序号, 用来丢弃"迟到的回包".
@@ -122,21 +155,30 @@ const parameterDerivation = computed(() =>
   deriveParameterValues(descriptors.value, parameterInputs.value),
 );
 
+/**
+ * 当前这份表单的输入.
+ *
+ * 提交、"哪里错了"和"存成模板"读的都是**同一份**: 三处各拼一次的话, 加一个字段就要记得改三个
+ * 地方, 而漏改的那一处不会报错, 只会让"按钮能点"与"点了报什么错"对不上. 参数派生失败时给空集
+ * ——那时 `submissionPayload` 当场回 `null`, 参数那几条错误另由 `parameterDerivation.errors` 报.
+ */
+const formInput = computed<RunFormInput>(() => ({
+  ...runFields.value,
+  strategyId: selectedStrategyId.value,
+  strategyVersionId: selectedVersionId.value,
+  matchMode: MATCH_MODE,
+  isMatchModeSupported: isMatchModeSupported.value,
+  runFieldRequirements: runFieldRequirements.value,
+  parameterValues: parameterDerivation.value.ok ? parameterDerivation.value.values : {},
+}));
+
 /** 能与不能提交, 只有这一个判断; 按钮状态与提交动作都读它. */
 const submissionPayload = computed<RunSubmitPayload | null>(() => {
   if (!parameterDerivation.value.ok) {
     return null;
   }
 
-  const formValidation = validateRunForm({
-    ...runFields.value,
-    strategyId: selectedStrategyId.value,
-    strategyVersionId: selectedVersionId.value,
-    matchMode: MATCH_MODE,
-    isMatchModeSupported: isMatchModeSupported.value,
-    runFieldRequirements: runFieldRequirements.value,
-    parameterValues: parameterDerivation.value.values,
-  });
+  const formValidation = validateRunForm(formInput.value);
 
   return formValidation.ok ? formValidation.payload : null;
 });
@@ -150,17 +192,7 @@ const visibleFieldErrors = computed<Record<string, string>>(() => {
   const errors: Record<string, string> = {};
 
   if (submissionPayload.value === null) {
-    const formValidation = validateRunForm({
-      ...runFields.value,
-      strategyId: selectedStrategyId.value,
-      strategyVersionId: selectedVersionId.value,
-      matchMode: MATCH_MODE,
-      isMatchModeSupported: isMatchModeSupported.value,
-      runFieldRequirements: runFieldRequirements.value,
-      parameterValues: parameterDerivation.value.ok
-        ? parameterDerivation.value.values
-        : {},
-    });
+    const formValidation = validateRunForm(formInput.value);
 
     Object.assign(
       errors,
@@ -185,10 +217,10 @@ const isSubmitDisabled = computed(
  * 因为换了个版本就没了 (`buildPrefilledRunFields` 的回落值是当前输入).
  *
  * 这里**没有 watcher**: 预填要发一次请求, 必然晚于 `descriptors` 变化, 用 watcher 重置就一定会
- * 把填好的记忆清掉. 改成两个 `@change` 各调一次本函数, 重置点因此只有这一处.
+ * 把填好的记忆清掉. 改成两个 `@change` 加「套用」共三处显式调用, 重置点因此只有这一处.
  */
 function applyFormForCurrentSelection(): void {
-  const prefill = appliedPrefill.value;
+  const prefill = appliedPrefill.value?.prefill ?? null;
 
   parameterInputs.value = createInitialParameterInputs(
     descriptors.value,
@@ -201,12 +233,31 @@ function applyFormForCurrentSelection(): void {
   );
 }
 
-/** 「重置为默认值」: 丢掉本轮套用的那份记忆, 把整张表单恢复成 manifest 默认值. */
+/** 「重置为默认值」: 丢掉本轮套用的那份取值, 把整张表单恢复成 manifest 默认值. */
 function resetToDefaults(): void {
   appliedPrefill.value = null;
   runFields.value = { ...EMPTY_RUN_FIELDS };
   parameterInputs.value = createInitialParameterInputs(descriptors.value);
   hasAttemptedSubmit.value = false;
+}
+
+/**
+ * 把后端那份"上次提交"收成提示条要的形状.
+ *
+ * `run_id` 为空即**没有记忆**: 后端那时回的是全空字段加空 `params`, 与"什么都没套用"逐字等价,
+ * 故在这里就归一成 `null`, 免得下游还要再判一次.
+ */
+function buildAppliedPrefill(
+  prefill: LastSubmittedParameters | null,
+): AppliedPrefill | null {
+  if (prefill === null || prefill.run_id === null) {
+    return null;
+  }
+
+  return {
+    prefill,
+    bannerText: `已按你上次提交的参数填充 (${formatDateTime(prefill.submitted_at)})`,
+  };
 }
 
 async function loadStrategyDetail(strategyId: string): Promise<void> {
@@ -216,6 +267,10 @@ async function loadStrategyDetail(strategyId: string): Promise<void> {
   selectedVersionId.value = '';
   appliedPrefill.value = null;
   loadErrorMessage.value = null;
+  runTemplates.value = [];
+  selectedTemplateId.value = '';
+  templateErrorMessage.value = null;
+  isLoadingTemplates.value = false;
 
   if (!strategyId) {
     return;
@@ -234,12 +289,15 @@ async function loadStrategyDetail(strategyId: string): Promise<void> {
     }
 
     strategyDetail.value = detail;
-    appliedPrefill.value = prefill;
+    appliedPrefill.value = buildAppliedPrefill(prefill);
     // 版本号倒序, 故第一个就是最新版本 —— 这也是「缺省最新」的含义.
     selectedVersionId.value = detail.versions[0]?.id ?? '';
 
     // 顺序有意如此: 这两行读的都是上面刚写下的 state, 故先落 state 再算表单.
     applyFormForCurrentSelection();
+    // 模板与上面那两路**分开取**: 它是取值的第二个来源, 失败只该让模板区少一份列表, 不该把整张
+    // 表单挡在"加载中".
+    void loadRunTemplates(strategyId, requestToken);
   } catch (error) {
     if (requestToken !== selectionToken) {
       return;
@@ -251,6 +309,46 @@ async function loadStrategyDetail(strategyId: string): Promise<void> {
       isLoadingVersions.value = false;
     }
   }
+}
+
+/**
+ * 该策略下本人保存的模板.
+ *
+ * 与预填同一口径: 这一路失败不该让整张表单加载不出来. 但**不静默**——「这个策略还没有模板」与
+ * 「模板没取到」对用户是两件事, 混成一句"暂无模板"就等于骗人: 前者的下一步是自己存一份, 后者的
+ * 下一步是重试.
+ */
+async function loadRunTemplates(
+  strategyId: string,
+  requestToken: number,
+): Promise<void> {
+  isLoadingTemplates.value = true;
+
+  try {
+    const templateList = await fetchRunTemplates(strategyId);
+
+    if (requestToken !== selectionToken) {
+      return;
+    }
+
+    runTemplates.value = templateList.templates;
+  } catch (error) {
+    if (requestToken !== selectionToken) {
+      return;
+    }
+
+    runTemplates.value = [];
+    templateErrorMessage.value = describeApiFailure(error, '加载配置模板失败');
+  } finally {
+    if (requestToken === selectionToken) {
+      isLoadingTemplates.value = false;
+    }
+  }
+}
+
+/** 模板区的「重新加载」: 复用当前的选择与序号, 免得模板里要去读那个裸的 `selectionToken`. */
+function reloadRunTemplates(): void {
+  void loadRunTemplates(selectedStrategyId.value, selectionToken);
 }
 
 /**
@@ -277,6 +375,79 @@ function handleStrategyChange(): void {
 function handleVersionChange(): void {
   hasAttemptedSubmit.value = false;
   applyFormForCurrentSelection();
+}
+
+/** 「套用」: 把选中那份模板填进表单. 与按记忆预填走**同一条路**, 只是换一份取值. */
+function applyTemplate(): void {
+  const selectedTemplate = runTemplates.value.find(
+    (template) => template.id === selectedTemplateId.value,
+  );
+
+  if (selectedTemplate === undefined) {
+    return;
+  }
+
+  appliedPrefill.value = {
+    prefill: selectedTemplate,
+    bannerText: `已套用模板「${selectedTemplate.name}」`,
+  };
+  applyFormForCurrentSelection();
+  hasAttemptedSubmit.value = false;
+}
+
+/**
+ * 「存为模板」: 表单现在提交得出去才开弹窗.
+ *
+ * 提交不出去时**不弹**, 而是把 `hasAttemptedSubmit` 翻起来 —— 那一瞬间表单上会就地出现那几条
+ * 红字 (与点「提交回测」走同一条路), 用户看到的是"哪里要改", 而不是"点了没反应"或一句笼统的
+ * "表单不完整". 按钮因此**不置灰**: 置灰就没人告诉他为什么点不动.
+ */
+function openTemplateDialog(): void {
+  hasAttemptedSubmit.value = true;
+
+  if (submissionPayload.value === null) {
+    return;
+  }
+
+  templateNameInput.value = '';
+  templateDialogErrorMessage.value = null;
+  isTemplateDialogVisible.value = true;
+}
+
+/**
+ * 弹窗里的「保存」.
+ *
+ * 请求体的取值一律由 `buildTemplateDraft` 从 `formInput` 上抄 (提交得出去的东西才存得下来), 故这
+ * 里不另判一次表单——它若此刻仍不合法, 那是弹窗开着的这段时间里表单被改了, 而弹窗是模态的, 走不到.
+ */
+async function saveTemplate(): Promise<void> {
+  const draftResult = buildTemplateDraft(templateNameInput.value, formInput.value);
+
+  if (!draftResult.ok) {
+    // 名字的问题 (空着 / 超长) 就地显示在弹窗里, 不关弹窗: 关掉等于让人从头再填一遍名字.
+    templateDialogErrorMessage.value = Object.values(draftResult.errors).join('；');
+
+    return;
+  }
+
+  isSavingTemplate.value = true;
+
+  try {
+    const createdTemplate = await createRunTemplate(
+      selectedStrategyId.value,
+      draftResult.draft,
+    );
+
+    // 列表按 `created_at DESC` 排, 故新的一份在最前 —— 与后端列表的次序一致, 免得存完还要重取.
+    runTemplates.value = [createdTemplate, ...runTemplates.value];
+    selectedTemplateId.value = createdTemplate.id;
+    isTemplateDialogVisible.value = false;
+    showSuccessToast(`已保存模板「${createdTemplate.name}」.`);
+  } catch (error) {
+    templateDialogErrorMessage.value = describeApiFailure(error, '保存模板失败');
+  } finally {
+    isSavingTemplate.value = false;
+  }
 }
 
 async function submit(): Promise<void> {
@@ -349,15 +520,15 @@ onMounted(() => {
     >
       <!-- 外面这个 div 不是多余的: EP 的 `.el-alert{margin:0}` 是无层样式, 会压掉 `space-y-6`
            给它的上边距, 所以纵向间距只能挂在我们自己的包裹层上. -->
-      <div v-if="appliedPrefill?.run_id">
+      <div v-if="appliedPrefill">
         <!-- closable 必须显式关掉: 关掉只翻组件内部的可见标志, appliedPrefill 还在, 于是
-             「提示被关掉了但表单里仍是记忆值」, 而且「重置为默认值」这个唯一入口也没了. -->
+             「提示被关掉了但表单里仍是套用来的值」, 而且「重置为默认值」这个唯一入口也没了. -->
         <ElAlert
           type="info"
           :closable="false"
         >
           <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>已按你上次提交的参数填充 ({{ formatDateTime(appliedPrefill.submitted_at) }})</span>
+            <span>{{ appliedPrefill.bannerText }}</span>
             <button
               type="button"
               class="text-brand hover:underline"
@@ -470,6 +641,65 @@ onMounted(() => {
             </dd>
           </div>
         </dl>
+      </SurfaceCard>
+
+      <!-- 模板区跟着策略走 (模板挂在策略下), 故选到策略才渲染. 它**不**用 fieldset: 这里没有要
+           一起提交的控件, 「套用」与「存为模板」都是即时生效的按钮. -->
+      <SurfaceCard
+        v-if="strategyDetail !== null"
+        class="space-y-3"
+      >
+        <h2 class="text-sm font-semibold text-slate-700">
+          配置模板
+        </h2>
+
+        <p class="text-xs text-slate-500">
+          模板存的是一份<strong class="font-semibold">取值</strong> (运行级字段与策略参数),
+          <strong class="font-semibold">不存版本</strong> —— 换版本后仍可套用, 而当前 manifest
+          里没有的那个参数会被忽略.
+        </p>
+
+        <ErrorBanner
+          :message="templateErrorMessage"
+          retry-label="重新加载模板"
+          @retry="reloadRunTemplates"
+        />
+
+        <div class="flex flex-wrap items-center gap-3">
+          <ElSelect
+            v-model="selectedTemplateId"
+            class="w-64"
+            placeholder="选择一份已保存的模板"
+            :loading="isLoadingTemplates"
+            :disabled="runTemplates.length === 0"
+            clearable
+          >
+            <ElOption
+              v-for="template in runTemplates"
+              :key="template.id"
+              :label="template.name"
+              :value="template.id"
+            />
+          </ElSelect>
+
+          <ElButton
+            :disabled="selectedTemplateId === ''"
+            @click="applyTemplate"
+          >
+            套用
+          </ElButton>
+
+          <ElButton @click="openTemplateDialog">
+            存为模板
+          </ElButton>
+        </div>
+
+        <p
+          v-if="runTemplates.length === 0 && !isLoadingTemplates && templateErrorMessage === null"
+          class="text-xs text-slate-400"
+        >
+          这个策略下还没有保存过模板. 把参数与运行范围填好, 点「存为模板」即可留作下次直接套用.
+        </p>
       </SurfaceCard>
 
       <SurfaceCard
@@ -632,5 +862,48 @@ onMounted(() => {
         </RouterLink>
       </div>
     </form>
+
+    <!-- 弹窗放在 form **外面**: EP 的弹窗内容默认 teleport 到 body, 但节点仍算在这个 form 里,
+         那样在名字输入框上敲回车会顺着 form 提交一次回测. -->
+    <ElDialog
+      v-model="isTemplateDialogVisible"
+      title="存为模板"
+      width="440px"
+    >
+      <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
+        模板名
+        <ElInput
+          v-model="templateNameInput"
+          maxlength="64"
+          placeholder="例如 沪深300 日线 慢速"
+          @keyup.enter="saveTemplate"
+        />
+      </label>
+
+      <p class="mt-2 text-xs text-slate-500">
+        会保存当前表单的运行级字段与策略参数, 不含策略版本.
+      </p>
+
+      <p
+        v-if="templateDialogErrorMessage"
+        class="mt-2 text-xs text-rose-600"
+      >
+        {{ templateDialogErrorMessage }}
+      </p>
+
+      <template #footer>
+        <ElButton @click="isTemplateDialogVisible = false">
+          取消
+        </ElButton>
+        <!-- 文案里的「保存中…」与提交按钮同一理由: 转圈不进可访问名. -->
+        <ElButton
+          type="primary"
+          :loading="isSavingTemplate"
+          @click="saveTemplate"
+        >
+          {{ isSavingTemplate ? '保存中…' : '保存' }}
+        </ElButton>
+      </template>
+    </ElDialog>
   </section>
 </template>

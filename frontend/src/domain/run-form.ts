@@ -13,15 +13,20 @@
  */
 
 import type {
-  LastSubmittedParameters,
   MarketDataType,
   RunSubmitPayload,
+  RunTemplateCreatePayload,
 } from '../api/types';
 import type { RunFieldRequirements } from './manifest';
 
 /** 与 `run_submission.MAXIMUM_RUN_FIELD_VALUE_LENGTH` 一致. */
 export const MAXIMUM_RUN_FIELD_VALUE_LENGTH = 64;
 
+/** 与 `catalog.schemas.MAXIMUM_RUN_TEMPLATE_NAME_LENGTH` 一致. */
+export const MAXIMUM_RUN_TEMPLATE_NAME_LENGTH = 64;
+
+/** 与 `routers/run_templates.BLANK_TEMPLATE_NAME_MESSAGE` 逐字一致. */
+export const BLANK_TEMPLATE_NAME_MESSAGE = '模板名不能为空白';
 const TRADING_DAY_PATTERN = /^\d{8}$/;
 
 const INITIAL_CAPITAL_TEXT = '100000';
@@ -34,6 +39,24 @@ export interface RunFieldInputs {
   startTradingDay: string;
   endTradingDay: string;
   initialCapitalText: string;
+}
+
+/**
+ * 一份"填表用的取值集合": 键名与运行记录对齐 (snake_case), 取值全可空.
+ *
+ * 与 `RunFieldInputs` **不是一回事**: 那个是六个控件里的原始文本 (camelCase, 初始资金还是字符串),
+ * 这个是已经过服务端语义的取值. `api/types` 的 `LastSubmittedParameters` (上次提交的记忆) 与
+ * `RunTemplate` (保存过的模板) 都满足它, 且字段口径逐字相同 —— 于是"套用模板"与"按上次提交预填"
+ * 在下面两个函数眼里是**同一个动作**, 取数路径不必分支.
+ */
+export interface RunFormPrefill {
+  bar_period: string | null;
+  exchange_id: string | null;
+  instrument_id: string | null;
+  start_trading_day: string | null;
+  end_trading_day: string | null;
+  initial_capital: number | null;
+  params: Record<string, unknown>;
 }
 
 /** 表单刚打开时的运行级输入. */
@@ -62,12 +85,12 @@ export type RunFormValidation =
   | { ok: false; errors: Record<string, string> };
 
 /**
- * 用上一次提交的运行级字段填表: 逐字段"能用就用, 不能用就原样留着".
+ * 用一份取值 (上次提交的记忆, 或保存过的模板) 填运行级字段: 逐字段"能用就用, 不能用就原样留着".
  *
  * 判据复用 `validateRunForm` 的那三个读取器 (一次性 `errors` 对象用完即丢), 故界面上的运行级
- * 规则**只有一处**: 记忆里的取值若在本表单上会被判错, 那它就不该被填进来.
+ * 规则**只有一处**: 那份取值里的字段若在本表单上会被判错, 那它就不该被填进来.
  *
- * 回落到 `current` 而不是空串, 是为了不静默抹掉用户已经敲进去的东西——记忆是锦上添花, 每次重新
+ * 回落到 `current` 而不是空串, 是为了不静默抹掉用户已经敲进去的东西——预填是锦上添花, 每次重新
  * 载入就把用户填好的一半表单清掉, 比不预填更糟. `prefill` 为 `null` (没跑过这个策略) 时结果
  * 恒等于 `current`, 与没有这个功能时一模一样.
  *
@@ -75,7 +98,7 @@ export type RunFormValidation =
  * 死数据 (`validateRunForm` 也会把它丢掉).
  */
 export function buildPrefilledRunFields(
-  prefill: LastSubmittedParameters | null,
+  prefill: RunFormPrefill | null,
   requirements: RunFieldRequirements,
   current: RunFieldInputs,
 ): RunFieldInputs {
@@ -219,6 +242,76 @@ export function validateRunForm(input: RunFormInput): RunFormValidation {
       params: input.parameterValues,
     },
   };
+}
+
+export type TemplateDraftResult =
+  | { ok: true; draft: RunTemplateCreatePayload }
+  | { ok: false; errors: Record<string, string> };
+
+/**
+ * 把当前这份表单连同模板名收成"存模板"的请求体.
+ *
+ * 取值一律从 `validateRunForm` 的 payload 上抄, **不另走一条派生**: 提交得出去的东西才存得下来,
+ * 于是"存得下、套用后提交不了"这种模板在设计上就不存在. 调用方因此必须把 `parameterValues` 喂成
+ * `deriveParameterValues` 的产物 (表单原始输入是字符串, 存进去就变成 `"0.01"` 而不是 `0.01`, 而
+ * `params` 在库里与 `Runs.ParamsJson` 同形同义, 不能是另一种东西).
+ *
+ * 模板名与表单内容一起校验、错误一起回: 名字空着而表单也缺字段时, 用户该一次看见全部要改的地方,
+ * 而不是改完名字再看见下一批.
+ */
+export function buildTemplateDraft(
+  templateName: string,
+  input: RunFormInput,
+): TemplateDraftResult {
+  const nameErrors = readTemplateNameErrors(templateName);
+  const validation = validateRunForm(input);
+
+  if (!validation.ok) {
+    return { ok: false, errors: { ...validation.errors, ...nameErrors } };
+  }
+
+  if (Object.keys(nameErrors).length > 0) {
+    return { ok: false, errors: nameErrors };
+  }
+
+  const payload = validation.payload;
+
+  return {
+    ok: true,
+    draft: {
+      name: templateName.trim(),
+      match_mode: payload.match_mode,
+      bar_period: payload.bar_period,
+      exchange_id: payload.exchange_id ?? null,
+      instrument_id: payload.instrument_id ?? null,
+      start_trading_day: payload.start_trading_day,
+      end_trading_day: payload.end_trading_day,
+      initial_capital: payload.initial_capital,
+      params: payload.params,
+    },
+  };
+}
+
+/**
+ * 模板名的本地判据.
+ *
+ * 两句分别对齐后端的两处: 「不能为空白」是 `_resolve_template_name` (去空白后为空即 400), 「不得
+ * 超过 64 个字符」是 `RunTemplateCreateRequest.name` 的 `Field(max_length=...)` (超了即 422).
+ * 注意后者比的是**原串**: pydantic 的 `max_length` 不看空白, 故这里也比原串——比去空白后的串会
+ * 让「64 个字符 + 一个尾空格」在界面上放行, 然后在后端吃一个 422.
+ */
+function readTemplateNameErrors(templateName: string): Record<string, string> {
+  if (!templateName.trim()) {
+    return { name: BLANK_TEMPLATE_NAME_MESSAGE };
+  }
+
+  if (templateName.length > MAXIMUM_RUN_TEMPLATE_NAME_LENGTH) {
+    return {
+      name: `不得超过 ${MAXIMUM_RUN_TEMPLATE_NAME_LENGTH} 个字符`,
+    };
+  }
+
+  return {};
 }
 
 /**

@@ -27,6 +27,16 @@ DEFAULT_HTTP_PORT = 8000
 MAXIMUM_PORT = 65535
 JWT_SECRET_KEY_BYTES = 48
 
+# 保留策略默认**关**: 它删的是历史轮的作业目录 (结果库明细、对比曲线、逐字复现要读的东西) 与
+# 运行行, 且不可逆. 默认开启意味着升级后的第一次启动就批量删历史——用户没提过这个要求.
+DEFAULT_RUN_RETENTION_ENABLED = False
+DEFAULT_RETAINED_RUNS_PER_USER = 50
+
+# 布尔取值按常见的几套写法都收, 但**只收这几套**: 其余一律报错. `true`/`false` 之外还认 1/0,
+# 是因为环境文件里手写 `=1` 比 `=true` 常见.
+ENVIRONMENT_TRUE_VALUES = frozenset({"true", "1", "yes", "on"})
+ENVIRONMENT_FALSE_VALUES = frozenset({"false", "0", "no", "off"})
+
 # 引擎自己认的文件名, 由引擎写死故为常量: 会话表要复制进每个 job 目录, 种子库是只读输入.
 SESSION_FILENAME = "Sessions.json"
 SEED_DATABASE_FILENAME = "BackTestInit.db"
@@ -69,7 +79,40 @@ def read_integer_environment(name: str, fallback: int) -> int:
     return int(stripped_value)
 
 
+def read_boolean_environment(name: str, fallback: bool) -> bool:
+    """读取布尔型环境变量.
+
+    未设置或为空串时取回退值; 设置了但两种取值都不是则**立即报错**, 与
+    `read_integer_environment` 同一条纪律. 保留策略那一项尤其不能静默降级: 写
+    `QUANT_RUN_RETENTION_ENABLED=enable` 的人想要的是"开着", 而按"非 true 即 false"处理会得到
+    一个安静地什么都不删的后端——与"保留策略没生效"这件事本身无法区分.
+    """
+
+    raw_value = os.getenv(name)
+
+    if raw_value is None:
+        return fallback
+
+    normalized_value = raw_value.strip().lower()
+
+    if not normalized_value:
+        return fallback
+
+    if normalized_value in ENVIRONMENT_TRUE_VALUES:
+        return True
+
+    if normalized_value in ENVIRONMENT_FALSE_VALUES:
+        return False
+
+    accepted_values = sorted(ENVIRONMENT_TRUE_VALUES | ENVIRONMENT_FALSE_VALUES)
+
+    raise ValueError(
+        f"环境变量 {name} 需为布尔值 ({'/'.join(accepted_values)}), 实际为 {raw_value!r}"
+    )
+
+
 def strip_surrounding_quotes(value: str) -> str:
+
     """去掉成对包裹的引号.
 
     资源管理器"复制文件地址"那类粘贴会带上引号, 而 `KEY="value"` 里的引号若不剥掉, 取值
@@ -199,6 +242,8 @@ class PlatformSettings:
     session_file_path: Path
     seed_database_path: Path
     maximum_output_tail_bytes: int = DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES
+    run_retention_enabled: bool = DEFAULT_RUN_RETENTION_ENABLED
+    retained_runs_per_user: int = DEFAULT_RETAINED_RUNS_PER_USER
 
     def __post_init__(self) -> None:
         """校验数值项与路径项, 避免并发闸门为 0 时永久阻塞、超时为 0 时秒杀作业."""
@@ -208,6 +253,11 @@ class PlatformSettings:
 
         if self.max_concurrent_runs < 1:
             raise ValueError("max_concurrent_runs 需 >= 1")
+
+        # 保留轮数为 0 时清理算法读成"一个不留": 它会把每个用户的全部历史轮删光, 而这与"关掉
+        # 保留策略"长得一模一样, 只是方向相反. 想不保留历史就关 `run_retention_enabled`.
+        if self.retained_runs_per_user < 1:
+            raise ValueError("retained_runs_per_user 需 >= 1")
 
         if self.run_timeout_seconds < 1:
             raise ValueError("run_timeout_seconds 需 >= 1")
@@ -274,6 +324,12 @@ class PlatformSettings:
             ),
             maximum_output_tail_bytes=read_integer_environment(
                 "QUANT_MAXIMUM_OUTPUT_TAIL_BYTES", DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES
+            ),
+            run_retention_enabled=read_boolean_environment(
+                "QUANT_RUN_RETENTION_ENABLED", DEFAULT_RUN_RETENTION_ENABLED
+            ),
+            retained_runs_per_user=read_integer_environment(
+                "QUANT_RETAINED_RUNS_PER_USER", DEFAULT_RETAINED_RUNS_PER_USER
             ),
         )
 

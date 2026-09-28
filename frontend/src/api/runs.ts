@@ -4,15 +4,25 @@ import { encodeArtifactPath } from '../domain/download';
 import { request, requestBlob } from './client';
 import type {
   JobArtifactList,
+  MessageResponse,
   PageResponse,
   ResultTableName,
   ResultTableResponse,
+  RunComparison,
   RunDetail,
   RunEquity,
   RunStatus,
   RunSubmitPayload,
   RunSummary,
 } from './types';
+
+/**
+ * 一次对比的轮数上限, 与 `routers/runs.py:MAXIMUM_COMPARISON_RUNS` 一致.
+ *
+ * 界面上根本不给第 7 个勾选框, 是避免「请求 400、用户只看到一句报错」那种无声失败的唯一可靠
+ * 办法 (同 `RUN_SORT_COLUMNS` / `RESULT_TABLE_NAMES` 的先例).
+ */
+export const MAXIMUM_COMPARISON_RUNS = 6;
 
 /**
  * `sort_by` 的白名单, 与 `routers/runs.py:RUN_SORT_COLUMNS` 逐字对应.
@@ -55,6 +65,21 @@ export function fetchRuns(query: RunListQuery): Promise<PageResponse<RunSummary>
   });
 }
 
+/**
+ * 多轮对比: 每轮一列, 附各自的权益曲线.
+ *
+ * `ids` 走在 query string 上 (`?ids=a,b,c`), 故它自带深链接——`/compare?ids=…` 是可以直接发给
+ * 别人的地址, 而页面上那份勾选状态不过是这个地址的另一种写法.
+ *
+ * **归属判定是整请求的**: 有一个 id 不属于你 (或不存在) 就整个 404, 不会降级成"少一列"——多租户
+ * 规则要求越权与不存在不可分辨. 而"某一轮还没有曲线"只降那一列 (见 `RunComparisonEntry`).
+ */
+export function fetchRunComparison(runIds: string[]): Promise<RunComparison> {
+  return request<RunComparison>('/runs/compare', {
+    query: { ids: runIds.join(',') },
+  });
+}
+
 export function fetchRunDetail(runId: string): Promise<RunDetail> {
   return request<RunDetail>(`/runs/${encodeURIComponent(runId)}`);
 }
@@ -67,6 +92,19 @@ export function submitRun(payload: RunSubmitPayload): Promise<RunDetail> {
 export function cancelRun(runId: string): Promise<RunDetail> {
   return request<RunDetail>(`/runs/${encodeURIComponent(runId)}/cancel`, {
     method: 'POST',
+  });
+}
+
+/**
+ * 删掉一轮: **连作业目录一起删**, 且这一动作不可撤销.
+ *
+ * 只能删终态的轮 (未结束的回 409, 想让它消失走取消端点); 重复删除回 404. 目录删不掉时后端
+ * **保留行**并回失败——行是找到那个目录的唯一句柄 (Windows 上被孤儿进程占着的目录会走到这里),
+ * 故调用方该把失败当作"过一会儿可以再试", 而不是"已经删干净了".
+ */
+export function deleteRun(runId: string): Promise<MessageResponse> {
+  return request<MessageResponse>(`/runs/${encodeURIComponent(runId)}`, {
+    method: 'DELETE',
   });
 }
 

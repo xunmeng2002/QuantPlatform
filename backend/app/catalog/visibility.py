@@ -19,13 +19,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..errors import ResourceNotFoundError
 from .enums import StrategyVisibility, UserType
-from .models import RunModel, StrategyGrantModel, StrategyModel, UserModel
+from .models import RunModel, RunTemplateModel, StrategyGrantModel, StrategyModel, UserModel
 
 
 RecordType = TypeVar("RecordType")
 
 STRATEGY_NOT_FOUND_MESSAGE = "策略不存在"
 RUN_NOT_FOUND_MESSAGE = "运行不存在"
+RUN_TEMPLATE_NOT_FOUND_MESSAGE = "配置模板不存在"
 USER_NOT_FOUND_MESSAGE = "用户不存在"
 
 
@@ -72,6 +73,23 @@ def build_owned_run_query(user: UserModel) -> Select[tuple[RunModel]]:
     """当前用户提交的运行查询."""
 
     return select(RunModel).where(RunModel.user_id == user.id)
+
+
+def build_owned_run_template_query(
+    user: UserModel, strategy_id: str
+) -> Select[tuple[RunTemplateModel]]:
+    """当前用户在某个策略下拥有的配置模板查询.
+
+    `strategy_id` 在这里而不是调用方: 归属过滤与策略过滤是**同一件事的两半**——模板的作用域是
+    策略域, 只按 `OwnerUserId` 取件会让"用 B 策略的 URL 去改 A 策略的模板"成立, 而那正是这个
+    作用域设计要挡的. 两半写在同一个函数里, 就没有"调用方漏加了一半"的位置.
+    """
+
+    return (
+        select(RunTemplateModel)
+        .where(RunTemplateModel.owner_user_id == user.id)
+        .where(RunTemplateModel.strategy_id == strategy_id)
+    )
 
 
 async def _load_one_or_raise(
@@ -142,6 +160,20 @@ async def load_owned_run(
         build_owned_run_query(user).where(RunModel.id == run_id),
         RUN_NOT_FOUND_MESSAGE,
         populate_existing=populate_existing,
+    )
+
+
+async def load_owned_run_template(
+    session: AsyncSession, user: UserModel, strategy_id: str, template_id: str
+) -> RunTemplateModel:
+    """取当前用户在指定策略下拥有的配置模板, 取不到即视为不存在."""
+
+    return await _load_one_or_raise(
+        session,
+        build_owned_run_template_query(user, strategy_id).where(
+            RunTemplateModel.id == template_id
+        ),
+        RUN_TEMPLATE_NOT_FOUND_MESSAGE,
     )
 
 

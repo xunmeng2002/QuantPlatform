@@ -15,16 +15,20 @@ import pytest
 from app.config import (
     DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES,
     DEFAULT_HTTP_PORT,
+    DEFAULT_RETAINED_RUNS_PER_USER,
+    DEFAULT_RUN_RETENTION_ENABLED,
     MAXIMUM_PORT,
     PlatformSettings,
     load_environment_file,
     parse_environment_file,
+    read_boolean_environment,
     read_integer_environment,
     resolve_jwt_secret_key,
 )
 
 
 ENVIRONMENT_NAME = "QUANT_TEST_INTEGER"
+BOOLEAN_ENVIRONMENT_NAME = "QUANT_TEST_BOOLEAN"
 JWT_SECRET_ENVIRONMENT_NAME = "QUANT_JWT_SECRET_KEY"
 ENVIRONMENT_FILE_KEY = "QUANT_TEST_FROM_FILE"
 ENVIRONMENT_FILE_SECOND_KEY = "QUANT_TEST_FROM_FILE_SECOND"
@@ -96,6 +100,68 @@ def test_read_integer_environment_rejects_non_integers(
         read_integer_environment(ENVIRONMENT_NAME, 7)
 
 
+@pytest.mark.parametrize("blank_value", ["", "   "])
+def test_read_boolean_environment_returns_fallback_when_blank(
+    monkeypatch: pytest.MonkeyPatch, blank_value: str
+) -> None:
+    monkeypatch.setenv(BOOLEAN_ENVIRONMENT_NAME, blank_value)
+
+    assert read_boolean_environment(BOOLEAN_ENVIRONMENT_NAME, True) is True
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected_value"),
+    [
+        ("true", True),
+        ("TRUE", True),
+        (" True ", True),
+        ("1", True),
+        ("yes", True),
+        ("on", True),
+        ("false", False),
+        ("FALSE", False),
+        ("0", False),
+        ("no", False),
+        ("off", False),
+    ],
+)
+def test_read_boolean_environment_parses_booleans(
+    monkeypatch: pytest.MonkeyPatch, raw_value: str, expected_value: bool
+) -> None:
+    monkeypatch.setenv(BOOLEAN_ENVIRONMENT_NAME, raw_value)
+
+    parsed_value = read_boolean_environment(BOOLEAN_ENVIRONMENT_NAME, not expected_value)
+
+    assert parsed_value is expected_value
+
+
+@pytest.mark.parametrize("raw_value", ["enable", "enabled", "2", "t", "是", "n/a"])
+def test_read_boolean_environment_rejects_anything_else(
+    monkeypatch: pytest.MonkeyPatch, raw_value: str
+) -> None:
+    """非法布尔取值必须当场报错, 不能静默当成 false.
+
+    保留策略那一项静默翻转的后果是**不可逆**的: 写 `=enable` 的人以为开着, 后端安静地什么都不
+    删; 反过来把 `=disable` 当成 false 也不是它想表达的意思. 两种方向都不该猜.
+    """
+
+    monkeypatch.setenv(BOOLEAN_ENVIRONMENT_NAME, raw_value)
+
+    with pytest.raises(ValueError):
+        read_boolean_environment(BOOLEAN_ENVIRONMENT_NAME, False)
+
+
+def test_unset_boolean_environment_returns_its_own_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """回退值原样返回, 不做 True/False 归一: 回退值是调用方给的默认策略."""
+
+    monkeypatch.delenv(BOOLEAN_ENVIRONMENT_NAME, raising=False)
+
+    assert read_boolean_environment(BOOLEAN_ENVIRONMENT_NAME, True) is True
+    assert read_boolean_environment(BOOLEAN_ENVIRONMENT_NAME, False) is False
+
+
 def test_environment_key_takes_precedence_over_the_secret_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -152,6 +218,9 @@ def test_valid_settings_are_accepted() -> None:
 
     assert settings.http_port == DEFAULT_HTTP_PORT
     assert settings.initial_admin_password is None
+    # 保留策略默认关, 且默认值本身合法: 不显式配置时升级行为与升级前一致.
+    assert settings.run_retention_enabled is DEFAULT_RUN_RETENTION_ENABLED
+    assert settings.retained_runs_per_user == DEFAULT_RETAINED_RUNS_PER_USER
 
 
 @pytest.mark.parametrize(
@@ -165,6 +234,9 @@ def test_valid_settings_are_accepted() -> None:
         {"http_port": 0},
         {"http_port": -1},
         {"http_port": MAXIMUM_PORT + 1},
+        # 保留 0 轮 = 一个不留, 而算法读到的正是这个数; 想不留就关掉保留策略.
+        {"retained_runs_per_user": 0},
+        {"retained_runs_per_user": -3},
     ],
 )
 def test_out_of_range_settings_are_rejected(overrides: dict[str, int]) -> None:
@@ -251,6 +323,8 @@ def test_from_environment_applies_documented_defaults(
         "QUANT_SESSION_FILE_PATH",
         "QUANT_SEED_DATABASE_PATH",
         "QUANT_MAXIMUM_OUTPUT_TAIL_BYTES",
+        "QUANT_RUN_RETENTION_ENABLED",
+        "QUANT_RETAINED_RUNS_PER_USER",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -263,6 +337,8 @@ def test_from_environment_applies_documented_defaults(
     assert settings.initial_admin_password is None
     assert settings.jwt_secret_key == "from-environment-key"
     assert "\\" not in settings.database_url
+    assert settings.run_retention_enabled is False
+    assert settings.retained_runs_per_user == DEFAULT_RETAINED_RUNS_PER_USER
 
 
 def test_from_environment_reads_integer_overrides(
@@ -276,6 +352,21 @@ def test_from_environment_reads_integer_overrides(
 
     assert settings.max_concurrent_runs == 4
     assert settings.http_port == 9100
+
+
+def test_from_environment_reads_the_retention_switches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """两个保留项要真的从环境里读出来: 默认关的那一项, 只能靠环境变量打开."""
+
+    monkeypatch.setenv(JWT_SECRET_ENVIRONMENT_NAME, "from-environment-key")
+    monkeypatch.setenv("QUANT_RUN_RETENTION_ENABLED", "true")
+    monkeypatch.setenv("QUANT_RETAINED_RUNS_PER_USER", "5")
+
+    settings = PlatformSettings.from_environment()
+
+    assert settings.run_retention_enabled is True
+    assert settings.retained_runs_per_user == 5
 
 
 def test_from_environment_rejects_a_non_integer_port(

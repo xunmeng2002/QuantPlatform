@@ -1,25 +1,36 @@
 <script setup lang="ts">
 /**
- * 运行详情: 指标、权益曲线与明细表、参数、引擎输出与产物下载, 以及取消.
+ * 运行详情: 指标、权益曲线与明细表、参数、引擎输出与产物下载, 以及取消、删除与加入对比.
  *
  * 未结束时每 2 秒刷新一次. 「引擎判定」与「状态」分开显示: 前者是引擎在自己那份 result.json 里
  * 写的结论, 后者是宿主对进程的观察 (退出码、有没有被杀), 两者不一致时正是最该看见的信息.
  *
- * 指标行由 `metricSections` 一次性算好: 这些列是引擎结果文件的镜像, 逐行写死在模板里的话, 加一列
- * 就要改三处对齐.
+ * 三节指标行由 `domain/run-metrics` 给出 —— 与对比页**同一份行定义**, 只是那边按 `RunSummary` 取
+ * 数、少收几行. 逐行写死在模板里的话, 加一列就要改两处对齐, 而两处对齐的差别是"同一列在两页上
+ * 是不同的数".
  *
  * 反馈分流: 两个 `ErrorBanner` 各管各的 —— `errorMessage` 是页面级加载失败, `artifactErrorMessage`
- * 是产物清单加载失败, 两者都带重试、都留在页上. 用户**动作**的得失走 toast (b 类): 取消运行、下载
- * 产物都成败各弹一次 —— 下载成功的 toast 不是多余的, 浏览器自己的下载提示在窗口最底下, 大文件还要
- * 等一会儿才出现, 「点了有没有反应」这句话得在这里回. 特别注意 `artifactErrorMessage` 是**被轮询
- * 驱动**的 (每 2 秒 `loadArtifacts` 清一次), 整条转成 toast 会让一次失败的清单加载每 2 秒弹一次.
+ * 是产物清单加载失败, 两者都带重试、都留在页上. 用户**动作**的得失走 toast (b 类): 取消运行、删除
+ * 运行、下载产物都成败各弹一次 —— 下载成功的 toast 不是多余的, 浏览器自己的下载提示在窗口最底下,
+ * 大文件还要等一会儿才出现, 「点了有没有反应」这句话得在这里回. 特别注意 `artifactErrorMessage` 是
+ * **被轮询驱动**的 (每 2 秒 `loadArtifacts` 清一次), 整条转成 toast 会让一次失败的清单加载每 2 秒
+ * 弹一次.
+ *
+ * 「删除运行」只在终态出现 (未结束的轮该走取消), 且删的是**整个作业目录**: 提示里要把不可恢复说清,
+ * 因为库里那一行和盘上那个目录会一起没.
  */
 
 import { computed, onMounted, ref, watch } from 'vue';
 import { ElAlert, ElButton } from 'element-plus';
-import { RouterLink } from 'vue-router';
+import { RouterLink, useRouter } from 'vue-router';
 
-import { cancelRun as cancelRunRequest, fetchRunArtifacts, fetchRunArtifactBlob, fetchRunDetail } from '../api/runs';
+import {
+  cancelRun as cancelRunRequest,
+  deleteRun as deleteRunRequest,
+  fetchRunArtifacts,
+  fetchRunArtifactBlob,
+  fetchRunDetail,
+} from '../api/runs';
 import type { JobArtifact, RunDetail } from '../api/types';
 import ArtifactList from '../components/ArtifactList.vue';
 import ContentSkeleton from '../components/ContentSkeleton.vue';
@@ -38,20 +49,14 @@ import {
 } from '../composables/use-feedback';
 import { usePolling } from '../composables/usePolling';
 import { artifactFilename, saveBlobAsFile } from '../domain/download';
-import {
-  formatAmount,
-  formatCount,
-  formatDateTime,
-  formatDuration,
-  formatFlag,
-  formatJsonText,
-  formatTradingDay,
-} from '../domain/format';
+import { formatJsonText } from '../domain/format';
+import { buildDetailMetricSections } from '../domain/run-metrics';
 import { describeEngineVerdict, describeRunStatus, isTerminalRunStatus } from '../domain/run-status';
 import { useStrategyCatalogStore } from '../stores/strategy-catalog';
 
 const props = defineProps<{ id: string }>();
 
+const router = useRouter();
 const strategyCatalog = useStrategyCatalogStore();
 
 const run = ref<RunDetail | null>(null);
@@ -63,80 +68,22 @@ const artifactErrorMessage = ref<string | null>(null);
 const isLoading = ref(true);
 /** 取消期间禁用那个按钮 (弹窗里的忙碌态没有了, 挪到这里). */
 const isCancelling = ref(false);
+const isDeleting = ref(false);
 const downloadingPath = ref<string | null>(null);
-
-interface MetricRow {
-  label: string;
-  value: string;
-}
-
-interface MetricSection {
-  title: string;
-  rows: MetricRow[];
-}
 
 const isTerminal = computed(() =>
   run.value === null ? true : isTerminalRunStatus(run.value.status),
 );
 
-const metricSections = computed<MetricSection[]>(() => {
-  const runDetail = run.value;
-
-  if (runDetail === null) {
-    return [];
-  }
-
-  return [
-    {
-      title: '概要',
-      rows: [
-        { label: '运行 ID', value: runDetail.id },
-        { label: '策略', value: strategyCatalog.nameFor(runDetail.strategy_id) },
-        { label: '策略版本 ID', value: runDetail.strategy_version_id },
-        { label: '行情模式', value: runDetail.market_data_type ?? '—' },
-        { label: '提交时间', value: formatDateTime(runDetail.submitted_at) },
-        { label: '开始时间', value: formatDateTime(runDetail.started_at) },
-        { label: '结束时间', value: formatDateTime(runDetail.finished_at) },
-        { label: '耗时', value: formatDuration(runDetail.duration_ms) },
-        { label: '宿主退出码', value: formatCount(runDetail.exit_code) },
-        { label: '宿主进程号', value: formatCount(runDetail.runner_pid) },
-        { label: '执行主机', value: runDetail.hostname || '—' },
-        { label: '引擎版本', value: runDetail.engine_version || '—' },
-      ],
-    },
-    {
-      title: '绩效指标',
-      rows: [
-        { label: '余额', value: formatAmount(runDetail.balance) },
-        { label: '可用资金', value: formatAmount(runDetail.available) },
-        { label: '交易笔数', value: formatCount(runDetail.trade_count) },
-        { label: '订单笔数', value: formatCount(runDetail.order_count) },
-        { label: '总手续费', value: formatAmount(runDetail.total_commission) },
-        { label: '总印花税', value: formatAmount(runDetail.total_stamp_tax) },
-        { label: '总过户费', value: formatAmount(runDetail.total_transfer_fee) },
-      ],
-    },
-    {
-      title: '引擎数据镜像',
-      rows: [
-        { label: '交易日区间', value: `${formatTradingDay(runDetail.start_trading_day)} ~ ${formatTradingDay(runDetail.end_trading_day)}` },
-        { label: '最后交易日', value: formatTradingDay(runDetail.last_trading_day) },
-        { label: '结果文件版本', value: formatCount(runDetail.schema_version) },
-        { label: '资金账户', value: runDetail.account_id ?? '—' },
-        { label: '基础数据已载入', value: formatFlag(runDetail.basic_data_loaded) },
-        { label: '资金已初始化', value: formatFlag(runDetail.has_capital) },
-        { label: '行情订阅数', value: formatCount(runDetail.md_subscribe_count) },
-        { label: 'K 线行情数', value: formatCount(runDetail.bar_market_data_count) },
-        { label: '深度行情数', value: formatCount(runDetail.depth_market_data_count) },
-        { label: '合约数', value: formatCount(runDetail.instrument_count) },
-        { label: '缺失手续费记录数', value: formatCount(runDetail.commission_missing_count) },
-        { label: '手续费率为零的键数', value: formatCount(runDetail.commission_zero_rate_key_count) },
-        { label: '手数倍数回退合约数', value: formatCount(runDetail.volume_multiple_fallback_product_count) },
-        { label: '引擎错误号', value: formatCount(runDetail.error_id) },
-      ],
-    },
-  ];
-});
+/** 三节指标行由 `domain/run-metrics` 给出, 与对比页**同一份定义** (那边只收 `RunSummary` 有的列). */
+const metricSections = computed(() =>
+  run.value === null
+    ? []
+    : buildDetailMetricSections(
+        run.value,
+        strategyCatalog.nameFor(run.value.strategy_id),
+      ),
+);
 
 async function loadRunDetail(): Promise<void> {
   errorMessage.value = null;
@@ -214,6 +161,47 @@ async function cancelRunWithConfirmation(): Promise<void> {
 
 const { isPolling, start: startPolling, stop: stopPolling } = usePolling(refreshRun);
 
+/**
+ * 把这一轮带进对比页.
+ *
+ * 只带这一轮, 不合并对比页上已经勾好的那些: 那边是另一个页面, 它勾了什么在这里无从得知 (唯一的
+ * 状态源在它自己的地址栏上). 与其在这里猜一份可能已经过期的选择, 不如老实起步, 让用户在对比页上
+ * 继续勾.
+ */
+function addToComparison(): void {
+  void router.push({ name: 'compare', query: { ids: props.id } });
+}
+
+async function deleteRunWithConfirmation(): Promise<void> {
+  const isConfirmed = await confirmAction({
+    title: '删除这次运行',
+    message: '该轮的作业目录 (结果库、日志与全部产物) 会被一并删除, 不可恢复。',
+    confirmLabel: '删除运行',
+    isDangerous: true,
+  });
+
+  if (!isConfirmed) {
+    return;
+  }
+
+  isDeleting.value = true;
+
+  try {
+    await deleteRunRequest(props.id);
+    // 先停轮询再跳: 这一页马上要被卸载, 但轮询是在**本组件**里起的, 不收掉的话它还会去请求一个
+    // 已经不存在的轮 (那时每 2 秒一次 404).
+    stopPolling();
+    showSuccessToast('已删除这次运行.');
+    await router.push({ name: 'runs' });
+  } catch (error) {
+    // 目录删不掉时后端**保留行**并回失败 (行是找到那个目录的唯一句柄), 故这里的文案要能读成
+    // "可以过一会儿再试", 而不是"已经删干净了".
+    showFailureToast(describeApiFailure(error, '删除失败'));
+  } finally {
+    isDeleting.value = false;
+  }
+}
+
 watch(isTerminal, (isFinished) => {
   if (isFinished) {
     stopPolling();
@@ -262,6 +250,15 @@ onMounted(async () => {
 
       <template #actions>
         <ElButton
+          v-if="run"
+          @click="addToComparison"
+        >
+          加入对比
+        </ElButton>
+
+        <!-- 「取消运行」与「删除运行」互斥: 未结束的轮该走取消 (删除对它只会回 409), 已结束的轮
+             才谈得上删掉. 两个都出现的话, 用户会在"取消"与"删除"之间选, 而那时只有一个是对的. -->
+        <ElButton
           v-if="run && !isTerminal"
           type="danger"
           plain
@@ -269,6 +266,16 @@ onMounted(async () => {
           @click="cancelRunWithConfirmation"
         >
           {{ isCancelling ? '取消中…' : '取消运行' }}
+        </ElButton>
+
+        <ElButton
+          v-if="run && isTerminal"
+          type="danger"
+          plain
+          :loading="isDeleting"
+          @click="deleteRunWithConfirmation"
+        >
+          {{ isDeleting ? '删除中…' : '删除运行' }}
         </ElButton>
       </template>
     </PageHeader>

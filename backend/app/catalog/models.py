@@ -1,4 +1,4 @@
-"""catalog 五张表的 ORM 定义.
+"""catalog 六张表的 ORM 定义.
 
 列名一律 PascalCase (按 database-style.md), Python 属性名 snake_case, 两者由
 mapped_column 的列名参数映射. 约束名不逐个手写, 由 MetaData 的命名约定统一生成.
@@ -341,3 +341,73 @@ class RunModel(Base):
     )
 
     has_capital: Mapped[bool | None] = mapped_column("HasCapital", Boolean, default=None)
+
+
+class RunTemplateModel(Base):
+    """配置模板: 一套命名的运行取值, 供同一策略重复套用.
+
+    **作用域是策略域, 不是用户域**: 行上同时有 `OwnerUserId` 与 `StrategyId`. 参数只在一个策略
+    的键命名空间里有意义, 纯用户域会让跨策略套用"只套一半"——运行级字段生效、参数被整批忽略,
+    而那是本仓到处在防的静默失败.
+
+    可见性仍只按归属人, 与运行同一条口径: 被授权人能用策略跑回测, 不等于能看见别人的模板.
+
+    **硬删, 没有 `DeletedAt`**: 没有外键指向它, 删它不影响任何历史运行——运行那一侧在提交时就把
+    取值烤进了 `Runs.ParamsJson`, 模板只是"下次照这样填"的一份草稿. 软删会引入"名字被占住又
+    没有接口释放"的老问题 (与 `Strategies` 的软删不同, 那边是为了让历史运行的外键仍然有效).
+
+    唯一键含 `StrategyId`: 同一个人在两个策略下各存一个叫 `默认` 的模板是正常的, 唯一性只该
+    落在"同一策略下不重名". 重名以这条约束为准 (捕 `IntegrityError`), 不另做"先查后插".
+
+    列的可空性与提交契约对齐: 提交时必填的列 (Name / MatchMode / BarPeriod / 两个交易日 /
+    InitialCapital) 一律非空不可省, 只有 `exchange_id` / `instrument_id` 可空——它们本就只在
+    manifest 映射了的时候才收. `ParamsJson` 与 `Runs.ParamsJson` **同形同义** (`{key: 引擎取值}`,
+    已过 `validate_parameter_value`), 故套用时可直接喂给参数控件, 不需要再译一遍.
+    """
+
+    __tablename__ = "RunTemplates"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "OwnerUserId",
+            "StrategyId",
+            "Name",
+            name="UqRunTemplatesOwnerUserIdStrategyIdName",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column("Id", String(32), primary_key=True)
+
+    owner_user_id: Mapped[str] = mapped_column(
+        "OwnerUserId", String(32), ForeignKey("Users.Id"), index=True
+    )
+
+    strategy_id: Mapped[str] = mapped_column(
+        "StrategyId", String(32), ForeignKey("Strategies.Id"), index=True
+    )
+
+    name: Mapped[str] = mapped_column("Name", String(64))
+
+    match_mode: Mapped[str] = mapped_column("MatchMode", String(20))
+
+    bar_period: Mapped[str] = mapped_column("BarPeriod", String(64))
+
+    exchange_id: Mapped[str | None] = mapped_column("ExchangeId", String(64), default=None)
+
+    instrument_id: Mapped[str | None] = mapped_column(
+        "InstrumentId", String(64), default=None
+    )
+
+    start_trading_day: Mapped[str] = mapped_column("StartTradingDay", String(8))
+
+    end_trading_day: Mapped[str] = mapped_column("EndTradingDay", String(8))
+
+    initial_capital: Mapped[float] = mapped_column("InitialCapital", Float)
+
+    params_json: Mapped[str] = mapped_column("ParamsJson", Text, default="{}")
+
+    created_at: Mapped[datetime] = mapped_column("CreatedAt", DateTime, default=utc_now)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        "UpdatedAt", DateTime, default=utc_now, onupdate=utc_now
+    )

@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 from collections.abc import Mapping
@@ -33,7 +32,7 @@ from ..manifest import (
     INSTRUMENT_ID_FIELD_NAME,
     StrategyManifest,
 )
-from ..scheduler.engine_config import resolve_market_data_type
+from ..scheduler.engine_config import parse_configuration_object, resolve_market_data_type
 
 
 logger = logging.getLogger(__name__)
@@ -94,8 +93,8 @@ async def read_last_submitted_parameters(
     if run is None:
         return None
 
-    engine_configuration = _parse_configuration_text(run.id, run.backtest_config_json)
-    strategy_configuration = _parse_configuration_text(run.id, run.params_json)
+    engine_configuration = parse_configuration_object(run.id, run.backtest_config_json)
+    strategy_configuration = parse_configuration_object(run.id, run.params_json)
 
     if engine_configuration is None or strategy_configuration is None:
         return None
@@ -118,24 +117,6 @@ async def read_last_submitted_parameters(
         initial_capital=_read_finite_number(engine_configuration, INITIAL_CAPITAL_KEY),
         params=parameter_values,
     )
-
-
-def _parse_configuration_text(
-    run_id: str, configuration_text: str
-) -> dict[str, object] | None:
-    """解析一份落库的配置文本; 读不动只记日志并回 `None`."""
-
-    try:
-        parsed_configuration = json.loads(configuration_text)
-    except json.JSONDecodeError as error:
-        logger.warning("运行 %s 的配置文本不是合法 JSON: %s", run_id, error)
-        return None
-
-    if not isinstance(parsed_configuration, dict):
-        logger.warning("运行 %s 的配置文本不是 JSON 对象", run_id)
-        return None
-
-    return parsed_configuration
 
 
 def _read_run_field_key_names(version: StrategyVersionModel | None) -> dict[str, str]:

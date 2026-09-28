@@ -46,7 +46,7 @@ Python 策略**。
 | D.15 | 观感层之二：把 Element Plus 的令牌桥补完（文字阶 / 填充阶 / 表格 / 阴影四族；EP 把表格与骨架屏的变量声明在 `.el-table` 上而**不是** `:root`，覆盖必须写 `html:root .el-table`；**D.18 后主文件再越 50 KB，整条移出**） |
 | D.16 | 主页第一屏的数字带 + 标签页图标（三个数全部取自已有实测值 / 图标是纯几何标记、不排汉字 / SVG 里的 `#1d4ed8` 是写死的；**顶栏标记那笔欠账已由 D.17 收口**；**D.19 后主文件再越 50 KB，整条移出**） |
 | D.17 | 顶栏标记换成与标签页同一份几何标记 + 五批验收清单合并成一份（静态 `src="/favicon.svg"` 会让 `@vitejs/plugin-vue` 改写成 `import`，Vitest 在 Windows 上直接炸 / 合并后的 37 条见 `docs/acceptance-checklist.md`；**D.19 后主文件再越 50 KB，整条移出**） |
-| D.18 | 策略 manifest 的作者向说明 + 一份可直接用的示例（作者向说明与样例落在 `docs/` / 平台**不读**策略自带配置文件、渲染结果 ≡「已映射字段 ∪ 已声明参数」/ `bar_period` 不映射会**静默 0 成交** / manifest 与 `.py` 放一起按版本传；**D.19 后主文件再越 50 KB，整条移出**） |
+| D.18 | 策略 manifest 的作者向说明 + 一份可直接用的示例（作者向说明与样例落在 `docs/` / 平台**不读**策略自带配置文件、渲染结果 ≡「已映射字段 ∪ 已声明参数」/ `bar_period` 不映射会**静默 0 成交** / manifest 与 `.py` 放一起按版本传；**D.19 后主文件再越 50 KB，整条移出**；留在主文件的短版 stub 于 **D.23 后随"已完成区滚动"一并移出**，结论现只在归档） |
 | D.19 | 引擎版本可追溯（`Runs.EngineVersion` 提交时冻结 / `catalog/migrations.py` 只补新增列 / `.pyd` + 三 DLL 的 `sha256:` 降级不可与人写版本号相比；**D.20 后主文件再越 50 KB，整条移出**） |
 | D.20 | 引擎的 MySQL / MariaDB 适配器改为按配置运行时装载（引擎包可以不发运这两系 / `$<TARGET_RUNTIME_DLLS>` 不再拷它们；**D.21 后主文件再越 50 KB，整条移出**） |
 | Q.01 | manifest 的 `params` schema 细节未定（**已定案**，见 D.06） |
@@ -56,11 +56,37 @@ Python 策略**。
 | Q.05 | 受限用户目录的泄漏面评审（**已随 P4 落地并收口**，见归档 D.07） |
 | Q.06 | Tick 三档撮合语义未定（**表单侧已定**＝不显示；引擎侧仍未定，短版见 ❓） |
 | Q.07 | 前端组件测试的 DOM 环境未定（**已定案**：装 `jsdom` + `@vue/test-utils`，全局仍 `node`、组件 spec 逐文件声明，见归档 D.11） |
+| Q.08 | 配置模板的存储位置未定（**已拍板：catalog 新增一张表**，即 `RunTemplates`，见 D.23） |
 | R.01 分期复述 | P0/P1/P2/P2b/P3/P4/P5 与四笔非分期项（预填 / UI 库 / 观感层 / 引擎版本）的分批复述，2026-09-28 从 `R.01` 整块压缩移入（**`R.01` 本体仍在 🔄 区，只留指针**；块 sha256 `8d08b423c3ec832b`） |
 
 ---
 
 ## ✅ 已完成
+
+### D.23 · 2026-09-28 （第二十三批） P6 多轮对比与配置模板 + P7 删除与保留清理
+
+- **两期一起做**（用户指定「接着做 P6、P7」）。**P6**：新表 `RunTemplates` + 四个模板端点
+  （`/api/strategies/{id}/run-templates` 的 list / create / rename / delete）、
+  `GET /api/runs/compare?ids=`、前端 `/compare` 页（新组件 `RunComparisonTable` 与
+  `EquityOverlayChart`）与提交页的「配置模板」区（套用 / 存为模板）。**P7**：`DELETE /api/runs/{id}`
+  与**保留清理**（`services/run_retention.py`，默认**关**，`QUANT_RETAINED_RUNS_PER_USER=50`）。
+  **日志轮转不做**——整目录移除天然覆盖 `log/`。设计与拍板逐条见 `platform-plan.md`
+  §9 的「P6/P7 落地范围」与 §13 的 P6/P7 拍板表。
+- **两处搬位置**（HTTP 契约一字不变，按 Harness §3 报备）：`run_submission.py` 的三个校验器与
+  `MAXIMUM_RUN_FIELD_VALUE_LENGTH` → `services/run_configuration.py`（**计划里叫
+  `run_field_values.py`，实施时按"收的是整份运行配置"改名**）；`_resolve_job_directory` 的四道路径
+  判定 → `services/run_storage.py:resolve_run_directory`（读路径只补 `is_dir()` 前置）。删除与保留
+  清理共用同一份守卫与同一个 `ROW_DELETABLE_OUTCOMES`，"什么算删干净了"因此只有一处判据。
+- **一处契约加宽**：`RunSummaryResponse` 增 `params_json`（纯增量），否则对比页看不见"同参不同
+  `GridStep`"差在哪。
+- **验收证据**：后端 **558 项全过**（新增 55 项）；真引擎验收 **4 项全过**（21.7 s）；前端
+  `type-check` 无错 + `vitest` **24 文件 / 204 项全绿** + `build` 成功。**验收句「同参不同 `GridStep`
+  的两轮指标并列且曲线叠加」已由 `test_run_comparison.py` 与 `RunCompareView.spec.ts` 各钉一条。**
+- **仍未决 —— 待用户手工验收**：浏览器与磁盘上的走查（对比页两列并排、模板套用往返、
+  删除后目录消失、开保留策略跑 N+2 轮只剩 N 轮），清单见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §11/§12。**提交未做**——等用户发话。
+- **顺带订正一处越批文案**：主页「当前边界」卡里"多轮对比与设置页尚未提供"删掉前半句
+  （现为"设置页尚未提供"），页面落地后那句话就不该再挂着。
 
 ### D.22 · 2026-09-28 （第二十二批） 引擎侧四个后端收成一条装载路 + Linux 链接补齐
 
@@ -70,54 +96,22 @@ Python 策略**。
   OpenSSL / zlib / resolv 链接修掉 —— **Windows 侧不受影响**（那份 connector 是 SHARED
   IMPORTED，符号由它自己带），上云的引擎包无变化。
 - **大小账**: 主文件约 **49.9 KB**，已无余量；按 D.21 留下的教训，**下一批开工前先做一次压缩**。
+  （**已办**：D.23 开工前把 `R.01` 的分批复述整块压进归档、`D.18` 短版随"已完成区滚动"移出，
+  主文件回到 **41 KB**。）
 
-### D.21 · 2026-09-27 （第二十一批） 取不到数据库适配器时的收场口径订正：不是进程终止，而是 ERROR + 失败退出
+### D.21 · 2026-09-27 （第二十一批） 取不到数据库适配器时的收场口径订正
 
-- **跨两仓的一批**（DBAdapters / QuantTrading），本仓只落一句文档订正。承接 D.20 留下的「⚠️ 订正」，
-  本批把 [`docs/job-workspace.md`](docs/job-workspace.md) §3.2 的「注意」段改写为实测口径。
-- **订正内容**：原文说「四个 `.exe` 宿主**没有捕获点**，缺了是**进程终止**而非报错」——该结论只在
-  D.20 当时的实现下成立（`MysqlWrapper` 构造函数 `throw`，异常一路逃出 `main` → `std::terminate`）。
-  引擎侧把失败出口改成**写一条 ERROR 日志 + 交出空适配器**之后，由引擎既有的判空通路接管：
-  `SimExchange::Init()` 返回失败，宿主以 `ExitCodeHostInitFailed`（实测 `1`）收场。**不是进程终止，
-  也不是抛异常**，四个 `.exe` 宿主与 Python 宿主行为一致。
-- **为什么这件事对平台有意义**：进程被 `abort` 打死时，**日志器那口后台缓冲连同 stdio 缓冲一起丢**
-  （实测 `0xC0000409`、日志 0 字节），runner 拿到的是一个没有诊断的退出码；现在拿到的是退出码 `1`
-  + 一条点名 `DbType`、列明全部合法取值与「缺省」的 ERROR，外加引擎自有的 `Create Db Failed.`。
-  **runner 侧零改动**——它本来就只看退出码与 `result.json`，而 §4 的退出码表里 `1` = 宿主启动失败
-  早已在册，这是那条口径第一次真正被走到。
-- **同一批的另一处**：未识别的**非空** `DbType`（如 `"9"`、`"sqllite"`）不再**静默退化成 SQLite**，
-  而是走上面同一条失败路径；空串仍按缺省取 SQLite。平台侧写入点恒写 `"1"`，是合法取值，**平台代码
-  零改动**。
-- **实测（本仓承担的验收）**: `cd backend && python -m pytest -m real_engine` → **`4 passed`**
-  （默认后端这条最常见的路没被改坏）。引擎侧另有 `DbType="9"` 探针在四个 `.exe` 宿主上退出码 `1`
-  且日志可读。
-- **风险（§7）**: 无多线程/锁/内存管理改动；本仓**无代码改动**，只改一句文档。
-- **补记（2026-09-28）：`DbType` 由字符串改为 `int`，本仓的写入点与断言随之改。** 本条上面那句
-  「平台侧写入点恒写 `"1"`」**已被推翻**：Spark 早已有 `enum class DbTypeType : int32_t
-  { DuckDb = 0, SqliteDb = 1, MysqlDb = 2, MariaDb = 3 }`（`Spark/Types.h`，模板生成、明写禁手改），
-  用户裁定「以枚举值为准」，QuantTrading 的配置模型随之把 `DbType` 由 `string` 声明成 `int`、
-  四份 `Configs/*.json` 的值改裸整数。本仓改动三处：① `app/scheduler/engine_config.py` 新增具名
-  常量 `SQLITE_DATABASE_TYPE = 1`（原为裸字面量 `"1"`），注释写明「取值即 Spark `DbTypeType` 的
-  枚举值」，`DATABASE_TYPE_FIELD_HINT` 与写入点照旧引用它；② `tests/test_run_scheduler.py` 的断言
-  改为 `engine_configuration["DbType"] == SQLITE_DATABASE_TYPE`，不再写裸值；③
-  [`docs/job-workspace.md`](docs/job-workspace.md) §3.2 那句「只有 `DbType` 取 `2` / `3` 时才需要」
-  随之一致（原文的半角引号写法已不存在）。**本仓行为变更：无**——渲染出的取值恒为合法值。
-  **实测**: `cd backend && python -m pytest tests/test_engine_config.py tests/test_run_scheduler.py -q`
-  → **29 passed**；`python -m pytest -m real_engine --basetemp=_acc_tmp/dbtype-int -q` → **`4 passed`**，
-  作业配置里 `"DbType": 1`、stdout `DbType:1`，指标与 `job-workspace.md` §6.3 基线**逐位相同**
-  （成交 `34` / 委托 `629` / 余额 `999257.8562340003`）。**一处新的失效形态（平台须知）**：
-  旧字符串写法 `"1"` 现在**装不上**——jsoncpp 的 `asInt()` 遇字符串值抛 `LogicError`，抛出点仍在
-  宿主 `try` 之外，实测退出码 `0xC0000409`、**日志 0 字节**、无任何提示，比 `DbType = 9` 那条
-  （退 `1` + 可读 ERROR）更难查。凡手工改过 `DbType` 的配置都要写成裸整数。
-- **大小账（补记）**: 写本补记前主文件 **49,966 B**，故按本条自己留下的那条教训**先压缩 R.01 的
-  十段分期复述**——原文 4,887 B（sha256 `8d08b423c3ec832b`）已整块搬入
-  [`PROGRESS-archive.md`](PROGRESS-archive.md) 的「R.01 分期复述（2026-09-28 压缩前原文）」一节
-  （用脚本按行搬移、**未手抄**），主文件只留一条指针 + 仍未了结的手工验收项，落到 **46,189 B**
-  后才写本条；补记自身约 1.5 KB，收尾 **47.7 KB 上下**。
-- **提交状态**：**未提交、未推送**。
-- **大小账**: 主文件开工时 49,380 B，故先移出 `D.20` 整条（`sed` 按行搬移、**未手抄**，只改标题层级
-  `### ` → `## `）。**下一批已无缓冲**：✅ 区只剩 `D.21` 一份整条可滚，按上一批留下的教训，
-  **下次先压缩 R.01 里已完成的复述**。
+- **已归档**：原文见 [`PROGRESS-archive.md`](PROGRESS-archive.md) 的 `D.21`（第二十三批开工前压缩时
+  移出）。该条里**仍在生效的结论**：① 引擎取不到数据库适配器时**不是进程终止**，而是写一条 ERROR
+  日志 + 交出空适配器，由引擎既有的判空通路接管，宿主以 `ExitCodeHostInitFailed`（实测 `1`）收场
+  ——runner 侧零改动，它本来就只看退出码与 `result.json`（§4 的退出码表里 `1` 早已在册）；
+  ② 未识别的**非空** `DbType` 不再静默退化成 SQLite，空串仍按缺省取 SQLite；③ **`DbType` 现在是
+  裸整数**（Spark `DbTypeType` 的枚举值），平台写入点是 `engine_config.SQLITE_DATABASE_TYPE = 1`。
+- **一处新的失效形态（平台须知）**：旧字符串写法 `"1"` 现在**装不上**——jsoncpp 的 `asInt()` 遇字符串
+  值抛 `LogicError`，抛出点仍在宿主 `try` 之外，实测退出码 `0xC0000409`、**日志 0 字节**、无任何提示，
+  比 `DbType = 9` 那条（退 `1` + 可读 ERROR）更难查。凡手工改过 `DbType` 的配置都要写成裸整数，
+  详见 [`docs/job-workspace.md`](docs/job-workspace.md) §3.2。
+- **提交状态**：已提交（`f7e10df`）。
 
 ### D.20 · 2026-09-27 （第二十批） 引擎的 MySQL / MariaDB 适配器改为按配置运行时装载
 
@@ -145,129 +139,36 @@ Python 策略**。
   见 `platform-plan.md` §12.24。
 - **仍未决（占用主文件）——待用户手工验收**: 打开一个已完成的轮，详情页「概要」多出「引擎版本」
   一行；换版按版本留目录而非原地覆盖（`platform-plan.md` §5.1）。
-### D.18 · 2026-09-27 （第十八批） 策略 manifest 的作者向说明 + 一份可直接用的示例
 
-- **已归档**：原文见 [`PROGRESS-archive.md`](PROGRESS-archive.md) 的 `D.18`（写 D.19 后主文件越过
-  50 KB 上限时移出）。该条里**仍在生效的结论**：① 作者向说明在
-  [`docs/strategy-manifest.md`](docs/strategy-manifest.md)、可直接上传的样例在
-  [`docs/strategy-manifest.example.json`](docs/strategy-manifest.example.json)，两者与
-  `platform-plan.md` §7.2 互相指向；② **平台不读策略自带的配置文件**，渲染结果 ≡「已映射的运行级
-  字段 ∪ 已声明的参数」—— 漏声明一个键，策略以退出码 1 收场，且 `config_filename` 必须与策略里
-  `open` 的名字一字不差；③ `bar_period` 不映射会**静默 0 成交**；④ 每个策略的 manifest 与它的
-  `.py` **放一起**（平台按**版本**存 manifest，两者要一起改一起传）。
-### D.17 · 2026-09-26 （第十七批） 顶栏标记换成与标签页同一份几何标记 + 五批验收清单合并成一份
+### 早期九批的合并存根（D.05 / D.06 / D.09 / D.12 – D.17）
 
-- **已归档**：原文见 [`PROGRESS-archive.md`](PROGRESS-archive.md) 的 `D.17`（写 D.19 后主文件越过
-  50 KB 上限时移出）。该条里**仍在生效的结论**：① 顶栏 28px 方块标引的**就是** `public/favicon.svg`
-  那一份文件 —— 不在组件里复刻一段 SVG（两处几何数据早晚漂移，"应用里的标"与"标签页上的标"本就该
-  是同一个）；地址须走**指令绑定**（`brandMarkUrl` 常量），写成静态 `src="/favicon.svg"` 会让
-  `@vitejs/plugin-vue` 把它改写成 `import '/favicon.svg'`，**Vitest 解析成 `file:///favicon.svg` 后
-  在 Windows 上直接炸掉两份 spec**（`npm run dev` 与生产构建都碰不到这个坑）。② 五批共 **37 条**
-  复选已按**页面与操作顺序**重排合并，见 [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md)。
-### D.16 · 2026-09-26 （第十六批） 主页第一屏的数字带 + 标签页图标
+这九批的**原文**都在 [`PROGRESS-archive.md`](PROGRESS-archive.md)，一句话结论与关键词见上方
+「归档索引」表。**主文件不再复述它们的结论**——引用其中任何细节前，先按上方那条规矩 grep 归档核实。
 
-- **已归档**：原文见 [`PROGRESS-archive.md`](PROGRESS-archive.md) 的 `D.16`（写 D.19 后主文件越过
-  50 KB 上限时移出）。该条里**仍在生效的结论**：主页 hero 那条数字带的三个数（`3.8 秒` /
-  `17 张` / `3.0 MB`）全部是**已有实测值**，与同页「引擎与运行环境」两行**同源**，**不引入任何
-  未实现的能力**；标签页图标是**纯几何标记、不排汉字**（16px 下"薪"17 画会糊成一团，且 SVG 图标
-  在页面之外渲染、不走页面字体栈，没装中文字体的机器上会落成空方框）；`#1d4ed8` 在 SVG 里是
-  **写死**的，换品牌色时要一起手改。
-- **当时的欠账已由 D.17 收口**：顶栏那个 28px 方块标当时仍是汉字「薪」，D.17 换成了与标签页同一份
-  `public/favicon.svg`（`alt=""` 是有意的，紧挨着的「薪火量化」才是可访问名）。
-### D.15 · 2026-09-26 （第十五批） 观感层之二：把 Element Plus 的令牌桥补完
+仍留在主文件可见的只有下面两件：
 
-- **已归档**：原文见 [`PROGRESS-archive.md`](PROGRESS-archive.md) 的 `D.15`（写 D.18 后越过 50 KB
-  上限时移出）。该条里**仍在生效的结论**：ED 出厂的**文字阶 / 填充阶 / 表格 / 阴影**此前没桥过来，
-  同一个卡片里因此并存"两套灰 + 两种线深 + 两种表头"，这才是"外观差点意思"的主因（**不是配色**）；
-  表格与骨架屏那六个变量 EP 声明在 `.el-table` / `.el-skeleton` 上而**不是** `:root`，自定义属性
-  就近取胜，写在 `html:root` 里的覆盖会**静默失效**，故必须写成 `html:root .el-table`（0,2,1）；
-  骨架屏流光的强度由 `--el-fill-color` 与 `--el-fill-color-darker` 两档决定，跟着新刻度走会变成三倍
-  故那两条点名取紧邻的一格；表头字色点名取 `regular`（slate-500 落在 `#f1f5f9` 上是 4.34:1，差一点
-  没过 AA）；`SurfaceCard` 去掉 `shadow-sm`——卡片只靠描边，阴影留给浮层。
-- **仍未决（占用主文件）——待用户手工验收**: 8 项已按页面重排，见
-  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §5 / §6 / §8。这批全是观感改动，
-  我无法自证，请以眼睛为准；不满意可整体回退（除 `SurfaceCard` 的 `shadow-sm` 与 12 处 label 外都是
-  纯令牌）。
+- **D.12 – D.17 六批的手工验收共 37 条**：已按页面与操作顺序合并为一份，见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md)（D.17 收口）。这批全是观感与交互，
+  **只能由用户眼睛判定**，AI 无法自证。
+- **D.05 的两条残件**：① 同策略并发 `PUT /{id}/grants` 的锁升级路径「本环境未复现、不等于线上
+  不需要」的**残余风险**；② 7 行 102 字符的行宽离群**待下一次格式化**一并做。
 
-### D.14 · 2026-09-26 （第十四批） 修「切换登录状态后空白页, 要按 F5」
-
-- **已归档**：原文见 [`PROGRESS-archive.md`](PROGRESS-archive.md) 的 `D.14`（写 D.18 后主文件余量
-  不足一条条目时移出）。该条里**仍在生效的结论**：`App.vue` 的路由出口是
-  `<Transition mode="out-in">`，它要求孩子是**单个元素**，被路由的组件一旦渲染成**片段**（模板根
-  节点前写一行注释，dev 保留注释即命中），过渡状态机就再也配不上，内容区永久只剩 `<!---->`；
-  修法是给 `<component :is>` 外面包一层 `<div :key="route.path">`（结构性防御），并把
-  `LoginView.vue` / `RunSubmitView.vue` 的前导注释移进根元素内部；`@vue/test-utils` 默认把
-  `<Transition>` 换成 `transition-stub`，**凡测过渡必须写 `stubs: { transition: false }`**，
-  否则是假绿；`style.css` 的 `@source not "./**/*.spec.ts";` 是给 Tailwind v4 的扫文件收口的。
-- **仍未决（占用主文件）——待用户手工验收**: 见
-  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §2 / §4
-  （登录、退出登录、提交一轮，三步都**不该需要 F5**）。
-
-### D.13 · 2026-09-26 （第十三批） 公开主页「薪火量化」+ 界面改名
-
-- **已归档**：原文见 [`PROGRESS-archive.md`](PROGRESS-archive.md) 的 `D.13`
-  （写 D.15 后主文件越过 50 KB 上限时移出）。该条里**仍在生效的结论**：`/` 由裸重定向改为公开主页
-  `home`；外壳显隐与"是否公开"解耦为 `meta.hidesHeader`（只有 `/login` 与 404 页用它）；带顶栏的
-  公开页在守卫里补一次 `loadCurrentUser`，失败时**停在原页**不弹走；`session.hasCurrentUser` 是
-  "身份已就绪"的唯一定义；界面文案与 `index.html` 的 `<title>` 用「薪火量化」，而仓库名 / 包名 /
-  目录名 / `APPLICATION_TITLE` / `platform-plan.md` 的 H1 **有意不动**。引用其余细节前先 grep 归档
-  核实原文。
-- **仍未决（占用主文件）——待用户手工验收**: 12 项已合并且按页面重排，见 [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §2 / §3 / §9。
-
-### D.12 · 2026-09-26 （第十二批） 观感层：统一外壳 / 版面原语 / 动效与焦点 / 两条反馈通道
-
-- **已归档**：原文见 [`PROGRESS-archive.md`](PROGRESS-archive.md) 的 `D.12`
-  （加 D.14 后主文件越过 50 KB 上限时移出）。该条里**仍在生效的结论**：顶栏用**不透明**底色而非
-  毛玻璃（`/runs` 每 2 秒整表重画，`backdrop-filter` 每帧重算模糊区）、反馈策略是"成功与失败都弹
-  toast"但**表单类动作失败仍就地留在表单里**（a 类例外，逐站清单在计划 §四）、`confirmAction` 的
-  四处实现要点（显式中文按钮文案 / 危险动作 `autofocus: false` / `confirmButtonClass:
-  'el-button--danger'` / 模块级单例闸挡双击）、`composables/use-feedback.ts` 的四个纯函数是全站
-  唯一出处、`router.scrollBehavior` 与 `min-h-[60vh]` 是路由过渡的必备伴随。引用其余细节前先 grep
-  归档核实原文。
-- **仍未决（占用主文件）——待用户手工验收**: 6 项已合并且按页面重排，见 [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §5 – §8；**D.11 与 D.10 两笔欠账**已并入该文件的 §4 / §5。
-
-### D.09 · 2026-09-26 （第九批） 网格步长由绝对价格改为比例
-
-- **已归档**：原文见 [`PROGRESS-archive.md`](PROGRESS-archive.md) 的 `D.09`
-  （加 D.11 后主文件越过 50 KB 上限时移出）。该条里**仍在生效的结论**：
-  `GridStep` 是**比例**（`0.01 = 1%`）、档位价与平仓价两条公式、合法区间
-  `0 < GridStep × GridCount < 1`、越界在**构造期**拒启（两侧孪生同源校验），
-  以及**重取后的真引擎基线**（成交 `34`、委托 `629`、余额 `999257.8562340003`）
-  —— 基线表在 `job-workspace.md` §6.3，单位契约另见下方备注。
-  **旧口径与新口径的数字不可相减**；引用该条其余细节前，先 grep 归档核实原文。
-
----
-
-### D.06 · 2026-09-25 （第六批） P3 runner 本体 + `params` schema 定案
-
-- **已归档**：原文见 [`PROGRESS-archive.md`](PROGRESS-archive.md) 的 `D.06`
-  （主文件再次逼近 50 KB 上限时移出）。该条里**仍在生效的结论都由别处承接**：
-  `argv[0]` 的订正见 `job-workspace.md` §3.1 与下方备注、写路径的结构性保证见
-  §2 与备注、`params` 定案见 `platform-plan.md` §7.2、P3 的六项已知缺口与
-  **两处 CAS 覆盖缺口**见下方备注、三版基线数字见 `job-workspace.md` §6。
-  **引用该条其余细节前，先 grep 归档核实原文。**
-
----
-
-### D.05 · 2026-09-25 （第五批） P2b 审核修正与测试补强
-
-- **已归档**：原文见 [`PROGRESS-archive.md`](PROGRESS-archive.md) 的 `D.05`（主文件逼近 50 KB 上限时移出）。
-  该条里两件**还没了结**的事仍需在主文件可见：一是同策略并发 `PUT /{id}/grants` 的锁升级
-  路径「本环境未复现、不等于线上不需要」的**残余风险**；二是 7 行 102 字符的行宽离群
-  **待下一次格式化**一并做。
-
+其余落点：`argv[0]` 与写路径见 [`docs/job-workspace.md`](docs/job-workspace.md) §2/§3.1，
+`params` 定案见 [`docs/platform-plan.md`](docs/platform-plan.md) §7.2，网格步长的单位契约与
+真引擎基线见 `job-workspace.md` §6.3，读结果库的两条端点与前端两个面板见 `platform-plan.md`
+§9/§10，跨批通用的规则见下方「备注」。
 
 ---
 
 ## 🔄 进行中
 
-### R.01 · 2026-09-25 回测平台实施（P0–P5 已交付，P6–P8 待做）
+### R.01 · 2026-09-25 回测平台实施（P0–P7 已交付，P8 待做）
 
 - **计划全文**：[`docs/platform-plan.md`](docs/platform-plan.md)。分期与验收见其 §11。
-- **分期进度指针（P0–P5 及四笔非分期项均已交付）**：P0（D.01）/ P1（D.02）/ P2 上传核心（D.03）/
+- **分期进度指针（P0–P7 及四笔非分期项均已交付）**：P0（D.01）/ P1（D.02）/ P2 上传核心（D.03）/
   P2b 授权共享（D.04，审核修正见 D.05）/ P3 runner 本体（D.06）/ P4 前端骨架（D.07）/
   P5 可视化（D.08）/ 提交页预填（D.10）/ UI 组件库（D.11）/ 观感层（D.12）/
-  引擎版本可追溯（D.19）共十条的分批复述已压缩，原文见
+  引擎版本可追溯（D.19）/ **P6 对比与模板 + P7 删除与保留清理（D.23）** 共十二条的分批复述已压缩，原文见
   [`PROGRESS-archive.md`](PROGRESS-archive.md) 的「R.01 分期复述（2026-09-28 压缩前原文）」
   一节（sha256 `8d08b423c3ec832b`）。**仍在生效的结论**：表名 PascalCase（`Users` / `Strategies` /
   `StrategyVersions` / `StrategyGrants` / `Runs`）；P2 的六个策略端点全部落地；
@@ -279,7 +180,9 @@ Python 策略**。
   只补新增列，**现有的库不必重建**）。**仍未决（占用主文件）——待用户手工验收**：
   P4/P5 的浏览器走查（步骤见 `platform-plan.md` §8.1–§8.3），以及 D.10/D.11/D.12/
   D.13/D.14/D.15/D.16/D.17 八批共 37 条复选 —— 后者已按页面与操作顺序合并为一份清单，
-  见 [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md)（D.17 收口）。
+  见 [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md)（D.17 收口）；
+  **D.23（P6/P7）另在那份清单上添了 §11/§12 两节**（对比页两列并排与曲线叠加、
+  「加入对比」、模板套用往返、删除后目录消失、保留策略开关四种情形）。
 - **⚠️ 参数语义变更：网格步长已由绝对价格改为比例**（见归档 D.09）：
   `GridStep` 现为**比例**（`0.01 = 1%`），旧值 `10.0` 这种绝对价格写法
   **在构造期就被拒**（合法区间 `0 < GridStep × GridCount < 1`，两侧
@@ -288,12 +191,13 @@ Python 策略**。
   `999377.0899999999 → 999257.8562340003`），`job-workspace.md` §6.3 是
   新表、§6.1/§6.2 两份旧表**保留但标注为旧口径**。要引用余额数字，
   先认准是哪一版步长下测的——**不同口径的数不可相减**。
-- **P6 起的前置**：P5 已把「读结果库」这条路打通（只读连接、白名单、分页、
-  `asyncio.to_thread`），P6 的多轮对比不必再碰 SQL——`/api/runs/compare?ids=a,b,c`
-  只需把 `read_capital_series` 在**多轮**上各调一次，曲线叠加是前端的事。
-  **口径坑**：不同轮的 `Capital` 长度与起点都不同（交易日区间不同），
-  叠加前必须先按 `TradingDay` 对齐，不能按数组下标。`DELETE /api/runs/{id}`
-  （要连工作目录一起删）留 P7。
+- **P6 的前置已由 P6 自己结清**（2026-09-28，D.23）：P5 打通的「读结果库」那条路确实够用——
+  `/api/runs/compare?ids=a,b,c` 把 `read_capital_series` 在**多轮**上各调一次
+  （逐轮各自 `to_thread`，不 `ATTACH`），曲线叠加是前端的事。**当时记的口径坑已落地**：
+  不同轮的 `Capital` 长度与起点都不同（交易日区间不同），叠加前按 `TradingDay` 取并集对齐、
+  缺的那天填 `null` 留断口（`frontend/src/domain/equity.ts:alignEquitySeries`），**不插值、
+  不取前值**——覆盖区间不同恰恰是这一页最该暴露的事实。`DELETE /api/runs/{id}` 已随 P7 落地
+  （连工作目录一起删，先目录后行）。
 - **P4 开工前的三处已拍板**（2026-09-25，原文见归档 `Q.03`/`Q.04`）：
   - **前端样式 = Tailwind**（按计划原文，与 `defect_tools` 的纯 CSS 有意分叉），
     P4 首日即用，故 `platform-plan.md` §11 的 P4 那行**不需要改**。
@@ -327,7 +231,7 @@ Python 策略**。
 | Tick 选项 | **表单不显示**，提交侧继续 400 | 三档撮合语义仍未定，不阻塞 P4 |
 | 前端依赖 | **最小集**：原生 `fetch`，不引 axios、不引 UI 库 | 表格/分页/模态框等自写，见归档 D.07。**2026-09-26 起 UI 库一项被 Element Plus `^2.14.6` 取代**（见归档 D.11）；**axios / sass 两条仍然有效** |
 | 前端测试 | **vitest 只测纯逻辑**（`environment: node`） | 不装 `@vue/test-utils` 与 jsdom；**要测组件时再加**。**2026-09-26 正是按本行自己预设的条件加装**（jsdom + @vue/test-utils；全局仍 `node`，组件 spec 逐文件声明 jsdom），见归档 D.11；当时的存疑原文已归档为 `Q.07` |
-| 前端页面范围 | **闭环 + 最小 admin 用户页** | 不含 `/compare`、`/settings`；**权益曲线与明细分页表已于 P5 补齐** |
+| 前端页面范围 | **闭环 + 最小 admin 用户页** | 原不含 `/compare`、`/settings`；**权益曲线与明细分页表已于 P5 补齐**、**`/compare` 已于 P6 落地（D.23）**，只剩 `/settings`（P8） |
 | 前端版本号 | **照抄本机同族项目的已验证组合** | router 5 / pinia 4 / vitest 5 / TS 7 都是主版本跳跃，不追 |
 | 结果表明细范围 | **精选 5 张**：`Capital` / `Trade` / `Order` / `Position` / `PositionDetail` | P5 拍板；**不加列表端点**，表名清单前端镜像一份，见归档 D.08 |
 | 回撤在哪算 | **前端纯函数派生**（`domain/equity.ts`） | P5 拍板；后端只回原样逐日序列，接口不随图表变化 |
@@ -351,9 +255,6 @@ Python 策略**。
   OS 账号"vs 每用户容器，两条路的实现与运维代价差别很大。**P8 上云前必须定**。
 - **行情数据上云的同步方式未定**（2026-09-25）：现约 1.2 MB/年/板块，
   体量不大，但需要定"谁同步、多久一次、失败怎么办"。**P8 前定**。
-- **配置模板的存储位置未定**（2026-09-25）：P6 的「配置模板保存复用」既可进
-  catalog（加一张表），也可落策略目录下。倾向前者（要按用户维度筛选），
-  待 P6 前定。
 - **请求体上限对分块编码无效**（2026-09-25，D.03 引入，原文见归档 D.03）：
   外层那道 413 只认 `Content-Length`，而 `Transfer-Encoding: chunked`
   不携带该头，绕得过。堵住它得在读取过程中逐块计字节，代价与收益不成比例

@@ -24,20 +24,23 @@ from app.catalog.models import RunModel
 from app.config import PlatformSettings
 from app.scheduler.runner import MAXIMUM_ERROR_MESSAGE_LENGTH
 from app.services.engine_probe import ENGINE_VERSION_FILENAME, read_engine_version
-from app.services.run_submission import (
-    MARKET_DATA_MISSING_MESSAGE,
+from app.services.run_configuration import (
     MATCH_MODE_NOT_SUBMITTABLE_MESSAGE,
     MISSING_PARAMETER_MESSAGE,
-    NO_VERSION_MESSAGE,
     RUN_FIELD_NOT_MAPPED_MESSAGE,
     RUN_FIELD_REQUIRED_MESSAGE,
-    SESSION_FILE_MISSING_MESSAGE,
     UNKNOWN_PARAMETER_MESSAGE,
+)
+from app.services.run_submission import (
+    MARKET_DATA_MISSING_MESSAGE,
+    NO_VERSION_MESSAGE,
+    SESSION_FILE_MISSING_MESSAGE,
     VERSION_NOT_FOUND_MESSAGE,
 )
 
 from .helpers import (
     SignedInAccount,
+    assert_rejected,
     bearer_headers,
     create_signed_in_account,
     create_strategy_grant_record,
@@ -96,22 +99,6 @@ RESULT_LONG_TAIL_KEY = "MissingRateKeys"
 # `exchange_id` 在下面的"未映射"用例里是被点名的字段: 报错文案该带**字段名**, 不该带取值.
 EXCHANGE_ID_FIELD_NAME = "exchange_id"
 INSTRUMENT_ID_FIELD_NAME = "instrument_id"
-
-
-def assert_rejected(
-    response: Response, expected_message: str, *rejected_values: str
-) -> None:
-    """一次被拒的提交: 400、文案相符, 且不原样回显调用方给出的取值.
-
-    不回显是硬要求 (D.03): 文案进响应体, 带上调用方的输入就等于平台把一次错误请求放大成一次
-    原样回显.
-    """
-
-    assert response.status_code == 400, response.text
-    assert response.json()["detail"] == expected_message
-
-    for rejected_value in rejected_values:
-        assert rejected_value not in response.text
 
 
 async def test_a_missing_rate_key_array_is_not_in_the_response_but_is_on_disk(

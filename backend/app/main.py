@@ -16,6 +16,7 @@ from typing import Any
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
+from sqlalchemy.exc import SQLAlchemyError
 import uvicorn
 
 from .bootstrap import ensure_initial_admin
@@ -28,10 +29,11 @@ from .errors import (
     ResourceNotFoundError,
 )
 from .manifest import MAXIMUM_MANIFEST_BYTES
-from .routers import auth, health, runs, strategies, users
+from .routers import auth, health, run_templates, runs, strategies, users
 from .routers.strategies import MAXIMUM_SOURCE_BYTES
 from .scheduler.recovery import recover_interrupted_runs
 from .scheduler.scheduler import RunScheduler
+from .services.run_retention import prune_superseded_runs
 
 
 APPLICATION_TITLE = "QuantPlatform"
@@ -45,6 +47,9 @@ AUTH_PREFIX = "/api/auth"
 HEALTH_PREFIX = "/api/health"
 USERS_PREFIX = "/api/users"
 STRATEGIES_PREFIX = "/api/strategies"
+# 配置模板挂在策略下: 它的作用域就是策略域 (参数只在一个策略的键命名空间里有意义). 路径参数
+# 因此写在**前缀**里, 各端点不必各自重复一遍 `/{strategy_id}`.
+RUN_TEMPLATES_PREFIX = "/api/strategies/{strategy_id}/run-templates"
 RUNS_PREFIX = "/api/runs"
 
 MULTIPART_FRAMING_ALLOWANCE_BYTES = 64 * 1024
@@ -83,9 +88,50 @@ def _redact_validation_error(validation_error: dict[str, Any]) -> dict[str, Any]
 logger = logging.getLogger(__name__)
 
 
+async def _prune_retained_runs(
+    database: PlatformDatabase, settings: PlatformSettings
+) -> None:
+    """启动时按保留策略清一次盘.
+
+    位置在两处之间: `recover_interrupted_runs` **之后**——恢复把上一轮留下的 `queued`/`running`
+    改写成 `interrupted`, 改写后才算终态、才进候选集合, 否则那些作业目录永远留在盘上; 调度器
+    `start()` **之前**——此刻还没有任何作业在跑, 清扫选中的每一行都不会是在飞的.
+
+    失败只记日志、**不阻止启动**. 清理是维护性动作, 让一次磁盘问题把整个后端拦在启动之外, 是把
+    可用性问题升级成停机. 这是有意的取舍, 不是空 except.
+    """
+
+    try:
+        removed_count = await prune_superseded_runs(database, settings)
+    except (OSError, SQLAlchemyError) as error:
+        logger.error("启动清理失败, 后端照常启动: %s", error)
+        return
+
+    if removed_count:
+        logger.info("启动清理移除了 %d 轮历史运行", removed_count)
+
+
+def _build_retention_sweep(
+    database: PlatformDatabase, settings: PlatformSettings
+) -> Callable[[str], Awaitable[None]]:
+    """把保留清理绑成一个"某一轮落终态之后"的回调.
+
+    刚结束的那一轮经 `protected_run_ids` 排除: 清扫正由它的收尾触发, 而用户此刻看的多半就是它.
+    通常它是"最新的一轮"因而不在候选里, 但一个早先提交、刚刚才跑完的长回测就不是——那一格不排除
+    的话, 用户会在刷新的一瞬间看到"运行不存在".
+
+    回调只被**起成任务**、不被 await, 故这里的异常不会回流到调度器, 由那个任务的收尾回调统一记录.
+    """
+
+    async def retention_sweep(finished_run_id: str) -> None:
+        await prune_superseded_runs(database, settings, (finished_run_id,))
+
+    return retention_sweep
+
+
 @asynccontextmanager
 async def _application_lifespan(application: FastAPI) -> AsyncIterator[None]:
-    """建表、播种、结清上一轮残留, 再起调度器; 退出时反序收场.
+    """建表、播种、结清上一轮残留、清一次盘, 再起调度器; 退出时反序收场.
 
     次序不能换: 恢复必须在调度器**启动之前**跑完. 反过来的话, 恢复那条 UPDATE 会把调度器刚认领
     的作业一起标成中断, 而那个作业的进程已经起来了——库里说"中断", 进程还在写盘.
@@ -98,6 +144,7 @@ async def _application_lifespan(application: FastAPI) -> AsyncIterator[None]:
     await database.initialize()
     await ensure_initial_admin(database, settings)
     await recover_interrupted_runs(database)
+    await _prune_retained_runs(database, settings)
     await scheduler.start()
 
     try:
@@ -217,6 +264,9 @@ def _register_routers(application: FastAPI) -> None:
     application.include_router(
         strategies.router, prefix=STRATEGIES_PREFIX, tags=["strategies"]
     )
+    application.include_router(
+        run_templates.router, prefix=RUN_TEMPLATES_PREFIX, tags=["run-templates"]
+    )
     application.include_router(runs.router, prefix=RUNS_PREFIX, tags=["runs"])
 
 
@@ -237,7 +287,11 @@ def create_application(settings: PlatformSettings | None = None) -> FastAPI:
     application.state.database = database
     # 调度器在装配期就建好 (而不是在 lifespan 里): 取消端点要经依赖取它, 而依赖函数只做取出.
     # 未起循环时注册表为空、信号量满格, 端点照样能答——它只是取不到句柄而已.
-    application.state.scheduler = RunScheduler(resolved_settings, database)
+    application.state.scheduler = RunScheduler(
+        resolved_settings,
+        database,
+        retention_sweep=_build_retention_sweep(database, resolved_settings),
+    )
 
     _register_exception_handlers(application)
     _register_request_size_guard(application)

@@ -229,6 +229,13 @@ export interface RunSummary {
   balance: number | null;
   available: number | null;
   total_commission: number | null;
+  /**
+   * 该轮提交的策略参数 (JSON 文本), 与详情页那一份**同一个字段**.
+   *
+   * 列表视图也带着它, 因为对比页要回答的是"这两轮差在哪", 而**参数就是那个差**: 两轮同策略同参数、
+   * 只差一个 `GridStep` 时, 指标列会不同却看不出因为什么.
+   */
+  params_json: string;
   error_id: number | null;
   error_msg: string | null;
 }
@@ -281,6 +288,53 @@ export interface RunSubmitPayload {
   bar_period: string;
   exchange_id?: string | null;
   instrument_id?: string | null;
+  start_trading_day: string;
+  end_trading_day: string;
+  initial_capital: number;
+  params: Record<string, unknown>;
+}
+
+/**
+ * 一份配置模板: 命名的取值集合, 供提交页重复套用.
+ *
+ * 字段与 `LastSubmittedParameters` **刻意对齐** (`params` 是参数的原始取值, 运行级字段各有具名
+ * 成员), 故前端只有一条"把一套取值填进表单"的路径. 与后端 `catalog.schemas.RunTemplateResponse`
+ * 逐字对应: `strategy_id` 也带回来, 免得页面靠自己的请求上下文去猜这份列表属于哪个策略.
+ */
+export interface RunTemplate {
+  id: string;
+  strategy_id: string;
+  name: string;
+  match_mode: MarketDataType;
+  bar_period: string;
+  exchange_id: string | null;
+  instrument_id: string | null;
+  start_trading_day: string;
+  end_trading_day: string;
+  initial_capital: number;
+  params: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RunTemplateList {
+  strategy_id: string;
+  templates: RunTemplate[];
+}
+
+/**
+ * 存一份配置模板的请求体.
+ *
+ * 与 `RunSubmitPayload` 是**同一套取值**少两项: 策略在 URL 上 (模板挂在那个策略下), 版本刻意
+ * 不存 (模板是策略级的, 换版本后仍该能用). 与后端 `catalog.schemas.RunTemplateCreateRequest`
+ * 逐字对应, 参数的取值口径见 `domain/run-form.buildTemplateDraft`.
+ */
+export interface RunTemplateCreatePayload {
+  name: string;
+  match_mode: MarketDataType;
+  bar_period: string;
+  exchange_id: string | null;
+  instrument_id: string | null;
   start_trading_day: string;
   end_trading_day: string;
   initial_capital: number;
@@ -364,6 +418,29 @@ export interface RunEquity {
    * 权益而不是第一个交易日结束时的权益; 末点与运行详情里的 `balance` 同值.
    */
   points: EquityPoint[];
+}
+
+/**
+ * 对比里的一轮: 它的列表列加上它自己的曲线.
+ *
+ * `summary` 而不是整份 `RunDetail`: 对比页只展示列表页与详情页共有的那些指标, 而 `Runs` 的镜像列
+ * 恰好就是它们——对比**绝不重读结果文件** (`docs/platform-plan.md` §12.8).
+ */
+export interface RunComparisonEntry {
+  summary: RunSummary;
+  equity_points: EquityPoint[];
+  /**
+   * 这一轮的曲线为什么没有; `null` 即有曲线.
+   *
+   * 与 `summary` 是**两个独立的可用性**: 结果库文件被磁盘清理删掉之后, 指标仍在 (它们在 `Runs`
+   * 表上), 只有曲线没了. 故降级粒度是"这一轮少一条线", 而不是整页报错.
+   */
+  equity_unavailable_reason: string | null;
+}
+
+/** 多轮对比. `runs` 的次序 = 请求里 `ids` 的次序 (去重后), 由服务端保证. */
+export interface RunComparison {
+  runs: RunComparisonEntry[];
 }
 
 /** 结果表的单元格值. 引擎的列只有 str / int / float 三种标量 (无 BLOB), `null` 是防御性允许. */

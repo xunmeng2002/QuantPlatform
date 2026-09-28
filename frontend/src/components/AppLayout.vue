@@ -38,6 +38,7 @@ const isHeaderVisible = computed(() => route.meta.hidesHeader !== true);
 const navigationLinks = computed<NavigationLink[]>(() => {
   const links: NavigationLink[] = [
     { routeName: 'runs', label: '回测运行' },
+    { routeName: 'compare', label: '多轮对比' },
     { routeName: 'strategies', label: '策略' },
   ];
 

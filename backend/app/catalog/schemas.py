@@ -28,6 +28,7 @@ MINIMUM_PASSWORD_LENGTH = 8
 MAXIMUM_PASSWORD_LENGTH = 256
 MAXIMUM_STRATEGY_NAME_LENGTH = 128
 MAXIMUM_STRATEGY_DESCRIPTION_LENGTH = 500
+MAXIMUM_RUN_TEMPLATE_NAME_LENGTH = 64
 
 
 class PageResponse(BaseModel, Generic[T]):
@@ -61,12 +62,16 @@ class AccessTokenResponse(BaseModel):
     expires_in_minutes: int
 
 
-class RunSubmitRequest(BaseModel):
-    """提交一次回测.
+class RunConfigurationRequest(BaseModel):
+    """一次运行的取值集合: 提交与存模板**共用同一份字段定义**.
+
+    两条路径收的字段逐字相同 (运行级取值 + 策略参数). 各写一份的话, "模板存得下的取值"与"提交
+    收得下的取值"就成了两个集合, 而它们的差别只在特定取值上出现——症状是"存得下、提交时 400".
+    共同的字段只声明一次, 这种漂移就没有可发生的缝隙.
 
     这里只声明"有哪些字段、是什么类型", **取值规则一概不写在这里**: 那些规则要回 400 并只说
     字段名与原因, 而 pydantic 的 422 会把出错的取值原样抄回响应体——这份请求体里装的是用户填的
-    参数与标的, 不该进接入层日志. 规则全部落在 `services/run_submission`.
+    参数与标的, 不该进接入层日志. 规则全部落在 `services/run_configuration`.
 
     `extra="forbid"`: 多写一个字段名 (如 `param` 少了个 s) 会让参数整批静默落空, 而策略随后
     以"配置里没有这个键"的样子报错——把字段名写错这件事必须在提交这一步就拦住.
@@ -77,8 +82,6 @@ class RunSubmitRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    strategy_id: str = Field(min_length=1, max_length=32)
-    strategy_version_id: str | None = Field(default=None, min_length=1, max_length=32)
     match_mode: MarketDataType
     bar_period: str = ""
     exchange_id: str | None = None
@@ -87,6 +90,66 @@ class RunSubmitRequest(BaseModel):
     end_trading_day: str = ""
     initial_capital: float
     params: dict[str, object] = Field(default_factory=dict)
+
+
+class RunSubmitRequest(RunConfigurationRequest):
+    """提交一次回测: 取值集合 + 跑哪个策略的哪个版本."""
+
+    strategy_id: str = Field(min_length=1, max_length=32)
+    strategy_version_id: str | None = Field(default=None, min_length=1, max_length=32)
+
+
+class RunTemplateCreateRequest(RunConfigurationRequest):
+    """把一套取值命名存下.
+
+    没有 `strategy_version_id`: 模板是**策略级**的, 不绑版本. 换了版本之后它仍该能用——绑了
+    版本的话, 一次正常的版本迭代就会让所有旧模板失效, 而用户看不出那是"因为版本"。
+    """
+
+    name: str = Field(min_length=1, max_length=MAXIMUM_RUN_TEMPLATE_NAME_LENGTH)
+
+
+class RunTemplateRenameRequest(BaseModel):
+    """模板改名."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=MAXIMUM_RUN_TEMPLATE_NAME_LENGTH)
+
+
+class RunTemplateResponse(BaseModel):
+    """一份配置模板.
+
+    字段与 `LastSubmittedParametersResponse` **刻意对齐** (`params` 是参数的原始取值, 运行级
+    字段各有具名成员): 前端因此只有一条"把一套取值填进表单"的路径, 不必为模板另写一条——而
+    两条路径并存时, 差别总会在某个取值类型上冒出来.
+    """
+
+    id: str
+    strategy_id: str
+    name: str
+    match_mode: MarketDataType
+    bar_period: str
+    exchange_id: str | None
+    instrument_id: str | None
+    start_trading_day: str
+    end_trading_day: str
+    initial_capital: float
+    params: dict[str, object]
+    created_at: datetime
+    updated_at: datetime
+
+
+class RunTemplateListResponse(BaseModel):
+    """某策略下本人保存的模板.
+
+    不分页: 个人级小集合, 且有 `MAXIMUM_TEMPLATES_PER_STRATEGY` 的硬上限. 外面这层信封与
+    `JobArtifactListResponse` 同形——让响应自带"这份列表属于哪个策略", 页面不必靠请求上下文
+    去猜自己拿到的是不是刚才那一份.
+    """
+
+    strategy_id: str
+    templates: list[RunTemplateResponse]
 
 
 class UserCreateRequest(BaseModel):
@@ -212,6 +275,10 @@ class RunSummaryResponse(BaseModel):
 
     全集见 RunDetailResponse; 列表页按指标排序与筛选, 逐行去解结果文件不可行, 故这些列
     由提交完成时从 result.json 镜像入库.
+
+    `params_json` 在这里而不是只在详情里: 对比页要回答的是"这两轮差在哪", 而**参数就是那个
+    差**——两轮同策略同参数、只差一个 `GridStep` 时, 指标列会不同却看不出因为什么. 它是纯增量
+    (详情继承本类, 字段一个不少), 故不另立一个 20 列的扁平类型.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -235,6 +302,7 @@ class RunSummaryResponse(BaseModel):
     balance: float | None
     available: float | None
     total_commission: float | None
+    params_json: str
     error_id: int | None
     error_msg: str | None
 
@@ -245,7 +313,6 @@ class RunDetailResponse(RunSummaryResponse):
     runner_pid: int | None
     hostname: str
     engine_version: str
-    params_json: str
     backtest_config_json: str
     workspace_path: str
     db_path: str
@@ -311,6 +378,32 @@ class RunEquityResponse(BaseModel):
 
     run_id: str
     points: list[EquityPointResponse]
+
+
+class RunComparisonEntryResponse(BaseModel):
+    """对比里的一轮: 它的列表列 (`summary`) 加上它自己的曲线.
+
+    **指标一律取 `summary` 里的镜像列, 绝不重读 `result.json`**: 那些列的立项理由就是"列表与
+    对比不逐行解文件"; 更要紧的是保留清理会移走旧轮的作业目录 (见 `services/run_retention`),
+    那时历史轮的指标必须还在, 而只有镜像列做到了这一点.
+
+    `equity_unavailable_reason` 与 `equity_points` 一空一满: 降级**只降这一轮**, 别的列照常
+    出数——一条曲线画不出来不该让整页变白 (同详情页各面板的降级粒度). 文案里不带路径。
+    """
+
+    summary: RunSummaryResponse
+    equity_points: list[EquityPointResponse]
+    equity_unavailable_reason: str | None
+
+
+class RunComparisonResponse(BaseModel):
+    """多轮对比: 每轮一列.
+
+    列表序 = 请求序 (去重后), 由服务端保证: 前端按 `ids` 里的次序渲染列, 而 `IN (...)` 的
+    返回序是未定义的——不在这里定死, 界面上的列序就在驱动之间随机.
+    """
+
+    runs: list[RunComparisonEntryResponse]
 
 
 class ResultTableResponse(BaseModel):

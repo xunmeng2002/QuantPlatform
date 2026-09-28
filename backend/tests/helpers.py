@@ -86,6 +86,23 @@ def bearer_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def assert_rejected(
+    response: Response, expected_message: str, *rejected_values: str
+) -> None:
+    """一次被拒的写操作: 400、文案相符, 且不原样回显调用方给出的取值.
+
+    不回显是硬要求 (D.03): 文案进响应体, 带上调用方的输入就等于平台把一次错误请求放大成一次
+    原样回显. 提交与存模板两条路径共用这一份判据——两份请求体的取值规则本就该是同一套, 而
+    "被拒时不许回显"也是同一条要求.
+    """
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == expected_message
+
+    for rejected_value in rejected_values:
+        assert rejected_value not in response.text
+
+
 async def fetch_page(
     client: AsyncClient,
     path: str,

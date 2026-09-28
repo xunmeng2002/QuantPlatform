@@ -5,14 +5,14 @@
  *
  *   1. **首点是种子行** (初始资金), 故收益率以首点为基准而不是第一个交易日;
  *   2. **回撤记在历史峰值上**——谷后创新高时回撤回到 0, 而"最大回撤"仍指向谷底那一天;
- *   3. **峰值为 0 时回撤记 0** 而不是除零得到 `Infinity` / `NaN`.
+ *   3. **峰值为 0 时回撤记 0** 而不是除零得到 `Infinity` / `NaN`;
+ *   4. **叠加时缺的那天是 `null`**——不插值也不取前值, 覆盖区间不同必须在图上是一段真空.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import type { EquityPoint } from '../api/types';
-import { buildEquitySeries, summarizeEquity } from './equity';
-
+import { alignEquitySeries, buildEquitySeries, summarizeEquity } from './equity';
 function equityPoint(tradingDay: string, balance: number): EquityPoint {
   return { trading_day: tradingDay, balance, available: balance };
 }
@@ -78,6 +78,84 @@ describe('buildEquitySeries', () => {
     ]);
 
     expect(series.drawdownRatios).toEqual([0, 0]);
+  });
+});
+
+describe('alignEquitySeries', () => {
+  // 两轮: 细网格从 20241001 起步, 粗网格从 20241002 起步, 中间重叠一天而两轮的收尾各差一天.
+  const FINE_CURVE = {
+    label: '细网格',
+    points: [
+      equityPoint('20241003', 1_000_300),
+      equityPoint('20241001', 1_000_100),
+      equityPoint('20241002', 1_000_200),
+    ],
+  };
+  const COARSE_CURVE = {
+    label: '粗网格',
+    points: [
+      equityPoint('20241002', 1_000_000),
+      equityPoint('20241004', 999_000),
+    ],
+  };
+
+  it('x 轴是各轮交易日的并集, 去重升序 (8 位串的字典序即时间序)', () => {
+    expect(alignEquitySeries([FINE_CURVE, COARSE_CURVE]).tradingDayLabels).toEqual([
+      '2024-10-01',
+      '2024-10-02',
+      '2024-10-03',
+      '2024-10-04',
+    ]);
+  });
+
+  it('某轮缺的那天是 null: 不插值, 也不拿前一天的值顶替', () => {
+    const aligned = alignEquitySeries([FINE_CURVE, COARSE_CURVE]);
+
+    expect(aligned.curves[0]?.balances).toEqual([1_000_100, 1_000_200, 1_000_300, null]);
+    expect(aligned.curves[1]?.balances).toEqual([null, 1_000_000, null, 999_000]);
+  });
+
+  it('同一序列同一天有多个点时取末值', () => {
+    const aligned = alignEquitySeries([
+      {
+        label: '重复日',
+        points: [
+          equityPoint('20241001', 1_000_000),
+          equityPoint('20241001', 1_000_500),
+        ],
+      },
+    ]);
+
+    expect(aligned.curves[0]?.balances).toEqual([1_000_500]);
+  });
+
+  it('余额是 0 时保留 0, 不当成缺失画成断线', () => {
+    const aligned = alignEquitySeries([
+      { label: '清零', points: [equityPoint('20241001', 0)] },
+    ]);
+
+    expect(aligned.curves[0]?.balances).toEqual([0]);
+  });
+
+  it('一条曲线都没有时是零值, 不是 undefined', () => {
+    expect(alignEquitySeries([])).toEqual({ tradingDayLabels: [], curves: [] });
+  });
+
+  it('某一轮一个点都没有时, 它在整根 x 轴上全是 null', () => {
+    const aligned = alignEquitySeries([
+      { label: '空的一轮', points: [] },
+      COARSE_CURVE,
+    ]);
+
+    expect(aligned.curves[0]?.balances).toEqual([null, null]);
+    expect(aligned.curves[1]?.label).toBe('粗网格');
+  });
+
+  it('输出序 = 输入序 (按序号取色与传进来的那一列一一对应)', () => {
+    const aligned = alignEquitySeries([COARSE_CURVE, FINE_CURVE]);
+
+    expect(aligned.curves.map((curve) => curve.label)).toEqual(['粗网格', '细网格']);
+    expect(aligned.curves[0]?.balances).toEqual([null, 1_000_000, null, 999_000]);
   });
 });
 

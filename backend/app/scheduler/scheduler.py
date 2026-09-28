@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from collections.abc import Awaitable, Callable
 
 from sqlalchemy import select, update
 
@@ -32,6 +33,9 @@ SHUTDOWN_GRACE_SECONDS = 10
 
 SCHEDULER_TASK_NAME = "quant-scheduler"
 JOB_TASK_NAME_PREFIX = "quant-job-"
+RETENTION_TASK_NAME = "quant-retention"
+
+RetentionSweep = Callable[[str], Awaitable[None]]
 
 
 class RunScheduler:
@@ -40,9 +44,18 @@ class RunScheduler:
     并发靠**信号量**而不是"数一数现在跑了几个": 后者要先查库再判断, 判断与启动之间还有 await,
     两个循环能同时通过检查. 信号量是同步的把关点, 且它天然把"排队"这件事停在 `queued` 上——
     行没被认领, 列表页看到的就是"排队中"而不是"已开始但没进程".
+
+    `retention_sweep` 是"某一轮落终态之后"的钩子, 参数是**刚结束的那一轮**的运行号. 默认 `None`
+    即不挂任何东西, 于是不关心磁盘清理的调用方 (以及绝大多数用例) 构造出来的调度器行为不变.
     """
 
-    def __init__(self, settings: PlatformSettings, database: PlatformDatabase) -> None:
+    def __init__(
+        self,
+        settings: PlatformSettings,
+        database: PlatformDatabase,
+        *,
+        retention_sweep: RetentionSweep | None = None,
+    ) -> None:
         self._settings = settings
         self._database = database
         self._registry = RunningJobRegistry()
@@ -50,6 +63,9 @@ class RunScheduler:
         self._slots = asyncio.Semaphore(settings.max_concurrent_runs)
         self._wake_signal = asyncio.Event()
         self._job_tasks: set[asyncio.Task[None]] = set()
+        self._job_run_ids: dict[asyncio.Task[None], str] = {}
+        self._retention_sweep = retention_sweep
+        self._retention_task: asyncio.Task[None] | None = None
         self._loop_task: asyncio.Task[None] | None = None
         self._stopping = True
 
@@ -72,11 +88,15 @@ class RunScheduler:
         self._loop_task.add_done_callback(_report_loop_exit)
 
     async def stop(self, timeout_seconds: float = SHUTDOWN_GRACE_SECONDS) -> None:
-        """停循环并等在跑的作业收尾.
+        """停循环、等在跑的作业收尾, 最后收掉保留清理任务.
 
         有界: 停机时限内没跑完的作业会被放掉, 它们的行留在 `running`, 由下次启动的恢复标成
         `interrupted`. 这是设计好的路径, 不是遗漏——为了等一个三十分钟的回测而让后端停不下来,
         比让一行显示"中断"糟糕得多.
+
+        清理任务必须在**这里**收掉 (而不是任它在后台跑): 数据库门面紧接着 `scheduler.stop()`
+        就被关掉, 一个还握着会话的游离任务会在连接释放之后才用上它. 取消点可能落在两次删除之间,
+        故留一次"目录已删、行还在"的半成品——那正是下一次清扫幂等收掉的那一格.
         """
 
         self._stopping = True
@@ -94,6 +114,21 @@ class RunScheduler:
 
         if not await self.wait_until_idle(timeout_seconds):
             logger.warning("停机时限内仍有作业在跑, 它们会在下次启动时被标为中断")
+
+        await self._cancel_retention_sweep()
+
+    async def _cancel_retention_sweep(self) -> None:
+        """取消在跑的保留清理并等它退出."""
+
+        retention_task = self._retention_task
+        self._retention_task = None
+
+        if retention_task is None:
+            return
+
+        retention_task.cancel()
+
+        await asyncio.gather(retention_task, return_exceptions=True)
 
     def wake(self) -> None:
         """催一次派发.
@@ -174,6 +209,7 @@ class RunScheduler:
                 self._runner.execute(handle), name=f"{JOB_TASK_NAME_PREFIX}{run_id}"
             )
             self._job_tasks.add(job_task)
+            self._job_run_ids[job_task] = run_id
             job_task.add_done_callback(self._on_job_task_done)
 
     async def _claim_next_run(self) -> str | None:
@@ -217,7 +253,7 @@ class RunScheduler:
         return candidate_id
 
     def _on_job_task_done(self, job_task: asyncio.Task[None]) -> None:
-        """作业任务结束: 还槽位, 记异常.
+        """作业任务结束: 还槽位, 记异常, 起一次保留清理.
 
         还槽位必须在**这里**, 而不是在 runner 的收尾路径上: 收尾路径有一处在异常下会跳过 (比如
         写库失败), 而槽位一旦漏还, `max_concurrent_runs=1` 时表现为"从此再也不跑了".
@@ -225,15 +261,61 @@ class RunScheduler:
 
         self._job_tasks.discard(job_task)
         self._slots.release()
+        finished_run_id = self._job_run_ids.pop(job_task, None)
 
         if job_task.cancelled():
             logger.warning("作业任务被取消, 其运行行可能未落终态 (由启动恢复兜底)")
+        else:
+            error = job_task.exception()
+
+            if error is not None:
+                logger.error("作业任务以未处理异常结束", exc_info=error)
+
+        if finished_run_id is not None:
+            self._start_retention_sweep(finished_run_id)
+
+    def _start_retention_sweep(self, finished_run_id: str) -> None:
+        """让清理任务游离地跑起来, 绝不 await.
+
+        这一行在**作业任务的完成回调**里, 而回调是事件循环同步调用的: "判"与"建"之间没有 await,
+        故 `_retention_task` 这个单飞护栏在单线程事件循环里就是原子的, 不需要锁.
+
+        `await` 它会拖住槽位释放的那条路径——清理要删目录、要连库, 让它挡在"槽位归还"前面, 等于
+        让磁盘上的历史决定下一个作业什么时候开始跑.
+
+        另起一个而不是在当前任务里做, 也因为回调在**作业任务**的收尾路径上: 在那里抛异常会把一次
+        正常收尾变成"作业任务以未处理异常结束".
+        """
+
+        if self._retention_sweep is None or self._stopping:
             return
 
-        error = job_task.exception()
+        if self._retention_task is not None:
+            return
+
+        self._retention_task = asyncio.create_task(
+            self._retention_sweep(finished_run_id), name=RETENTION_TASK_NAME
+        )
+        self._retention_task.add_done_callback(self._on_retention_task_done)
+
+    def _on_retention_task_done(self, retention_task: asyncio.Task[None]) -> None:
+        """清理任务收尾: 放开单飞护栏, 记异常.
+
+        放护栏必须发生, 否则第一次清扫之后再也不会有第二次. 取 `exception()` 也是必须的——不去
+        取的话, 一个失败的游离任务只在进程退出时抛一句 "Task exception was never retrieved".
+        """
+
+        self._retention_task = None
+
+        if retention_task.cancelled():
+            logger.info("保留清理任务在停机时被取消, 未删完的下次再收")
+            return
+
+        error = retention_task.exception()
 
         if error is not None:
-            logger.error("作业任务以未处理异常结束", exc_info=error)
+            logger.error("保留清理任务以未处理异常结束", exc_info=error)
+
 
 
 def _ensure_subprocess_capable_loop() -> None:
