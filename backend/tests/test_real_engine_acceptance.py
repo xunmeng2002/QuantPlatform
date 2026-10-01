@@ -48,7 +48,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import warnings
 from dataclasses import replace
 from pathlib import Path
 
@@ -150,63 +149,23 @@ STDERR_FILENAME = "stderr.txt"
 # 它的缺席是"这一轮没跑完"的直接证据——来自引擎自己, 不是平台的推断.
 ENGINE_FINISHED_MARKER = "RunResult Written"
 
-# ── 两类别混: 一个是**平台的收成**, 其余是**引擎的下游结果** ──────────────────────
+# ── 常量区: 只留**平台自己的**数字 ─────────────────────────────────────────────
 #
-# `BAR_MARKET_DATA_COUNT` **判红**. 它量的是"引擎**读到了**平台指的那批 bar", 是 `MdDataPath` +
-# `BarPreces` + 起止交易日三者合起来的直接证据, 且**与策略无关** (只由行情范围决定, 不随步长动).
-# 它变了就是平台写错了——这是本文件里唯一能替平台说话的量化断言.
+# `BAR_MARKET_DATA_COUNT` 量的是"引擎**读到了**平台指的那批 bar", 是 `MdDataPath` + `BarPreces` +
+# 起止交易日三者合起来的直接证据, 且**与策略无关** (只由行情范围决定, 不随步长动). 它变了, 就是
+# 平台把递过去的输入写歪了.
+#
+# **这里有意不再记录成交 / 委托 / 余额 / 费用那几个数.** 它们是引擎拿那批 bar 算出来的**下游
+# 结果**, 由策略与行情决定, 不是平台的产出: 换了策略、合约或区间, 它们本就该不一样, 记下来对
+# 别的回测毫无参照价值. 而就这一个场景而言也不划算 —— 引擎二进制、种子库、行情 parquet、策略
+# 文件全在**本仓之外**, 它们任何一个变了数字就变, 平台却没做错任何事. 履历也印证了这点: 那份
+# 记录值 (成交 `34` / 委托 `629` / 两份余额) 自 `ebaaab1` 引入起只被手工重取过一次
+# (`60a67e9`, 网格步长改比例 `84 → 34`)、又过期过一次 (2026-10-01 实跑 `435`, 原因在仓外),
+# **没有一次指向平台缺陷**. 它当初是用来验 "(P3) 作业目录构造与配置渲染没有改变回测结果" 的
+# 脚手架, 那个开发阶段早已结束; 它想验的东西现在由下面的断言**直接**钉着 —— `BarPreces` 两份
+# 配置同值 (静默 0 成交那条失效路径)、运行级字段按 manifest 映射、`DbHost` → `DbPath` 的派生、
+# 预填往返 —— 那些断言的是**契约本身**, 不依赖任何记录值, 也永远不会过期.
 BAR_MARKET_DATA_COUNT = 2928
-
-# 其余几个**只观测不判红**, 一律走 `record_engine_metric`: 它们是引擎拿那批 bar 算出来的下游
-# 结果, 不是平台的产出. 而平台自己产的东西在上面已经逐件钉过 (`BarPreces` 两份配置同值、运行级
-# 字段按 manifest 映射、`DbHost` 派生、预填往返)——全链条都对而下游变了, 只说明**引擎那一侧**
-# 变了, 那不该由本仓的默认套件判红.
-#
-# 2026-10-01 实测即为此例: 成交数在本机是 435 而不是这里记的 34, 而 `BAR_MARKET_DATA_COUNT`
-# 照样对得上; 已证实与平台侧改动无关 (同一用例在 `bbcccac` 的干净工作树上复跑, 同样是 435).
-# 值的来历: 2026-09-26 网格步长由绝对价 `10.0` 改为比例 `0.01` 后重取的实测 (成交 `84 → 34`);
-# 改比例会改变成交密度, 故它们随步长走.
-RECORDED_TRADE_COUNT = 34
-RECORDED_ORDER_COUNT = 629
-
-# **两份余额并存, 各自注明前提**——不要用新的盖掉旧的: 差值恰好是费用三项, 是"引擎行为未变、
-# 只是缺了费率表"这个判断的依据. 用哪一份由用例**自己看盘上的种子库**决定, 不靠猜.
-#
-# 种子库 `BackTestInit.db` **在盘上**: 引擎按它带的费率表收费, 费用三项非 0, 余额是扣费后的.
-# ⚠️ 这份记录值 998951.4506464996 是**旧口径 (绝对步长 10.0, 84 笔成交)**下量的, 与下面那份按
-# 比例步长量出来的余额**不再是同一批输入**, 不可相减; 它留在这里只为记住那个判据 (旧口径下差
-# 425.6393535003 = 420.0 + 4.297395 + 1.3419585). 【**2026-10-01**: 本机种子库**是在盘上**的,
-# 故真正对不上的是下面那一份, 不是这一份——它缺的是"按比例步长重测", 见上行.】
-RECORDED_BALANCE_WITH_SEED_DATABASE = 998951.4506464996
-# 种子库**不在盘上**时: 引擎对它的缺失是优雅降级 (`SimExchange.cpp` 只做 `exists` 检查, 缺失仅
-# Warning + `BasicDataLoaded=false`, 继续跑完), 费用三项退化成 0, 余额因此**高出**费用的总和
-# (旧口径下是 425.6393535; 末位差异来自浮点求和次序, 不是行为差异).
-# 【**2026-10-01**: 本机已不在这个环境里——`BackTestInit.db` 在盘上, 实测 `BasicDataLoaded:
-# true`、佣金 2175.0、余额 996120.90066060156. 这份记录值因此是**过期的**; 未删, 因为它记的是
-# 另一支环境的行为, 换台机器仍可能走到.】
-RECORDED_BALANCE_WITHOUT_SEED_DATABASE = 999257.8562340003
-
-# "缺费率的条数"恰等于成交笔数 (每笔成交都要查一次费率), 故它与 `RECORDED_TRADE_COUNT` 同值.
-# 只在**无种子库**时才对得上——有种子库时费率查得到, 这个数是 0 (本机 2026-10-01 实测即 0).
-RECORDED_MISSING_COMMISSION_COUNT = 34
-
-
-def record_engine_metric(metric_name: str, observed: object, recorded: object) -> None:
-    """把引擎报出的量与仓库里记下的那个数并排写出来; 相同则静默, 不同则记一条 warning.
-
-    **刻意不判红**: 这几个数是引擎的下游结果, 不是平台的产出 (理由见上面常量区). 漂移要看得见
-    ——pytest 每次跑完都把 warnings 汇成一段摘要——但"引擎那一侧变了"不该让本仓的默认套件变红,
-    那会把一个跨仓的集成信号伪装成平台的验收失败, 而真正该红的那条 (平台递错了输入) 反倒被淹没.
-    """
-
-    if observed == recorded:
-        return
-
-    warnings.warn(
-        f"{metric_name} 与仓库记录不符: 观测 {observed!r}, 记录 {recorded!r}"
-        f" (引擎侧变了? 见本文件常量区「平台的收成 vs 引擎的下游结果」那一段)",
-        stacklevel=2,
-    )
 
 # 结果表那一页故意取一个**小于**行数的页大小: 取 100 (上界) 时 `total` 与 `len(records)` 恰好
 # 相等, 于是"`LIMIT` 到底有没有生效"这件事在响应里看不出来——一页装得下全表时, 少绑一个参数
@@ -422,9 +381,9 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
     **平台的 runner** 以裸文件名启动, 结果由**收尾**镜像进库. 任何一环错, 引擎都会在启动期或
     结果文件里留下一处对不上的数.
 
-    **判据分两层, 别混**: 平台的产出 (渲染出的两份配置、`DbHost` 派生、预填往返、读端点与镜像列
-    互证) **判红**; 引擎的下游结果 (成交 / 委托 / 余额 / 缺费率条数) **只观测**, 见常量区那段
-    说明与 `record_engine_metric`.
+    **判据只落在平台的产出上**: 渲染出的两份配置、`DbHost` 派生、预填往返、读端点与镜像列互证.
+    引擎的下游结果 (成交 / 委托 / 余额 / 费用) **一个都不判**——它们由策略与行情决定, 换了场景就
+    该不一样, 记下来只会在仓外的输入变动时误报. 理由与履历见常量区.
     """
 
     async with running_client(real_settings) as (application, client):
@@ -477,32 +436,8 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
     # 被平台写歪, 这个数就动; 它也与策略无关, 故它不动就说明"引擎拿到的确实是平台指的那批数据".
     assert finished.bar_market_data_count == BAR_MARKET_DATA_COUNT
 
-    # 种子库在不在盘上**由本用例自己判定**, 不靠常数猜: 那个文件就在 `REAL_ENGINE_ROOT` 下, 是
-    # 平台这一侧看得见的事实. 用它挑对照记录, "该报哪一套数"才是可复算的.
-    #
-    # ⚠️ 2026-10-01 实测: 本机 `BackTestInit.db` **在盘上**, 于是走的是有种子库那一支 ——
-    # `BasicDataLoaded: true`, 佣金 2175.0, 缺费率条数 0, 与下面那份"无种子库"记录**正相反**.
-    # 那套记录是 2026-09-26 在无种子库时取的, 本机现在不在那个环境里了.
-    seed_database_present = (REAL_ENGINE_ROOT / REAL_SEED_DATABASE_FILENAME).is_file()
-    recorded_balance = (
-        RECORDED_BALANCE_WITH_SEED_DATABASE
-        if seed_database_present
-        else RECORDED_BALANCE_WITHOUT_SEED_DATABASE
-    )
-
-    # 成交/委托/余额/费用与"种子库装没装上"都是**引擎的下游结果**, 只观测不判红 ——
-    # 理由见 `record_engine_metric`.
-    record_engine_metric("成交笔数", finished.trade_count, RECORDED_TRADE_COUNT)
-    record_engine_metric("委托笔数", finished.order_count, RECORDED_ORDER_COUNT)
-    record_engine_metric("余额", finished.balance, recorded_balance)
-    record_engine_metric(
-        "种子库已装载", finished.basic_data_loaded, seed_database_present
-    )
-    record_engine_metric(
-        "缺费率条数",
-        finished.commission_missing_count,
-        0 if seed_database_present else RECORDED_MISSING_COMMISSION_COUNT,
-    )
+    # 成交 / 委托 / 余额 / 费用**不做任何断言**, 连"记录值对照"也不做 —— 理由见常量区.
+    # 这几个数已由平台镜像进 `Runs` 并在运行详情页可见, 不复述.
 
     # `DbHost` 写的是 `./BackTest.db`, 由引擎自己派生成 `BackTest_<RunId>.db`——平台若先拼一份,
     # 这里会变成 `BackTest_<RunId>_<RunId>.db`.
