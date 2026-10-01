@@ -1349,6 +1349,45 @@
   `### ` → `## `）。**下一批已无缓冲**：✅ 区只剩 `D.21` 一份整条可滚，按上一批留下的教训，
   **下次先压缩 R.01 里已完成的复述**。
 
+## D.22 · 2026-09-28 （第二十二批） 引擎侧四个后端收成一条装载路 + Linux 链接补齐
+
+- **跨两仓的一批**（DBAdapters / QuantTrading），**本仓零代码、零文档改动**。四个后端现在
+  **全部**经 `LoadDatabaseBackend` 按配置装载（不再有 DuckDB / SQLite 直连的分叉），平台写入点
+  `SQLITE_DATABASE_TYPE = 1` 仍是合法取值；另把 Linux 那份 `libMysqlWrapper.so` 缺
+  OpenSSL / zlib / resolv 链接修掉 —— **Windows 侧不受影响**（那份 connector 是 SHARED
+  IMPORTED，符号由它自己带），上云的引擎包无变化。
+- **大小账**: 主文件约 **49.9 KB**，已无余量；按 D.21 留下的教训，**下一批开工前先做一次压缩**。
+  （**已办**：D.23 开工前把 `R.01` 的分批复述整块压进归档、`D.18` 短版随"已完成区滚动"移出，
+  主文件回到 **41 KB**。）
+
+## D.24 旁支 · 2026-10-01 真引擎基线漂移的控制实验（行情迁移之外）
+
+- **起因**：`test_real_engine_acceptance.py` 的 `BASELINE_TRADE_COUNT = 34` 实跑得 **435**，
+  连同委托 `629 → 830` 与两份余额记录，一次性把真引擎验收打成 **2 过 2 败**。本旁支要回答的
+  只有一件事：**这是不是 D.24 自己引入的**。
+- **结论：不是**——三条证据同指"平台递过去的输入逐件正确，变的是引擎那一侧"：
+  ① 在**基线提交 `bbcccac` 的干净工作树**上、把行情根换回**旧根 `D:/MdBaoStock`**、跑同一个
+  用例，同样是 `assert 435 == 34` —— **那棵树里一行 D.24 的代码都没有**；
+  ② `BarMarketDataCount = 2928` 两边都对得上（说明引擎读到的确实是平台指的那批 bar：
+  `MdDataPath` + `BarPreces` + 起止交易日三者合起来对）；
+  ③ 平台生成的两份配置逐键正确 —— `BarPreces "5m"`、`StartTradingDay "20241001"`、
+  `EndTradingDay "20241231"`、`InitialCapital 1000000.0`、`GridStep 0.01`、`GridCount 5`。
+- **时间线佐证**：`../QuantTrading/bin/Release` 下那批引擎输入的 mtime 全在 2026-09-17/18
+  （`BackTest.dll` 09-18 19:40、`QuantTrading.cp311-win_amd64.pyd` 09-18 18:08、
+  `grid_strategy.py` 09-18 19:47、`BackTestInit.db` 09-18 00:14），**早于** 2026-09-26 那次
+  重取（`60a67e9`）。目录里没有 `engine-version.txt`，故只能按 mtime 判断。
+- **判据因此被改掉（用户裁定）**：原话是「成交量不是由策略与行情决定的吗？作为平台，只需要
+  展示并分析结果就行了」。据此把成交 / 委托 / 余额 / 缺费率条数 / `BasicDataLoaded` 从**硬断言**
+  降为**观察值**（`record_engine_metric`：不同则记一条 warning，**不判红**），只留
+  `BarMarketDataCount` 与平台自产的那一批（两份配置同值、运行级字段按 manifest 映射、`DbHost`
+  派生、预填往返、读端点与镜像列互证）判红。**记录值一个都没改。**
+- **连带的第二处过期（同日发现）**：本机 `BackTestInit.db` **在盘上**，故实跑走的是"有种子库"
+  那一支 —— `BasicDataLoaded: true`、`TotalCommission: 2175.0`、`CommissionMissingCount: 0`、
+  `Balance: 996120.9006606016`，于是仓库那**两份余额记录的前提都不成立**。用例改为**自己看盘上
+  有没有那个种子库**来挑对照记录（不靠常数猜），这条因此不再造成误判。
+- **未决部分留在主文件**（见 ❓ 段「真引擎验收那批引擎侧记录值要不要重取」）：记录值要不要
+  按本机重取。
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型
