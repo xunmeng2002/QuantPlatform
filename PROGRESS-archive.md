@@ -1360,6 +1360,118 @@
   （**已办**：D.23 开工前把 `R.01` 的分批复述整块压进归档、`D.18` 短版随"已完成区滚动"移出，
   主文件回到 **41 KB**。）
 
+> 归档于 2026-10-01（第二十五批写完后，主文件逼近 50 KB 上限；**短版留在 `PROGRESS.md`**，含两条仍未决的手工验收与已知欠账）。
+> 原文一字未改。
+
+## D.23 · 2026-09-28 （第二十三批） P6 多轮对比与配置模板 + P7 删除与保留清理
+
+- **两期一起做**（用户指定「接着做 P6、P7」）。**P6**：新表 `RunTemplates` + 四个模板端点
+  （`/api/strategies/{id}/run-templates` 的 list / create / rename / delete）、
+  `GET /api/runs/compare?ids=`、前端 `/compare` 页（新组件 `RunComparisonTable` 与
+  `EquityOverlayChart`）与提交页的「配置模板」区（套用 / 存为模板）。**P7**：`DELETE /api/runs/{id}`
+  与**保留清理**（`services/run_retention.py`，默认**关**，`QUANT_RETAINED_RUNS_PER_USER=50`）。
+  **日志轮转不做**——整目录移除天然覆盖 `log/`。设计与拍板逐条见 `platform-plan.md`
+  §9 的「P6/P7 落地范围」与 §13 的 P6/P7 拍板表。
+- **两处搬位置**（HTTP 契约一字不变，按 Harness §3 报备）：`run_submission.py` 的三个校验器与
+  `MAXIMUM_RUN_FIELD_VALUE_LENGTH` → `services/run_configuration.py`（**计划里叫
+  `run_field_values.py`，实施时按"收的是整份运行配置"改名**）；`_resolve_job_directory` 的四道路径
+  判定 → `services/run_storage.py:resolve_run_directory`（读路径只补 `is_dir()` 前置）。删除与保留
+  清理共用同一份守卫与同一个 `ROW_DELETABLE_OUTCOMES`，"什么算删干净了"因此只有一处判据。
+- **一处契约加宽**：`RunSummaryResponse` 增 `params_json`（纯增量），否则对比页看不见"同参不同
+  `GridStep`"差在哪。
+- **验收证据**：后端 **558 项全过**（新增 55 项）；真引擎验收 **4 项全过**（21.7 s）；前端
+  `type-check` 无错 + `vitest` **24 文件 / 204 项全绿** + `build` 成功。**验收句「同参不同 `GridStep`
+  的两轮指标并列且曲线叠加」已由 `test_run_comparison.py` 与 `RunCompareView.spec.ts` 各钉一条。**
+- **仍未决 —— 待用户手工验收**：浏览器与磁盘上的走查（对比页两列并排、模板套用往返、
+  删除后目录消失、开保留策略跑 N+2 轮只剩 N 轮），清单见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §11/§12。
+- **提交状态**：已提交（`32441b1`），49 个文件（31 改 + 18 新）。
+- **顺带订正一处越批文案**：主页「当前边界」卡里"多轮对比与设置页尚未提供"删掉前半句
+  （现为"设置页尚未提供"），页面落地后那句话就不该再挂着。
+
+---
+
+> 归档于 2026-10-01（第二十五批写完后，主文件逼近 50 KB 上限；**短版留在 `PROGRESS.md`**，含两条仍未决的手工验收与已知欠账）。
+> 原文一字未改。
+
+## D.24 · 2026-10-01 （第二十四批） 行情改由 QuoteHub 按需下载落地
+
+- **一批横跨平台与组件两侧的改动**（用户诉求：用户选回测合约，行情由组件下载落地；**下载前先判
+  本地已落地的够不够，不够才下**）。组件锁定为 `D:/Gitee/QuoteHub` —— 不是 QuantTrading
+  `PROGRESS.md:45` 里那个还不存在的 QuantHub。**行情根迁进仓内**：`D:/MdBaoStock` →
+  `<仓根>/market-data/`，**复制而非重下**（逐文件 SHA-256 比对，20 个文件全部一致；现有这份
+  正是真引擎基线 `2928` 证明过的那一份）。**原目录未删**，按 Harness §1 留给用户处置。
+  `.gitignore` 加的是**带前导斜杠**的 `/market-data/`：上面那几条无锚点模式会连同名嵌套目录
+  一起吞掉，行情根只此一个，钉死在仓根这一层。
+- **提交页把合约与 K 线周期改成下拉**：`exchange_id`/`instrument_id` 两个自由文本合成**一个**
+  `ElSelect`（`filterable`，**5207** 只股票 = `StockType='1' AND CurrentTradeStatus='1'`；
+  指数无分钟线、ETF 不是回测标的，都不列），选中时同时拆写那两个字段；`bar_period` 由自由文本
+  收紧为 `5m/15m/30m/60m`。**这不是观感偏好**：组件 CLI 的 `--frequency` 就是这四个（没有 1m、
+  没有 1d），而引擎按 `Preces = '%s'` 过滤 bar，周期与 parquet 文件名后缀必须**逐字一致**，
+  填错的表现是**静默 0 成交**。组件不在位时下拉**禁用并给出原因，不退回自由文本**（那会让用户
+  填出一个永远下不出来的值）。提交时另做一次**预检**并提示缺几天，**只告知、放行照旧**——
+  下载在调度器里做，提交侧不许有副作用。
+- **「够不够」的判据落在 `MinuteBars(Code, Frequency, TradingDay)`**，`expected` 取
+  `TradeDates(IsTradingDay=1)`，`missing = expected − ingested`。**明确不用
+  `MinuteBarTradingDays`**：它**无频率列**，拿它兜底会把「只有 5m 数据、用户要跑 15m」判成够用
+  → 跳过下载 → 引擎过滤得 0 根 bar → 静默 0 成交。实测该表对这三只合约就是**日历年历的副本**
+  （1621 = 1621），连「哪些日真取过」都担不起。
+- **调度侧的准备步骤**：插在 `_run_job` 内、作业目录登记之后、取消检查之前（形状与既有的
+  `JOB_DIRECTORY_FAILURE_MESSAGE` / `HOST_STARTUP_FAILURE_MESSAGE` 一致）；失败走
+  `platform_error_message` 仲裁成 `FAILED`，文案全是固定中文、不带路径。**不新增运行状态**——
+  那要连带改 `enums` / 终态集 / 取消 CAS / 前端徽章筛选，一条横跨四层的回归链。
+  **超时归属改了一处（本批风险最高）**：原来 `asyncio.timeout(run_timeout_seconds)` 在
+  `_execute_job` 里**包住整个 `_run_job`**，把下载放进去会让下载吃掉回测预算，且文案会误导成
+  「策略跑太久」；现把它连同 `except TimeoutError`（含 `job_timeout.expired()` 那道守卫）挪进
+  `_run_job`，只包 `_launch_and_await_exit` 一段，准备步骤自带
+  `market_data_prepare_timeout_seconds`。
+- **一律用 `backfill`，不用 `update`**：`backfill` 直写年度 Parquet，与现有 14 个文件同构；
+  `update` 写日度文件且要「库中最后交易日」续传语义。两者都走 `ingest_stock`，而后者每次都拉
+  整个区间（无「已有则跳过」），故 `backfill` 并不更贵。区间取**缺失日的最小~最大**，不是用户
+  请求的全区间 —— 这是唯一的成本闸。`--output-root` **必须显式传**（CLI 自己的默认值就是旧根
+  `D:/MdBaoStock`），`cwd` 必须在 QuoteHub 目录（它用相对名开库），**绝不 `shell=True`**，
+  两条管道并发读。**整所刷新**：`--codes` = 组件库里下过的全部代码 ∪ 本次选中，**不写组件的
+  任何文件**，平台也不自持合约表（全集从组件库推导，自维护、无漂移）；超过 3000 个合约以明确
+  文案失败，而不是撞成 `CreateProcess` 报错。
+- **复判规则是必需的，不是可选加固**：仍缺但区间内该频率**有**数据 → **放行**并记下缺失日
+  （它们是上游空档：停牌 / 未上市）；仍缺且区间内该频率**零**行 → `FAILED`。没有这条，一个含
+  停牌日的区间会**每次**都触发整所重下、永不收敛。以「零 vs 非零」为界，不引入任何可调阈值。
+- **三处偏离计划（报备）**：① `/contracts` 响应里那个 `frequencies` 字段**删了** —— 受支持的
+  周期不来自组件，是平台自己的常量，双方各持一份有注释相互指认的镜像即可，挂在那儿只会多一个
+  没人读的字段；② 只映射了 `exchange_id`/`instrument_id` **之一**的策略**跳过**行情准备
+  （早退 `READY`），而不是按计划判成 `MARKET_DATA_CONTRACT_UNRESOLVED_MESSAGE` —— 该常量不存在，
+  因为把它当错误会**打断每一个没做映射的策略**；③ 验收用例的 `quote_hub_root` 钉在一个
+  **覆盖 1990–2099 的桩组件**上，而不是计划写的「不存在的路径」—— 桩不在位时，凡映射了合约的
+  轮都会以「行情组件不在位」失败，而那正是该用例要跑的那条路。
+- **验收证据**：后端 **620 项全过**（此前 607 过 / 4 败，那 4 项是既有失败，见下条）；前端
+  `type-check` 无错 + `vitest` **213 项全过**（早前一次全量运行里 `router/index.spec.ts` 有 1 项
+  跨文件顺序 flake——单独跑 9 项全绿、重跑也全绿，是既有问题，与本批无关）。真引擎验收
+  **4 项全过、零 warning**；**判据只落在平台的产出上**（两份配置、`DbHost` 派生、预填往返、
+  读端点与镜像列互证、`BarMarketDataCount`），引擎的下游结果（成交 / 委托 / 余额 / 费用 /
+  `BasicDataLoaded`）**记录值整个删掉**——理由与它四个月的履历见归档「D.24 旁支」。
+  另在**不联网**的前提下实测确认：`SSE/600519` 5m 2024 全年判「够用」且**零子进程**；
+  同一合约请求 15m/30m/60m 一律判「不够」（**杀频率盲回归**，本批最关键的一条）。
+- **顺带修掉 4 项既有失败**（`tests/test_engine_probe.py`）：它把 `.pyd` 名字**硬编码**成
+  `cp314`，改成从探针自己的常量 + `interpreter_tag()` 推导后 12 项全绿；**它同时证了本机是
+  3.11.1 / cp311**，见备注的「环境锁定」。
+- **另修一处真引擎验收的 flake（同日，独立问题）**：`tests/run_helpers.py:read_job_text` 严格按
+  UTF-8 解码作业目录里的文本，而引擎宿主是 C++、stdout 不保证 UTF-8，且进程被 kill 时最后一个
+  多字节字符可能**只写了一半**——实测**6 次复现 1 次**，超时用例在 `read_text` 上抛
+  `UnicodeDecodeError`（**不是**断言失败，看着像"文件没写出来"，极易误判成 kill 没停住）。
+  改为 `errors="replace"`：断言看的是 ASCII 哨兵行，判据不受影响。修后连跑 6 次全绿。
+- **提交状态**：D.24 本体 `51427eb`（30 个文件）；同日**判据改法两笔** —— `bd466cc`（降为观察值 +
+  `read_job_text` 解码加固）与 `93d1998`（**删掉记录值**：用户复问「这些值到底用来干嘛的」后拍板
+  用不上，整个删）——「验收证据」与「另修一处 flake」两条写的就是它俩。
+- **仍未决 —— 待用户手工验收**：真组件 + 联网的端到端（计划验证 #2「新合约触发真 `backfill`
+  且**不挤掉**已下过的 `600000`/`600519`」是防「静默挤掉」的验收句，必须钉死；#6「提交页列出
+  5207 只且能按名称搜到」）。**另有三处已知欠账**：`market_data_prepare_timeout_seconds` 默认
+  **3600 是拍的**，未经实测外推（整所 `backfill` 要为区间内每个成员联网重取，耗时是最大未知）；
+  含停牌日的区间会**重复下载**（功能正确但费力，要收敛得另立"已确认上游无数据"的记账，那要写
+  状态）；`docs/strategy-manifest.md:16` 的「84 笔成交」是旧口径 —— 现已无基线可对，它就是个
+  举例用的数字，**改不改都不影响判据**，随手订正即可。
+
+---
+
 ## D.24 旁支 · 2026-10-01 真引擎基线漂移的控制实验（行情迁移之外）
 
 - **起因**：`test_real_engine_acceptance.py` 的 `BASELINE_TRADE_COUNT = 34` 实跑得 **435**，
