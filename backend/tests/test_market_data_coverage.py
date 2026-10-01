@@ -1,8 +1,9 @@
 """「本地已落地的行情够不够这一轮用」的判定表.
 
-这里每一条都对应一种**判错就静默跑出零结果**的情形, 故判定表要穷举而不是抽两三条. 上半部分
-测纯逻辑 (输入是两个交易日集合), 下半部分用一张**最小可用的桩库**测事实的读取: 真库有 40 MB,
-而这里要验的只是"取哪张表、过滤哪几列".
+这里每一条都对应一种**判错就白跑一轮**的情形——把"本地没有"判成"有", 于是跳过下载, 引擎到装载
+期才发现没有行情并以失败收场. 故判定表要穷举而不是抽两三条. 上半部分测纯逻辑 (输入是两个交易
+日集合), 下半部分用一张**最小可用的桩库**测事实的读取: 真库有 40 MB, 而这里要验的只是"取哪张
+表、过滤哪几列".
 
 桩库的列名与 `quote_hub.EXPECTED_SCHEMA_COLUMNS` 是同源约定, 故它不是"随手画的一张表"——它
 变了, 那套 schema 断言也该跟着变.
@@ -171,20 +172,6 @@ def test_splitting_and_rebuilding_a_contract_code() -> None:
     assert quote_hub.build_contract_code("NYSE", "600519") is None
 
 
-@pytest.mark.parametrize(
-    ("bar_period", "frequency"),
-    [("5m", "5"), ("15m", "15"), ("30m", "30"), ("60m", "60")],
-)
-def test_supported_bar_periods_round_trip(bar_period: str, frequency: str) -> None:
-    assert quote_hub.bar_period_to_frequency(bar_period) == frequency
-    assert quote_hub.frequency_to_bar_period(frequency) == bar_period
-
-
-@pytest.mark.parametrize("bar_period", ["1m", "1d", "5", "5min", ""])
-def test_unsupported_bar_periods_are_rejected(bar_period: str) -> None:
-    assert quote_hub.bar_period_to_frequency(bar_period) is None
-
-
 def test_calendar_days_are_converted_in_both_directions() -> None:
     assert quote_hub.format_component_day("20241231") == "2024-12-31"
     assert quote_hub.format_platform_day("2024-12-31") == "20241231"
@@ -247,11 +234,15 @@ def quote_hub_root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_frequency_blind_coverage_is_not_enough(quote_hub_root: Path) -> None:
-    """**只有 5m 数据、用户要跑 15m 时必须判不够**.
+def test_coverage_facts_are_read_for_one_frequency_only(quote_hub_root: Path) -> None:
+    """事实按**具体频率**读: 换一档库里没有的, 那一档就是零覆盖.
 
-    这一条是本次改动里最关键的回归闸: 拿一张没有频率列的按日记账表来判, 这里会判成"已覆盖",
-    于是跳过下载、引擎过滤后得 0 根 bar、**静默 0 成交**.
+    这一条钉在函数一级, 记的是"`MinuteBars` 的 `Frequency` 列是判据的一部分": 少了这一列, 判据
+    会把"别的周期有数据"读成"这个周期有数据", 于是跳过下载, 引擎到装载期才发现没有行情.
+
+    平台只问**落盘精度**那一档 (`MARKET_DATA_PRECISION_FREQUENCY`), 用户的订阅周期不进这条路
+    ——它只决定引擎在运行时把 5m 聚合成多粗的 bar. 故这里构造的"15 分钟"不是平台会问的一种取值,
+    而是用来证明频率确实参与了判据.
     """
 
     facts = quote_hub.read_coverage_facts(

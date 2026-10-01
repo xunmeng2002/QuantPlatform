@@ -7,13 +7,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { LastSubmittedParameters, RunTemplate, StrategyManifest } from '../api/types';
+import type { LastSubmittedParameters, RunTemplate } from '../api/types';
+import type { StrategyConfigurationTemplate } from '../api/types';
 import {
   createInitialParameterInputs,
   deriveParameterDescriptors,
   deriveParameterValues,
-} from './manifest';
-import type { ParameterInput, RunFieldRequirements } from './manifest';
+} from './strategy-configuration';
+import type { ParameterInput } from './strategy-configuration';
 import {
   BLANK_TEMPLATE_NAME_MESSAGE,
   EMPTY_RUN_FIELDS,
@@ -25,37 +26,13 @@ import {
   validateRunForm,
 } from './run-form';
 import type { RunFieldInputs, RunFormInput } from './run-form';
-const UNMAPPED_RUN_FIELDS: RunFieldRequirements = {
-  barPeriod: true,
-  exchangeId: false,
-  instrumentId: false,
-};
 
-const MAPPED_RUN_FIELDS: RunFieldRequirements = {
-  barPeriod: true,
-  exchangeId: true,
-  instrumentId: true,
-};
-
-/** 四种参数类型各一个, 用来验"存模板 → 套用"这条往返路不丢类型. */
-const ROUND_TRIP_MANIFEST: StrategyManifest = {
-  entry_filename: 'StrategyMain.py',
-  config_filename: 'BackTest.json',
-  supported_match_modes: ['Bar'],
-  params: [
-    { key: 'GridStep', label: '网格步长', type: 'number', default: 0.01 },
-    { key: 'TradeVolume', label: '单笔手数', type: 'integer', default: 100 },
-    { key: 'UseStopLoss', label: '启用止损', type: 'boolean', default: false },
-    {
-      key: 'Mode',
-      label: '模式',
-      type: 'string',
-      options: [
-        { value: 'fast', label: '快' },
-        { value: 'slow', label: '慢' },
-      ],
-    },
-  ],
+/** 三种参数取值类型各一个, 用来验"存模板 → 套用"这条往返路不丢类型. */
+const ROUND_TRIP_TEMPLATE: StrategyConfigurationTemplate = {
+  GridStep: 0.01,
+  TradeVolume: 100,
+  UseStopLoss: false,
+  AccountId: '模板占位账号',
 };
 
 function buildFormInput(overrides: Partial<RunFormInput> = {}): RunFormInput {
@@ -63,15 +40,13 @@ function buildFormInput(overrides: Partial<RunFormInput> = {}): RunFormInput {
     strategyId: 'strategy-1',
     strategyVersionId: 'version-1',
     matchMode: 'Bar',
-    isMatchModeSupported: true,
-    runFieldRequirements: UNMAPPED_RUN_FIELDS,
     barPeriod: '5m',
-    exchangeId: '',
-    instrumentId: '',
+    exchangeId: 'SSE',
+    instrumentId: '600519',
     startTradingDay: '20240102',
     endTradingDay: '20241231',
     initialCapitalText: '100000',
-    parameterValues: { period: 5 },
+    parameterValues: { GridStep: 0.01 },
     ...overrides,
   };
 }
@@ -87,8 +62,10 @@ function readErrors(input: RunFormInput): Record<string, string> {
 }
 
 describe('validateRunForm 的正向路径', () => {
-  it('未映射 exchange/instrument 时, payload 里是 null 而不是空串', () => {
-    const validation = validateRunForm(buildFormInput());
+  it('两个合约字段都带上, 且前后空白去掉', () => {
+    const validation = validateRunForm(
+      buildFormInput({ exchangeId: ' SSE ', instrumentId: '600519 ' }),
+    );
 
     expect(validation.ok).toBe(true);
     expect(validation.ok && validation.payload).toEqual({
@@ -96,26 +73,13 @@ describe('validateRunForm 的正向路径', () => {
       strategy_version_id: 'version-1',
       match_mode: 'Bar',
       bar_period: '5m',
-      exchange_id: null,
-      instrument_id: null,
+      exchange_id: 'SSE',
+      instrument_id: '600519',
       start_trading_day: '20240102',
       end_trading_day: '20241231',
       initial_capital: 100000,
-      params: { period: 5 },
+      params: { GridStep: 0.01 },
     });
-  });
-
-  it('映射了就带上这两个字段, 前后空白去掉', () => {
-    const validation = validateRunForm(
-      buildFormInput({
-        runFieldRequirements: MAPPED_RUN_FIELDS,
-        exchangeId: ' SHFE ',
-        instrumentId: 'rb2405',
-      }),
-    );
-
-    expect(validation.ok && validation.payload.exchange_id).toBe('SHFE');
-    expect(validation.ok && validation.payload.instrument_id).toBe('rb2405');
   });
 
   it('没有选版本时 version 字段是 null, 由后端取最新版本', () => {
@@ -126,19 +90,17 @@ describe('validateRunForm 的正向路径', () => {
 });
 
 describe('validateRunForm 的必填与格式', () => {
-  it('没选策略 / 选中的版本不支持该行情模式', () => {
+  it('没选策略当场报错', () => {
     expect(readErrors(buildFormInput({ strategyId: '' })).strategy_id).toBe('请选择策略');
-    expect(
-      readErrors(buildFormInput({ isMatchModeSupported: false })).strategy_id,
-    ).toBe('该策略不支持 Bar 行情模式');
   });
 
-  it('bar_period 与 manifest 的映射无关, 恒必填', () => {
+  it('bar_period 恒必填', () => {
     expect(readErrors(buildFormInput({ barPeriod: '   ' })).bar_period).toBe('不能为空');
   });
 
   it('bar_period 只收清单内的周期, 清单外的取值当场挡下', () => {
-    // `1d` 与 `1m` 是行情组件根本没有的周期: 提交出去不会报错, 只会按一个空文件过滤出零根 bar.
+    // `1d` 与 `1m` 是引擎聚合不出来的周期: 提交出去不会静默零成交, 但整轮会在装载期被拒 —— 那时
+    // 已经白跑了一轮, 故在这里就挡住.
     for (const unsupported of ['1d', '1m', '5', '5M', 'daily']) {
       expect(readErrors(buildFormInput({ barPeriod: unsupported })).bar_period).toBe(
         '只能是 5m / 15m / 30m / 60m',
@@ -146,42 +108,20 @@ describe('validateRunForm 的必填与格式', () => {
     }
   });
 
-  it('映射了却没填 / 没映射但填了', () => {
-    expect(
-      readErrors(buildFormInput({ runFieldRequirements: MAPPED_RUN_FIELDS })).exchange_id,
-    ).toBe('不能为空');
-
-    // 没映射而填了: 后端回「该策略未映射 exchange_id」, 故这里也不放行 —— 但不是报错, 是不发送.
-    const validation = validateRunForm(
-      buildFormInput({ exchangeId: 'SHFE', instrumentId: 'rb2405' }),
-    );
-
-    expect(validation.ok && validation.payload.exchange_id).toBeNull();
-    expect(validation.ok && validation.payload.instrument_id).toBeNull();
+  it('合约与交易所恒必填: 平台按固定键名覆写它们, 没有"这个策略不用合约"这回事', () => {
+    expect(readErrors(buildFormInput({ exchangeId: '' })).exchange_id).toBe('不能为空');
+    expect(readErrors(buildFormInput({ instrumentId: '  ' })).instrument_id).toBe('不能为空');
   });
 
   it('运行级字段的超长与控制字符都在本地挡住', () => {
     const tooLong = 'a'.repeat(MAXIMUM_RUN_FIELD_VALUE_LENGTH + 1);
 
-    // 这两条只落在自由文本的那两格上: 周期已经收成下拉, 长度与字符那两条对它不再适用.
-    expect(
-      readErrors(
-        buildFormInput({
-          runFieldRequirements: MAPPED_RUN_FIELDS,
-          exchangeId: tooLong,
-          instrumentId: '600519',
-        }),
-      ).exchange_id,
-    ).toBe(`不得超过 ${MAXIMUM_RUN_FIELD_VALUE_LENGTH} 个字符`);
-    expect(
-      readErrors(
-        buildFormInput({
-          runFieldRequirements: MAPPED_RUN_FIELDS,
-          exchangeId: 'SSE\u0007',
-          instrumentId: '600519',
-        }),
-      ).exchange_id,
-    ).toBe('不得含控制字符');
+    expect(readErrors(buildFormInput({ exchangeId: tooLong })).exchange_id).toBe(
+      `不得超过 ${MAXIMUM_RUN_FIELD_VALUE_LENGTH} 个字符`,
+    );
+    expect(readErrors(buildFormInput({ exchangeId: 'SSE\u0007' })).exchange_id).toBe(
+      '不得含控制字符',
+    );
   });
 
   it('交易日是 8 位数字, 且开始不得晚于结束', () => {
@@ -235,11 +175,7 @@ describe('buildTemplateDraft', () => {
   it('取值整套从提交 payload 上抄, 模板名去空白', () => {
     const result = buildTemplateDraft(
       '  网格默认  ',
-      buildFormInput({
-        runFieldRequirements: MAPPED_RUN_FIELDS,
-        exchangeId: 'SHFE',
-        instrumentId: 'rb2405',
-      }),
+      buildFormInput({ exchangeId: 'SZSE', instrumentId: '000001' }),
     );
 
     expect(result).toEqual({
@@ -248,21 +184,14 @@ describe('buildTemplateDraft', () => {
         name: '网格默认',
         match_mode: 'Bar',
         bar_period: '5m',
-        exchange_id: 'SHFE',
-        instrument_id: 'rb2405',
+        exchange_id: 'SZSE',
+        instrument_id: '000001',
         start_trading_day: '20240102',
         end_trading_day: '20241231',
         initial_capital: 100000,
-        params: { period: 5 },
+        params: { GridStep: 0.01 },
       },
     });
-  });
-
-  it('没映射的运行级字段存 null, 不存空串', () => {
-    const result = buildTemplateDraft('默认', buildFormInput());
-
-    expect(result.ok && result.draft.exchange_id).toBeNull();
-    expect(result.ok && result.draft.instrument_id).toBeNull();
   });
 
   it('提交不出去的表单存不成模板, 报的是 validateRunForm 那套说法', () => {
@@ -308,13 +237,13 @@ describe('buildTemplateDraft', () => {
   });
 
   it('存下来的参数能原样填回控件 (往返回同一条控件路径)', () => {
-    const descriptors = deriveParameterDescriptors(ROUND_TRIP_MANIFEST);
-    // 控件给出来的原始输入: 数值是字符串, 有选项的参数是**选项下标** (`coerceParameterInput` 的契约).
+    const descriptors = deriveParameterDescriptors(ROUND_TRIP_TEMPLATE);
+    // 控件给出来的原始输入: 数值是字符串, 布尔量是布尔.
     const parameterInputs: Record<string, ParameterInput> = {
       GridStep: '0.01',
       TradeVolume: '100',
       UseStopLoss: false,
-      Mode: '1',
+      AccountId: '真实账号',
     };
     const derivation = deriveParameterValues(descriptors, parameterInputs);
     const result = buildTemplateDraft(
@@ -324,12 +253,12 @@ describe('buildTemplateDraft', () => {
       }),
     );
 
-    // 存进去的是引擎取值 (`0.01` 而不是 `"0.01"`), 与 `Runs.ParamsJson` 同形同义.
+    // 存进去的是 JSON 取值 (`0.01` 而不是 `"0.01"`), 与 `Runs.ParamsJson` 同形同义.
     expect(result.ok && result.draft.params).toEqual({
       GridStep: 0.01,
       TradeVolume: 100,
       UseStopLoss: false,
-      Mode: 'slow',
+      AccountId: '真实账号',
     });
 
     // 套用时走的还是 `createInitialParameterInputs`, 故原始输入能一位不差地回来.
@@ -359,9 +288,7 @@ describe('buildPrefilledRunFields', () => {
   }
 
   it('记忆里的运行级字段填进来, 数值原样成文本', () => {
-    expect(
-      buildPrefilledRunFields(buildPrefill(), MAPPED_RUN_FIELDS, EMPTY_RUN_FIELDS),
-    ).toEqual({
+    expect(buildPrefilledRunFields(buildPrefill(), EMPTY_RUN_FIELDS)).toEqual({
       barPeriod: '30m',
       exchangeId: 'SZSE',
       instrumentId: '000001',
@@ -390,10 +317,8 @@ describe('buildPrefilledRunFields', () => {
       updated_at: '2026-09-26T03:00:00',
     };
 
-    expect(
-      buildPrefilledRunFields(template, MAPPED_RUN_FIELDS, EMPTY_RUN_FIELDS),
-    ).toEqual(
-      buildPrefilledRunFields(buildPrefill(), MAPPED_RUN_FIELDS, EMPTY_RUN_FIELDS),
+    expect(buildPrefilledRunFields(template, EMPTY_RUN_FIELDS)).toEqual(
+      buildPrefilledRunFields(buildPrefill(), EMPTY_RUN_FIELDS),
     );
   });
 
@@ -407,7 +332,7 @@ describe('buildPrefilledRunFields', () => {
       initialCapitalText: '500000',
     };
 
-    expect(buildPrefilledRunFields(null, MAPPED_RUN_FIELDS, current)).toEqual(current);
+    expect(buildPrefilledRunFields(null, current)).toEqual(current);
   });
 
   it('单项读不动时只丢那一项, 其余照填', () => {
@@ -417,9 +342,7 @@ describe('buildPrefilledRunFields', () => {
       initial_capital: 0,
     });
 
-    expect(
-      buildPrefilledRunFields(prefill, MAPPED_RUN_FIELDS, EMPTY_RUN_FIELDS),
-    ).toEqual({
+    expect(buildPrefilledRunFields(prefill, EMPTY_RUN_FIELDS)).toEqual({
       barPeriod: '30m',
       exchangeId: 'SZSE',
       instrumentId: '000001',
@@ -429,64 +352,44 @@ describe('buildPrefilledRunFields', () => {
     });
   });
 
-  it('未声明映射的运行级字段不预填: 那两个输入框根本不渲染', () => {
-    expect(
-      buildPrefilledRunFields(buildPrefill(), UNMAPPED_RUN_FIELDS, EMPTY_RUN_FIELDS),
-    ).toEqual({
-      barPeriod: '30m',
-      exchangeId: '',
-      instrumentId: '',
-      startTradingDay: '20220104',
-      endTradingDay: '20221230',
-      initialCapitalText: '250000',
-    });
-  });
-
   it('读不动的取值按运行级字段那套判据挡下', () => {
     // 旧的一份记忆里可能存着组件根本没有的周期 (界面以前是自由文本), 它不该被填进下拉框.
-    expect(
-      buildPrefilledRunFields(
-        buildPrefill({ bar_period: '1d' }),
-        MAPPED_RUN_FIELDS,
-        EMPTY_RUN_FIELDS,
-      ).barPeriod,
-    ).toBe('');
+    expect(buildPrefilledRunFields(buildPrefill({ bar_period: '1d' }), EMPTY_RUN_FIELDS).barPeriod).toBe(
+      '',
+    );
 
     expect(
-      buildPrefilledRunFields(
-        buildPrefill({ exchange_id: 'SSE\u0007' }),
-        MAPPED_RUN_FIELDS,
-        EMPTY_RUN_FIELDS,
-      ).exchangeId,
+      buildPrefilledRunFields(buildPrefill({ exchange_id: 'SSE\u0007' }), EMPTY_RUN_FIELDS)
+        .exchangeId,
     ).toBe('');
   });
 });
 
 describe('buildCoverageQuery', () => {
-  it('五格都成型时才给出预检查询, 取值去空白', () => {
+  it('四格都成型时才给出预检查询, 取值去空白', () => {
     expect(
       buildCoverageQuery(
-        buildFormInput({
-          runFieldRequirements: MAPPED_RUN_FIELDS,
-          barPeriod: ' 15m ',
-          exchangeId: 'SSE',
-          instrumentId: '600519',
-        }),
+        buildFormInput({ exchangeId: ' SSE ', instrumentId: '600519 ' }),
       ),
     ).toEqual({
       exchange_id: 'SSE',
       instrument_id: '600519',
-      bar_period: '15m',
       start_trading_day: '20240102',
       end_trading_day: '20241231',
     });
   });
 
+  it('问的是"本地有没有那段日期", 与用户选的订阅周期无关', () => {
+    // 落盘只有 5m 一档, 换订阅周期不改变"数据在不在" —— 查询里因此没有 bar_period 这一格.
+    expect(buildCoverageQuery(buildFormInput({ barPeriod: '' }))).toEqual(
+      buildCoverageQuery(buildFormInput({ barPeriod: '60m' })),
+    );
+  });
+
   it('缺任何一格都问不出结果, 于是回 null', () => {
     const incomplete: Partial<RunFormInput>[] = [
-      { barPeriod: '' },
-      { runFieldRequirements: MAPPED_RUN_FIELDS, exchangeId: '' },
-      { runFieldRequirements: MAPPED_RUN_FIELDS, instrumentId: '' },
+      { exchangeId: '' },
+      { instrumentId: '' },
       { startTradingDay: '' },
       { endTradingDay: '2024-12-31' },
     ];
@@ -500,17 +403,6 @@ describe('buildCoverageQuery', () => {
     expect(
       buildCoverageQuery(
         buildFormInput({ startTradingDay: '20241231', endTradingDay: '20240102' }),
-      ),
-    ).toBeNull();
-  });
-
-  it('manifest 只映射了一个键时不问: 拼不出组件主键, 判不了本地够不够', () => {
-    expect(
-      buildCoverageQuery(
-        buildFormInput({
-          runFieldRequirements: { barPeriod: true, exchangeId: true, instrumentId: false },
-          exchangeId: 'SSE',
-        }),
       ),
     ).toBeNull();
   });

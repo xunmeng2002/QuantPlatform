@@ -232,13 +232,14 @@ Strategies(
 -- 策略版本：留档，append-only，永不改写
 StrategyVersions(
   Id PK, StrategyId FK, VersionNo,
-  EntryFilename,   -- 入口文件名，如 grid_strategy.py
-  ConfigFilename,  -- 策略配置文件名，如 TestStrategyGrid.json
-  ManifestJson,    -- 参数 schema + 支持的行情模式
-  SourceHash,      -- sha256，兼作内容寻址
+  EntryFilename,        -- 上传的 .py 裸文件名，如 grid_strategy.py
+  ConfigFilename,       -- 上传的 .json 裸文件名，如 TestStrategyGrid.json
+  ConfigurationJson,    -- 策略配置模板原文；NULL = 改形态之前的旧版本
+  ManifestJson,         -- **历史列**，改形态后恒为空串，见 §7.2
+  SourceHash,           -- sha256，兼作内容寻址
   StoragePath, UploadedAt, UploadedByUserId FK->Users,
   UNIQUE(StrategyId, VersionNo)
-  -- 判重的键是 (SourceHash, ManifestJson) 两列，不加约束，见 §6 修订 ②
+  -- 判重的键是 (SourceHash, ConfigurationJson) 两列，不加约束，见 §6 修订 ②
 )
 
 -- 策略授权：多对多（共享）
@@ -296,10 +297,12 @@ Runs(
    与上传落盘是两件事，混在一批里改，出问题时分不清是哪半边。
 
 ② **`UNIQUE(StrategyId, SourceHash)` 撤销**。版本判重的键改为
-   `(SourceHash, ManifestJson)` 这一对：同一份源码配不同 manifest（改了入口
-   文件名、或增删了参数）是一份**新**版本。只钉 `SourceHash` 会把这种上传挡成
-   完整性冲突，逼用户"改参数必须连源码一起改"——荒谬。判重挪到服务层做，
+   `(SourceHash, ConfigurationJson)` 这一对：同一份源码配不同配置模板（改了参数、
+   或换了入口文件名）是一份**新**版本。只钉 `SourceHash` 会把这种上传挡成
+   完整性冲突，逼用户"改配置必须连源码一起改"——荒谬。判重挪到服务层做，
    那里判错也只是多一个目录，不伤完整性；`(StrategyId, VersionNo)` 仍是硬约束。
+   （该列原叫 `ManifestJson`，2026-10-01 改形态时另起 `ConfigurationJson`，
+   见 §7.2。）
 
 ③ **`UNIQUE(OwnerUserId, Name)` 改成部分唯一索引**（`WHERE DeletedAt IS NULL`）。
    整表唯一会连已删策略的名字一起占住，而列表页与详情页都不再显示这条记录——
@@ -315,90 +318,90 @@ Runs(
 
 ### 7.1 上传形态
 
-- **上传 `.py` 为必需**；manifest 可在网页表单填写，或上传 `manifest.json` 导入。
-  两条路都落到 `strategy_versions.manifest_json`，故不必二选一。
+- **两份文件，都是必需**：策略源码 `.py`，以及**它在启动时真正去读的那份配置** `.json`。
+  multipart 两个文件部件（`source` / `configuration`）——配置模板必须带自己的文件名，
+  而纯文本字段没有名字，作业目录里要按这个名字生成它。
 - **不收 zip**：解压要逐条校验路径防 zip-slip，为一个单文件场景引入一整类
   漏洞面不划算。多文件策略（辅助模块）需要时再评估。
-- 上传即建一个 `strategy_versions` 版本。`(source_hash, manifest_json)` 与
-  该策略下**任一既有**版本相同则复用该版本，不重复占盘
-  （**内容未变不产生新版本号**）。判重比的是"任一既有版本"而非"最新版本"：
-  改了参数又改回去，就该命中那个老版本——版本号要能表达"内容变过几次"，
-  不是"上传过几次"。
-- **上传编码用 multipart**（`UploadFile`），`.py` 作文件部件，manifest 作一个
-  文本字段：前端既可填表单，也可读入一份 `manifest.json` 再灌进同一字段，
-  两条路落到同一处，服务端只有一条路径。Starlette 解析该编码需要
-  `python-multipart`，已入 `requirements.txt`。
+- 两个文件名都必须是**裸文件名**且各带后缀（`.py` / `.json`），校验在
+  `app/strategy_configuration.py`——纯函数，不碰库也不碰盘。见 §7.2。
+- 上传即建一个 `strategy_versions` 版本。`(source_hash, configuration_json)` 与该策略下
+  **任一既有**版本相同则复用该版本，不重复占盘（**内容未变不产生新版本号**）。
+  判重比的是"任一既有版本"而非"最新版本"：改了参数又改回去，就该命中那个老版本——
+  版本号要能表达"内容变过几次"，不是"上传过几次"。
 
-### 7.2 manifest 内容
+### 7.2 策略配置模板
 
-> **2026-09-27 增补**：本节是 manifest 的**实现口径**（平台怎么读它）。策略作者要的那份
-> 「怎么填、哪里容易踩坑、文件放哪」在 [`strategy-manifest.md`](strategy-manifest.md)，
-> 配一份可直接用的 [`strategy-manifest.example.json`](strategy-manifest.example.json)。
+> **2026-10-01 改形态**：本节取代原「manifest 内容」。策略作者那一份说明见
+> [`strategy-configuration.md`](strategy-configuration.md)，配一份可直接用的
+> [`strategy-configuration.example.json`](strategy-configuration.example.json)。
 
-| 字段 | 说明 |
+**那份配置 JSON 的键就是参数**：每个键在提交页渲染一个控件，**键集由文件固定**，不可增删。
+平台不认识任何参数声明——没有标题、没有范围、没有可选项、没有分组，**参数合法性由策略自己守**。
+
+| 事项 | 口径 |
 | ---- | ---- |
-| `entry_filename` | 入口文件名，决定 job 目录里的裸文件名与 `argv[0]` |
-| `config_filename` | 策略配置文件名，平台据此渲染参数并写出该文件 |
-| `supported_match_modes` | 该策略**声明**支持的行情模式，`Bar` / `Tick` |
-| `run_field_keys` | 运行级字段在策略配置里的键名，见下 |
-| `params` | 参数列表：键 / 标签 / 类型 / 默认值 / 范围 / 枚举 |
+| 控件形态 | 按该键**当前取值的 JSON 类型**：布尔 / 数值 / 字符串 |
+| 初值 | 文件里该键的取值 |
+| 渲染 | 模板 + 用户编辑 + **覆写**三个运行级键 |
+| 键集 | 不可增删；提交只改值 |
 
-**`params` 的 schema 已于 2026-09-25（P3 开工前）定案**（原为 ❓，已结清）：
+**三个运行级键**由平台覆写，键名固定，与引擎自带的 `Configs/TestStrategyGrid.json`
+同拼写：`ExchangeId`（`SSE` / `SZSE`）、`InstrumentId`、`BarPreces`（**引擎侧既有拼写，
+非笔误**，见 §12）。模板里没有就新增，有就覆写；它们**不进参数区**——参数区再给一次，
+只会让用户以为改得动。
 
-| 字段 | 必填 | 说明 |
-| ---- | ---- | ---- |
-| `key` | ✅ | 非空、≤64、`^[A-Za-z0-9_.-]+$`、同 manifest 内互不重复 |
-| `label` | | 界面显示名，缺省回落 `key` |
-| `type` | | `integer` / `number` / `string` / `boolean`，缺省 `string` |
-| `default` | | **缺省即"提交方必须给出"**——不另设 `required` 标志 |
-| `minimum` / `maximum` | | 仅 `integer` / `number` 允许 |
-| `options` | | `[{"value": …, "label": …}]`，出现时取值必须落在其中 |
-| `group` | | 分组名，纯供前端表单分区 |
+**形状约束只有四条**（键数 ≤ 200、键名 ≤ 64 字符且非空、UTF-8 文本 ≤ 64 KiB、
+不得含 `NaN` / `Infinity` / `-Infinity`），都与"表单能不能渲染"直接相关：一个键一个控件，
+而键名是那格控件的唯一标识。顶层必须是 JSON 对象——数组或标量渲染不出任何控件，却照样会被
+原样写进策略配置（`app/strategy_configuration.py:parse_configuration_template`）。
+非有限数那一类不能省：`json.loads` 默认收下这几个**非 JSON 字面量**，落进配置后引擎读到的
+是一个不可比的数——那一轮结果再怎么看都正常，只是永远算不对。
 
-- **为什么不设 `required`**：`required: true` 配 `default: 10` 是自相矛盾的组合，
-  而"没有 `default` 就必须提交"已完整表达同一件事，且**写不出矛盾组合**。
-- **为什么 `options` 不限类型**：`type=string + options`（周期）与
-  `type=integer + options`（从 {1,5,10} 里选格数）都是真实需求，故 `options`
-  是任何类型都可挂的约束，每项 `value` 按 `type` 校验。
-- **默认值与提交值走同一个校验函数**，否则会出现"默认值自己不合法、
-  提交方照抄默认值反被拒"。
+**取值是数组 / 对象 / `null` 的键**渲染不出控件，平台**原样透传**：提交页把它们列出来但改不了。
+硬造一个控件只会引入"存得进去、读不出来"的一类失败。
 
-**`run_field_keys`**（P3 新增）把三个运行级字段映射到策略配置里的键名，
-键只允许 `exchange_id` / `instrument_id` / `bar_period`（`extra="forbid"` 收严，
-写错键名立刻报错），值按与 `params[].key` 相同的模式校验，且**不得与任一
-`params[].key` 重复**（否则同一份配置里有两个写入者，值以谁为准无从说起）。
-三项均可省略，**省略即该字段不写进策略配置**。
+**参数值类型写错是新的一类静默风险**：把 `GridStep` 写成字符串 `"0.01"`，表单上就是个文本框，
+策略拿到的是字符串。类型以文件里的取值为准。旧 manifest 曾挡掉一批"键名写错就静默落空"的
+错误（顶层的 `extra="forbid"`），新形态下模板即真相，那类错误消失，代价换成这一条。
 
-它结清的是一类**静默失效**：`exchange_id` / `instrument_id` 引擎不认识，
-只有策略的 `subscribe_tick` 用；而 `bar_period` **两处都要写**——引擎配置里的
-`BarPreces`（实际聚合周期）与策略配置里的那个（`declare_bar_period` 的期望周期）
-不一致时，策略收不到 bar、**静默 0 成交**。有映射时两者由平台写同一个值，
-一致性从此是结构性的；**没有映射时平台只写引擎配置**，这份差异由策略作者承担。
+`ManifestJson` 是**历史列**：改形态后新写的一律是空串，"这个版本是旧形态"由
+`ConfigurationJson` 为 `NULL` 表达——那是**结构性**的判据，不是靠去猜旧 manifest 里的键长什么样。
+新形态下三个字段——入口文件名、配置文件名、配置模板——都必有值，故这一列既不必删、也无从
+回收；`catalog/migrations.py` 只加列不删列，保留它不花任何代价。
 
-参数项继续 `extra="allow"`（未知键原样保留），manifest 顶层继续 `extra="forbid"`
-——顶层键名写错（如 `param` 少个 s）会让参数整批静默落空。
+### 7.3 两种周期不是一件事，行情模式只有 `Bar`
 
-### 7.3 为什么 manifest 必须声明行情模式
+- **落盘精度**：磁盘上的行情只有 5m 一档，引擎那份 `BackTest.json.BarPreces` 恒为平台常量
+  `5m`（`app/config.py` 的 `MARKET_DATA_PRECISION`），由平台写死，用户改不动。它只决定
+  读哪一族 parquet。
+- **订阅周期**：提交页选的 `5m` / `15m` / `30m` / `60m` 写进**策略配置**的 `BarPreces`，
+  是策略声明的聚合目标（`declare_bar_period` 的期望周期）。引擎在运行时把 5m 聚合成它
+  ——`BarAggregator` 收同精度且 `targetSeconds % inputSeconds == 0` 的目标。
 
-`QuantTrading` 有实据：Python 策略漏写 `on_bar` 时，引擎在 `MatchMode: Bar` 下
-**静默 0 成交**——引擎报的 0 是忠实的，日志也正常，费率三项为 0 也是对的。
-当时能潜伏数轮，是因为策略与配置由同一个人一次写好、无人交叉校验。
+把一个值写进这两处，正是 2026-10-01 修掉的那个类别错误：选 15m 时引擎按 `Preces = '15m'`
+去过滤，磁盘上没有这一族，一行都读不到。**它是报错不是静默 0 成交**——引擎在装载期就判
+`ErrorMarketDataNotExist` 拒掉整轮（`SimExchange.cpp` 那段注释写着"不必等首根 bar 才发现
+不可聚合"）。但那一轮已经废了，而详情报的是通用的"引擎报告本轮回测失败"，用户看不出是周期
+选错了，故提交页只给清单内的值。
 
-**上传之后这个前提消失了**：策略来自某个用户，运行配置来自提交表单，两者
-不同时间、可能不同人。故平台必须**在提交时**校验：
-`请求的 MatchMode ∈ manifest.supported_match_modes`，否则**直接拒绝**，
-而不是等用户对着 0 笔成交去排查。
+**行情模式固定 `Bar`**：可提交的模式只有 `Bar`（`engine_config.MATCH_MODE_VALUES`），
+提交页因此**没有**行情模式选择。旧设计要策略在 manifest 里声明 `supported_match_modes`
+并逐轮校验，是因为当年有实据：Python 策略漏写 `on_bar` 时，引擎在 `MatchMode: Bar` 下
+0 笔成交，而**引擎报的 0 是忠实的**，日志也正常，费率三项为 0 也是对的——只看 `Success`
+不足以判定打通。新形态下这份声明没有地方可放，也不需要：`MatchMode` 由平台写死，
+不是用户可选项，"请求的模式不在策略声明的清单里"这件事写不出来。Tick 仍未开放，见 §12。
 
 ### 7.4 落盘与运行
 
 ```text
 users/<user_id>/strategies/<strategy_id>/<version_no>/
-├── entry.py          # 用户上传原文，平台永不改写
-└── manifest.json     # 该版本的 manifest 快照
+├── <entry_filename>     # 用户上传的 .py 原文，平台永不改写
+└── <config_filename>    # 用户上传的配置 JSON 原文，平台永不改写
 ```
 
-运行时把 `entry.py` 复制进 `runs/<RunId>/`，以裸文件名启动（见第 3 节），
-并按 manifest 渲染参数写出 `<config_filename>`。
+两者都按**上传时的裸文件名**落盘。运行时把它们复制进 `runs/<RunId>/`，以裸文件名启动
+（见第 3 节），并在提交时以**该版本的配置模板为底稿**渲染出 `<config_filename>`。
 
 ### 7.5 授权共享
 
@@ -479,7 +482,8 @@ QuantPlatform/
 │   ├── app/
 │   │   ├── main.py            # FastAPI 装配 + 启动恢复
 │   │   ├── config.py          # 引擎根、runs 根、并发上限、超时
-│   │   ├── clock.py / ids.py / errors.py / dependencies.py / manifest.py
+│   │   ├── clock.py / ids.py / errors.py / dependencies.py
+│   │   ├── strategy_configuration.py   # 上传的两份文件与配置模板的形状校验
 │   │   ├── bootstrap.py       # 首个管理员播种（无口令环境变量则启动即抛）
 │   │   ├── auth/              # dependencies / passwords / tokens
 │   │   ├── catalog/           # database / models（五张表）/ schemas /
@@ -511,7 +515,7 @@ frontend/
     ├── main.ts  App.vue  style.css    # style.css 内是 Tailwind 的 @theme 令牌
     ├── api/         client.ts（唯一出入口）/ types.ts（手写契约）/
     │                auth.ts / strategies.ts / runs.ts / users.ts
-    ├── domain/      纯逻辑: manifest / run-form / run-status / format / labels /
+    ├── domain/      纯逻辑: strategy-configuration / run-form / run-status / format / labels /
     │                download / equity（P5：权益序列与回撤，纯函数）
     ├── stores/      session / strategy-catalog / user-directory
     ├── router/      index.ts（路由表 + 登录守卫 + 逐页懒加载）
@@ -520,7 +524,7 @@ frontend/
     │                ConfirmDialog / PaginationBar / StatusBadge / ErrorBanner /
     │                EmptyNotice / LoadingNotice / FilePicker /
     │                EquityChartPanel / ResultTablePanel（P5）
-    ├── composables/ usePolling.ts / useManifestTextSource.ts
+    ├── composables/ usePolling.ts / useConfigurationFileSource.ts
     └── views/       LoginView / RunListView / RunSubmitView / RunDetailView /
                      StrategyListView / StrategyDetailView / UserAdminView /
                      NotFoundView
@@ -588,12 +592,12 @@ npm run dev     # http://localhost:5173/
 （`../QuantTrading/bin/Release`、`market-data/Bar`、`../QuoteHub`）。
 
 1. 以管理员登录 → 「用户管理」建**两个**账号，**显示名都填**（建号页已强制）。
-2. 甲登录 → 「策略管理」上传策略（`.py` + manifest 表单）→ 详情页确认版本与
-   参数预览、确认可见性。
+2. 甲登录 → 「策略管理」上传策略（`.py` + 配置 `.json` 两份文件）→ 详情页确认
+   版本与参数预览、确认可见性。
 3. 甲在同页授权给**乙**：授权编辑器里按**显示名**从目录中选到乙（选不到自己，
    这是有意的）。
-4. 乙登录 → 「新建回测」应能看到该策略；参数表单**按 manifest 生成**
-   （类型/范围/选项/分组），且**没有行情模式选择**（Tick 不出现）。
+4. 乙登录 → 「新建回测」应能看到该策略；参数表单**按配置模板的键生成**
+   （控件形态由该键取值的类型决定），且**没有行情模式选择**（Tick 不出现）。
 5. 填运行范围后提交 → 运行列表自动轮询至 `succeeded`。
 6. 运行详情：`TradeCount == 84`、`BarMarketDataCount == 2928`（与 P0 基线同
    口径，前提差异见 [`job-workspace.md`](job-workspace.md) §6）。
@@ -640,7 +644,7 @@ P4 / P5 的功能闭环。
 | `POST` | `/api/users` | 建用户（admin；`display_name` 必填，空白回 400） |
 | `PATCH` | `/api/users/{id}/status` | 启用/停用（admin） |
 | `GET` | `/api/strategies` | 可见策略：本人 + 授权共享 + public |
-| `POST` | `/api/strategies` | 上传策略（`.py` + manifest） |
+| `POST` | `/api/strategies` | 上传策略（`.py` + 配置 `.json` 两份文件） |
 | `GET` | `/api/strategies/{id}` | 详情与版本列表 |
 | `GET` | `/api/strategies/{id}/last-submitted-parameters` | 本人对该策略**最近一次提交**的参数（提交页预填；**无历史即 200 + 全空**，不是 404） |
 | `GET` | `/api/strategies/{id}/run-templates` | 本人在该策略下保存的配置模板（**P6**，见下） |
@@ -692,9 +696,10 @@ P4 / P5 的功能闭环。
 >
 > **P4 落地范围**（前端前置的三处，都不新增依赖）：`GET /api/users/directory`
 > （§7.5）、`POST /api/users` 的 `display_name` 必填、
-> `StrategyVersionResponse` 增 `manifest_json`（**纯透传、不在读路径解析**：
+> `StrategyVersionResponse` 增 `configuration_json`（**纯透传、不在读路径解析**：
 > 解析要在读接口里多一条失败路径，存量行万一坏掉会让整个策略详情 500，
-> 而前端本来就要 `JSON.parse`）、`GET /api/runs/{id}/files` 与
+> 而前端本来就要 `JSON.parse`；该字段原先叫 `manifest_json`，改形态时改名，
+> 见 §7.2）、`GET /api/runs/{id}/files` 与
 > `/files/{file_path:path}`。后两条的要点：作业目录**由运行行确定性重建**
 > （`settings.runs_root / run.run_id`，不持久化新列、不翻调度器内存）、
 > 目录不存在回 **404 而非 500**、路径 `resolve()` 后必须仍在作业目录内
@@ -750,16 +755,18 @@ P4 / P5 的功能闭环。
 >    （该模块禁止路由自己拼 `where`），排序照调度器的 `(submitted_at, id)` **双键兜平局**
 >    ——Windows 上 `SubmittedAt` 只有毫秒精度，单键不确定。**粒度是 (用户, 策略)**，
 >    共享策略下绝不把别人的参数填给你。
-> 3. **引擎键名反查**：`MatchMode` → `engine_config.resolve_market_data_type`
->    （由 `MATCH_MODE_VALUES` 反查，未收录回 `None`）、`BarPreces` → `bar_period`
->    （**这是引擎侧既有拼写，不是笔误**）、`StartTradingDay` / `EndTradingDay` /
->    `InitialCapital` 直取。`MatchMode` 与 `InitialCapital` 用 `isinstance` 验类型，
->    坏值各自回空，**不整份作废**。
-> 4. **`params` 由运行级键做差集**：用**该运行自己那个版本**的 manifest 的
->    `named_run_field_keys().values()` 剔除运行级键（manifest 已保证参数键不与运行级键撞名，
->    故差集精确）。余下的策略参数**原样（含类型）带回，后端不做范围过滤**——
->    前端为了渲染控件本就要逐项判「这个取值在这个控件上能不能用」，后端再滤一道就是
->    两处真相，还会静默吞键。
+> 3. **两个来源不能互换**：撮合模式与两个交易日取自**引擎那份**（`MatchMode` →
+>    `engine_config.resolve_market_data_type`，由 `MATCH_MODE_VALUES` 反查，未收录回
+>    `None`；`StartTradingDay` / `EndTradingDay` / `InitialCapital` 直取），合约与订阅
+>    周期取自**策略那份**（`ExchangeId` / `InstrumentId` / `BarPreces`，**这是引擎侧既有
+>    拼写，不是笔误**）。尤其 `bar_period` 只能从策略配置取——引擎那份的 `BarPreces`
+>    是平台常量（落盘精度），从那里读会让每一次预填都报 `5m`。`MatchMode` 与
+>    `InitialCapital` 用 `isinstance` 验类型，坏值各自回空，**不整份作废**。
+> 4. **`params` 是常量差集**：策略配置减去 `PLATFORM_KEY_NAMES` 那三个键即可
+>    （渲染与解码引用的是**同一份常量**，两处不可能不一致；旧形态要回头去查该运行用的
+>    那个版本的 manifest，见 §7.2）。余下的策略参数**原样（含类型）带回，后端不做范围
+>    过滤**——前端为了渲染控件本就要逐项判「这个取值在这个控件上能不能用」，后端再滤
+>    一道就是两处真相，还会静默吞键。
 > 5. **坏 JSON 优雅降级**：`JSONDecodeError` 记 warning 后回 `None`（等价「没有记忆」），
 >    绝不因一轮坏数据让提交页报错。
 > 6. **无历史回 200 而不是 404**：`run_id=None` + 空 `params`。404 会与「策略不存在/
@@ -786,10 +793,12 @@ P4 / P5 的功能闭环。
 >    与 `MAXIMUM_RUN_FIELD_VALUE_LENGTH` 提到 `services/run_configuration.py` 并改为公开名，
 >    提交侧改 import。**HTTP 契约一字不变**，属搬位置。两处各写一份的话，"能存下的取值"与
 >    "能提交的取值"就不是同一个集合，症状是"存得下、提交时 400"且只在特定取值上出现。
-> 5. **参数按该策略最新版本的 manifest 校验，但模板不绑版本**：模板是策略级的，换版本后仍应
+> 5. **参数按该策略最新版本的配置模板校验，但模板不绑版本**：模板是策略级的，换版本后仍应
 >    可用。代价是"某个参数在新版本里被删掉"要等到套用或提交时才暴露——绑版本换来的
->    "存模板时就报错"会让每一次正常迭代作废全部旧模板。
-> 6. **没有 apply 端点**：套用要与当前 manifest 派生出的控件、当前表单已填的值一起决定，
+>    "存模板时就报错"会让每一次正常迭代作废全部旧模板。参数**键集不属于模板**（它由配置
+>    文件固定，见 §7.2），故换版本后旧模板可能带着新版本没有的键，提交侧以
+>    `UNKNOWN_PARAMETER_MESSAGE` 拒。
+> 6. **没有 apply 端点**：套用要与当前配置模板派生出的控件、当前表单已填的值一起决定，
 >    是纯前端动作；放服务端等于把 `createInitialParameterInputs` /
 >    `buildPrefilledRunFields` 抄一份，而抄出来的那份迟早与界面上真正跑的那份不一致。
 > 7. **硬删，无 `DeletedAt`**：没有任何外键指向模板，删它不影响历史运行——那一轮的取值在提交
@@ -887,10 +896,10 @@ P4 / P5 的功能闭环。
 | `/login` | 登录 | 换取 JWT 存 localStorage；失败文案用后端原文 | ✅ P4（观感层统一 2026-09-26） |
 | `/` | 主页 | 原文为「重定向到 `/runs`」；**2026-09-26 起改为公开主页**（五节落地页，见下方订正段） | ✅ P4（主页 2026-09-26 增补） |
 | `/runs` | 运行列表 | 状态徽章 / 引擎判定 / 交易日区间 / 耗时 / 交易笔数 / 余额；按状态与策略筛选、按指标排序、分页；**存在非终态轮时 2 s 轮询**。**控件与表格已换成 Element Plus**（见 §12.18 与 §13 的 EP 拍板表） | ✅ P4（EP 化 2026-09-26，观感层统一 2026-09-26） |
-| `/runs/new` | 新建回测 | 选策略 → 选版本（缺省最新）→ **按 manifest 动态生成参数表单** → 提交；`match_mode` 固定 `Bar`。**选中策略时按「你上次提交的那一份」预填**（策略参数 + 标的/日期/初始资金/周期），并给一个**「重置为默认值」**按钮（见 §11 的增补段）。**「配置模板」区：下拉选一份已存模板 →「套用」/「存为模板」**（弹窗输名字，见 §11 的 P6 增补段）。**控件已换成 Element Plus，但表单外壳仍是原生 `<form>`**（见 §13） | ✅ P4（预填 2026-09-26 增补，EP 化 2026-09-26，观感层统一 2026-09-26，**模板 2026-09-28 P6**） |
+| `/runs/new` | 新建回测 | 选策略 → 选版本（缺省最新）→ **按该版本的配置模板动态生成参数表单** → 提交；`match_mode` 固定 `Bar`。**选中策略时按「你上次提交的那一份」预填**（策略参数 + 标的/日期/初始资金/周期），并给一个**「重置为默认值」**按钮（见 §11 的增补段）。**「配置模板」区：下拉选一份已存模板 →「套用」/「存为模板」**（弹窗输名字，见 §11 的 P6 增补段）。**控件已换成 Element Plus，但表单外壳仍是原生 `<form>`**（见 §13） | ✅ P4（预填 2026-09-26 增补，EP 化 2026-09-26，观感层统一 2026-09-26，**模板 2026-09-28 P6**） |
 | `/runs/:id` | 运行详情 | 概览 / 绩效指标 / 引擎数据镜像 / **权益曲线与回撤曲线** / **5 张结果表的明细分页表** / 提交参数与引擎配置 / stdout·stderr 尾巴 / 产物清单与下载 / 取消 / **加入对比**；未结束时 2 s 轮询。**「取消运行」与「删除运行」按终态互斥**（未结束只能取消，已结束才能删） | ✅ P5（观感层统一 2026-09-26；**结果库两节只在终态挂载**：未结束时后端回 409，前端干脆不请求，翻成终态由既有的 `watch(isTerminal)` 自动接上；**加入对比与删除 2026-09-28 P6/P7**） |
 | `/strategies` | 策略管理 | 列表 + 上传面板 + 可见性 + 归属（经用户目录映显示名） | ✅ P4（观感层统一 2026-09-26） |
-| `/strategies/:id` | 策略详情 | 版本列表（含该版本 manifest 的参数预览）+ 传新版本 + **授权编辑器（目录选人）** + 软删 | ✅ P4（观感层统一 2026-09-26） |
+| `/strategies/:id` | 策略详情 | 版本列表（含该版本配置模板的参数预览）+ 传新版本 + **授权编辑器（目录选人）** + 软删 | ✅ P4（观感层统一 2026-09-26） |
 | `/users` | 用户管理（admin） | 列表 / 建号（显示名必填）/ 启用停用 | ✅ P4（观感层统一 2026-09-26） |
 | `/:pathMatch(.*)*` | 404 | 未知路径不白屏；**不需要登录**（登录前的错地址也该看得见它） | ✅ P4（观感层统一 2026-09-26） |
 | `/compare` | 对比 | 多轮指标表 + 权益曲线叠加。**`?ids=` 是这一页唯一的状态源**（勾选框只是它的另一种写法）：去空白、丢空项、保序去重、最多 6 轮，选满后其余勾选框置灰；候选只列**终态**轮；取数一次性**不轮询**（另有「刷新」按钮） | ✅ P6（2026-09-28） |
@@ -987,7 +996,7 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
 （不论成败、是否还在跑）；另给一个**「重置为默认值」**按钮；粒度 **(用户, 策略)**，
 绝不跨用户。端点契约见 §9 的增补段，**无新表、无 DB 变更、无新依赖**。
 
-前端落点在 `RunSubmitView.vue` 与两个纯函数模块（`domain/manifest.createInitialParameterInputs`
+前端落点在 `RunSubmitView.vue` 与两个纯函数模块（`domain/strategy-configuration.createInitialParameterInputs`
 扩一个 `rememberedValues` 形参、`domain/run-form.buildPrefilledRunFields`），判据一律**复用既有校验器**
 （`coerceParameterInput` / `readTradingDay` / `readInitialCapital` / `readRunFieldValue`），
 故「界面放行什么」这件事仍然只有一处真相。三处值得后人当心：
@@ -1011,8 +1020,8 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
 **不做 / 已知缺口**：① **记忆不可删除**——它是从运行历史派生的，不是一份副本，按钮只表示"本轮不套用"；
 要能真删就得新建一张表。② 不做「常用参数模板」（多套参数命名保存复用），那是 P6 的语义，
 本轮只是「上一次」。③ **不预填行情模式**：表单本来就没有这个控件（Tick 不可提交），
-端点上仍回 `match_mode` 供日后放开 Tick 时用。④ **manifest 没声明的约束照样能带出**：
-如跨参数的 `0 < GridStep × GridCount < 1`——manifest 表达不了跨参数约束，
+端点上仍回 `match_mode` 供日后放开 Tick 时用。④ **平台认不了的约束照样能带出**：
+如跨参数的 `0 < GridStep × GridCount < 1`——平台只看键值、不看键之间的关系，
 引擎构造期会拒并在 `stderr.txt` 写明。⑤ **不记「上次选的是哪一版」**：版本仍默认最新。
 
 **2026-09-27 增补：引擎版本可追溯**（用户提出，不属任何分期）。起因是**换引擎那一刻库里没有
@@ -1115,6 +1124,8 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
    原文"否则启动期即终止进程"**已不成立**。详见 §3 与
    [`job-workspace.md`](job-workspace.md) §3.1。
 7. **`BarPreces` 是引擎侧既有拼写**（非笔误，不可擅改），平台配置键须逐字一致。
+   它在两份配置里各出现一次而**语义不同**：引擎 `BackTest.json` 那份恒为落盘精度 `5m`，
+   策略配置那份是用户选的订阅周期，见 §7.3。
 8. **不做**：跨运行库级对比（`ATTACH` 上限 10，已决定暂不做）、盘后行情修正、
    C++ 策略宿主（三条再评估触发条件已留档）、zip 上传（见 7.1）。
    **P6 的对比绕开了这个限制而不是解开它**：对比**不 `ATTACH`**——逐轮分别开只读连接、
@@ -1140,13 +1151,14 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
     删除端点回 **409 且保留行**、保留清理**跳过该行**等下次。这是"删不掉就是删不掉"的正确
     结果（行是目录唯一的句柄，保留行才谈得上重试），**不要当缺陷修**——重启后端或结束那个
     进程后重试即可。
-13. **Tick 模式不可提交**：manifest 仍可声明支持 `Tick`（那是策略作者的事），
-    但提交侧一律 400。引擎的 tick 撮合有**三档**（`OrderBook:0` / `LastPrice:1` /
-    `OppositePrice:2`），平台的 `MarketDataType` 只有两值，推不出那三档；
+13. **Tick 模式不可提交**：提交侧一律 400。引擎的 tick 撮合有**三档**（`OrderBook:0` /
+    `LastPrice:1` / `OppositePrice:2`），平台的 `MarketDataType` 只有两值，推不出那三档；
     且行情根 `market-data/` 下根本没有 tick 数据，从未验证过。判据是具名常量
     `SUBMITTABLE_MATCH_MODES = frozenset({MarketDataType.BAR})`，开 Tick 时改它。
     **P4 的「新建回测」表单因此不显示 Tick 选项**（2026-09-25 拍板）——
     表单按 Bar 单模式生成，不做模式联动，也就不必先编出三档的界面语义。
+    （旧形态允许策略在 manifest 里声明支持 `Tick`，声明了也一样 400；改形态后
+    §7.2 的那份配置没有地方放这份声明，判断一字未变。）
 14. **种子库 `BackTestInit.db` 不重建**：本机 `bin/Release` 下没有它，
     费用三项恒为 0、`CommissionMissingCount` 恒 84、`BasicDataLoaded` 恒 `false`。
     这是**输入缺失**而非缺陷，验收里已把这四条**钉成断言**（重建时会一起转红）。
@@ -1256,7 +1268,7 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
 | 可见性 | `private` / `shared` / `public` | |
 | 授权与可见性的衔接 | **授权驱动可见性** | 2026-09-25 P2b 开工前拍板；见 §7.5 |
 | 上云节奏 | 本机跑通再迁 | |
-| 上传形态 | `.py` 必需 + manifest 表单或文件 | 不收 zip |
+| 上传形态 | **`.py` + 配置 `.json` 两份文件**（2026-10-01 改） | 原为「`.py` + manifest」；不收 zip，见 §7.1 |
 
 **P3 开工前新增的拍板**（2026-09-25）：
 
@@ -1265,7 +1277,7 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
 | 授权粒度 | **不区分 `read` / `run`，授权即可跑** | 跑权限 = 可见性，不新增越权分支；`GrantPermission` 保留但不再被读；见 §11 |
 | `public` 语义 | **隐含可跑** | 一次有意的权限放宽 |
 | `params` schema | **本轮定案**（四类型 + `options` + 缺省即必填） | 见 §7.2 |
-| manifest 运行级字段映射 | **新增 `run_field_keys`** | 结清"`bar_period` 两处不一致 → 静默 0 成交"；见 §7.2 |
+| manifest 运行级字段映射 | **新增 `run_field_keys`**（2026-10-01 随 manifest 一起删除） | 当时按"`bar_period` 两处不一致 → 静默 0 成交"记；**该说法已于 2026-10-01 订正**为"引擎装载期即拒、报错收场"，见 §7.3 |
 | Tick 模式 | **本轮不开**（提交侧 400） | 三档撮合语义未定；见 §12.13 |
 | 种子库 | **不重建**，验收按"缺失"断言 | 见 §12.14 |
 | P3 范围 | 提交 + 队列 + 回收 + 恢复 **+ cancel** | 只读端点留 P5、`DELETE` 留 P7 |
@@ -1349,9 +1361,9 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
 | 决策点 | 选择 | 备注 |
 | ---- | ---- | ---- |
 | 模板的作用域 | **策略域**：行上同时有 `OwnerUserId` 与 `StrategyId`，可见性**只按归属人** | 参数只在一个策略的键命名空间里有意义；纯用户域会让跨策略套用"只套一半"（运行级字段生效、参数被静默忽略），正是本仓到处在防的静默失败 |
-| 模板有无 apply 端点 | **无**：只有 list / create / rename / delete | 套用要与当前 manifest 派生出的控件、当前表单已填值一起决定，是纯前端动作；放服务端等于把 `createInitialParameterInputs` / `buildPrefilledRunFields` 抄一份 |
+| 模板有无 apply 端点 | **无**：只有 list / create / rename / delete | 套用要与当前配置模板派生出的控件、当前表单已填值一起决定，是纯前端动作；放服务端等于把 `createInitialParameterInputs` / `buildPrefilledRunFields` 抄一份 |
 | 模板的删除形态 | **硬删，无 `DeletedAt`** | 没有任何外键指向模板；软删会引入"名字被占住又无接口释放"的老问题，而改名/删除**不要求策略此刻可见**正是为了不留这种死角 |
-| 模板校验的来源 | **按该策略最新版本 manifest 校验，但不绑版本** | 绑版本会让每次正常迭代作废全部旧模板；代价是"参数被删掉"要到套用或提交时才暴露 |
+| 模板校验的来源 | **按该策略最新版本的配置模板校验，但不绑版本** | 绑版本会让每次正常迭代作废全部旧模板；代价是"参数被删掉"要到套用或提交时才暴露 |
 | compare 的失败粒度 | **归属/不存在 → 整请求 404**；**只对"这一轮还没有曲线"逐轮降级** | "少一列"是越权与不存在的可分辨信号，与多租户规则冲突；而未结束的轮不该让整页变白（同 `RunDetailView` 面板级降级的先例） |
 | compare 的指标来源 | **只取 `Runs` 的镜像列**，绝不重读 `result.json` | 那 27 列的立项理由就是"列表与对比不逐行解文件"；也是保留清理的前提——目录清掉后指标必须还在 |
 | 对比轮数上限 | **6**（`MAXIMUM_COMPARISON_RUNS`），**按去重后判** | 三条依据：ECharts 默认调色板 9 色、URL 长度、每轮一次结果库打开的可估开销 |

@@ -5,7 +5,7 @@
  * 三个写操作 (传新版本 / 改授权 / 删除) **只对归属人显示**: 被授权人拿到的是同一份详情, 但授权
  * 列表是空数组 (后端有意如此, 不是 403), 给他一个点了必然 403 的按钮才是更糟的界面.
  *
- * manifest 的每个版本都留一份可展开的**参数预览** —— 提交表单是按它生成的, 在这里就能看出来
+ * 每个版本都留一份可展开的**参数预览** —— 提交表单是按该版本的配置模板生成的, 在这里就能看出来
  * 下一轮回测会长出哪些控件.
  *
  * 三个写操作都走 `use-feedback.ts`: 删除与保存授权是表单之外的页面级动作 (b 类), 成败都弹 toast;
@@ -40,11 +40,21 @@ import {
   showSuccessToast,
 } from '../composables/use-feedback';
 import { formatDateTime } from '../domain/format';
-import { describeGrantPermission, describeStrategyVisibility } from '../domain/labels';
-import { deriveParameterDescriptors, parseStrategyManifest } from '../domain/manifest';
-import type { ParameterDescriptor } from '../domain/manifest';
+import {
+  describeGrantPermission,
+  describeParameterControl,
+  describeStrategyVisibility,
+} from '../domain/labels';
+import {
+  deriveParameterDescriptors,
+  parseStrategyConfigurationTemplate,
+} from '../domain/strategy-configuration';
+import type { ParameterDescriptor } from '../domain/strategy-configuration';
 import { useSessionStore } from '../stores/session';
 import { useUserDirectoryStore } from '../stores/user-directory';
+
+/** 与 `run_submission.CONFIGURATION_UNREADABLE_MESSAGE` 同一件事, 这里只负责说在版本清单上. */
+const PRE_CHANGE_VERSION_MESSAGE = '该版本落在改形态之前, 没有配置模板';
 
 const props = defineProps<{ id: string }>();
 
@@ -68,25 +78,29 @@ const strategy = computed(() => strategyDetail.value?.strategy ?? null);
 interface VersionRow {
   version: StrategyVersion;
   descriptors: ParameterDescriptor[];
-  manifestProblem: string | null;
+  /** 改形态之后落的版本才有模板; 更早的版本那个字段是 `null`, 提交页也提交不了它们. */
+  configurationProblem: string | null;
 }
 
 /**
- * 每个版本的 manifest 只解析一次.
+ * 每个版本的配置模板只解析一次.
  *
  * 模板里逐处调用「解析这个版本」看着更直接, 但一次渲染会解析四五遍 (长度、有没有坏、参数字段),
- * 而且这三处判断分散在模板里很难保证彼此一致.
+ * 而且这几处判断分散在模板里很难保证彼此一致.
  */
 const versionRows = computed<VersionRow[]>(() =>
   (strategyDetail.value?.versions ?? []).map((version) => {
-    const manifestResult = parseStrategyManifest(version.manifest_json);
+    const configurationResult =
+      version.configuration_json === null
+        ? { ok: false as const, message: PRE_CHANGE_VERSION_MESSAGE }
+        : parseStrategyConfigurationTemplate(version.configuration_json);
 
     return {
       version,
-      descriptors: manifestResult.ok
-        ? deriveParameterDescriptors(manifestResult.manifest)
+      descriptors: configurationResult.ok
+        ? deriveParameterDescriptors(configurationResult.template)
         : [],
-      manifestProblem: manifestResult.ok ? null : manifestResult.message,
+      configurationProblem: configurationResult.ok ? null : configurationResult.message,
     };
   }),
 );
@@ -332,7 +346,7 @@ onMounted(() => {
         <EmptyNotice
           v-if="versionRows.length === 0"
           message="这个策略还没有版本"
-          hint="下面的「上传新版本」提交第一份源码与 manifest"
+          hint="下面的「上传新版本」提交第一份源码与配置"
         />
 
         <ul
@@ -368,17 +382,17 @@ onMounted(() => {
               </summary>
 
               <p
-                v-if="versionRow.manifestProblem"
+                v-if="versionRow.configurationProblem"
                 class="mt-2 text-xs text-amber-700"
               >
-                {{ versionRow.manifestProblem }} — 该版本无法生成提交表单.
+                {{ versionRow.configurationProblem }} — 该版本无法提交.
               </p>
 
               <p
                 v-else-if="versionRow.descriptors.length === 0"
                 class="mt-2 text-xs text-slate-400"
               >
-                该版本的 manifest 没有声明任何参数.
+                该版本的配置里没有可以在界面上改的键.
               </p>
 
               <table
@@ -391,19 +405,10 @@ onMounted(() => {
                       键
                     </th>
                     <th class="py-1 pr-3 font-medium">
-                      标签
-                    </th>
-                    <th class="py-1 pr-3 font-medium">
-                      类型
-                    </th>
-                    <th class="py-1 pr-3 font-medium">
-                      缺省值
-                    </th>
-                    <th class="py-1 pr-3 font-medium">
-                      范围 / 选项
+                      控件
                     </th>
                     <th class="py-1 font-medium">
-                      分组
+                      缺省值
                     </th>
                   </tr>
                 </thead>
@@ -415,28 +420,11 @@ onMounted(() => {
                     <td class="py-1 pr-3 font-mono text-slate-700">
                       {{ descriptor.key }}
                     </td>
-                    <td class="py-1 pr-3 text-slate-700">
-                      {{ descriptor.label }}
-                    </td>
                     <td class="py-1 pr-3 text-slate-500">
-                      {{ descriptor.type }}{{ descriptor.isRequired ? ' · 必填' : '' }}
+                      {{ describeParameterControl(descriptor.type) }}
                     </td>
-                    <td class="py-1 pr-3 text-slate-500">
-                      {{ descriptor.isRequired ? '—' : String(descriptor.defaultValue) }}
-                    </td>
-                    <td class="py-1 pr-3 text-slate-500">
-                      <template v-if="descriptor.options.length > 0">
-                        {{ descriptor.options.map((option) => option.label).join(' / ') }}
-                      </template>
-                      <template v-else-if="descriptor.minimum !== null || descriptor.maximum !== null">
-                        {{ descriptor.minimum ?? '—' }} ~ {{ descriptor.maximum ?? '—' }}
-                      </template>
-                      <template v-else>
-                        —
-                      </template>
-                    </td>
-                    <td class="py-1 text-slate-500">
-                      {{ descriptor.group || '—' }}
+                    <td class="py-1 font-mono text-slate-500">
+                      {{ String(descriptor.defaultValue) }}
                     </td>
                   </tr>
                 </tbody>

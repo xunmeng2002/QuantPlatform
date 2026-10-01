@@ -29,7 +29,6 @@ from typing import Iterator
 from ..config import (
     QUOTE_HUB_CLI_FILENAME,
     QUOTE_HUB_DATABASE_FILENAME,
-    SUPPORTED_MARKET_DATA_FREQUENCIES,
 )
 
 
@@ -85,7 +84,6 @@ EXCHANGE_IDENTIFIER_TO_PREFIX = {
 }
 
 CONTRACT_CODE_SEPARATOR = "."
-BAR_PERIOD_SUFFIX = "m"
 
 # 组件打印的登录失败标记. 它 `raise SystemExit("BaoStock 登录失败")`, 类别只能从 stderr 文字认.
 LOGIN_FAILURE_STDERR_MARKER = "登录失败"
@@ -274,24 +272,6 @@ def read_coverage_facts(
         covered_days=[row[0] for row in covered_rows],
         calendar_last_day=None if calendar_row is None else calendar_row[0],
     )
-
-
-def frequency_to_bar_period(frequency: str) -> str:
-    """`5` → `5m`. 引擎按 `Preces` 过滤行情, 这个字面量与落地文件后缀、`BackTest.json` 的
-    `BarPreces` 三处必须逐字一致."""
-
-    return f"{frequency}{BAR_PERIOD_SUFFIX}"
-
-
-def bar_period_to_frequency(bar_period: str) -> str | None:
-    """`5m` → `5`; 不是受支持的周期回 None."""
-
-    if not bar_period.endswith(BAR_PERIOD_SUFFIX):
-        return None
-
-    candidate = bar_period[: -len(BAR_PERIOD_SUFFIX)]
-
-    return candidate if candidate in SUPPORTED_MARKET_DATA_FREQUENCIES else None
 
 
 def format_platform_day(component_day: str) -> str:

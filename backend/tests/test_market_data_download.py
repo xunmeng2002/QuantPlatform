@@ -10,18 +10,18 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from pathlib import Path
 
 import pytest
 
-from app.config import PlatformSettings
+from app.config import MARKET_DATA_PRECISION_FREQUENCY, PlatformSettings
 from app.services import quote_hub
 from app.services.market_data_preparation import (
     MARKET_DATA_COMPONENT_MISSING_MESSAGE,
     MARKET_DATA_COMPONENT_START_FAILED_MESSAGE,
     MARKET_DATA_DOWNLOAD_FAILED_MESSAGE,
     MARKET_DATA_LOGIN_FAILED_MESSAGE,
-    MARKET_DATA_PERIOD_UNSUPPORTED_MESSAGE,
     MARKET_DATA_PREPARE_TIMEOUT_MESSAGE,
     MARKET_DATA_REQUEST_INCOMPLETE_MESSAGE,
     MARKET_DATA_STILL_INSUFFICIENT_MESSAGE,
@@ -50,7 +50,6 @@ from .quote_hub_stub import (
 
 REQUESTED_EXCHANGE_ID = "SSE"
 REQUESTED_INSTRUMENT_ID = "600519"
-REQUESTED_BAR_PERIOD = "5m"
 
 #: 区间落在桩库日历之内, 但那只新合约还没有任何 bar —— 于是判据回"不够", 走下载那条路.
 WINDOW_START_DAY = "20240102"
@@ -99,14 +98,12 @@ def _build_settings(
 def _build_request(
     exchange_id: str = REQUESTED_EXCHANGE_ID,
     instrument_id: str = REQUESTED_INSTRUMENT_ID,
-    bar_period: str = REQUESTED_BAR_PERIOD,
     start_trading_day: str = WINDOW_START_DAY,
     end_trading_day: str = WINDOW_END_DAY,
 ) -> MarketDataRequest:
     return MarketDataRequest(
         exchange_id=exchange_id,
         instrument_id=instrument_id,
-        bar_period=bar_period,
         start_trading_day=start_trading_day,
         end_trading_day=end_trading_day,
     )
@@ -165,10 +162,10 @@ async def test_a_covered_request_starts_no_subprocess(
     assert count_starts(covered_component) == 0
 
 
-async def test_an_unmapped_contract_skips_preparation(
+async def test_a_contractless_request_skips_preparation(
     tmp_path: Path, covered_component: Path
 ) -> None:
-    """manifest 没映射合约的策略照旧能跑: 没有合约就没什么可准备的, 不该拦."""
+    """没指名合约的策略照旧能跑: 没有合约就没什么可准备的, 不该拦."""
 
     settings = _build_settings(tmp_path, covered_component)
     request = _build_request(exchange_id="", instrument_id="")
@@ -370,20 +367,38 @@ async def test_concurrent_preparations_start_the_component_only_once(
     assert count_starts(download_component) == 1
 
 
-async def test_an_unsupported_bar_period_is_rejected_before_any_subprocess(
+async def test_the_component_is_asked_for_the_dataset_precision_frequency(
     tmp_path: Path, download_component: Path
 ) -> None:
-    """周期与落地文件后缀必须逐字一致, 否则引擎过滤后得 0 根 bar —— **静默 0 成交**."""
+    """组件被问的频率来自**平台常量**, 且请求里根本没有周期这个字段.
 
+    周期解绑之后, 覆盖判据只关心"落盘数据在不在"——落盘精度恒为 5m, 用户在提交页选什么不改变
+    这个答案. 断言钉在数据类本身上而不是文案上, 是为了挡住"顺手把周期加回来": 加回来的那一刻,
+    选 15m 会让组件去问一个库里不存在的频率, 判成"不够", 于是**每一轮都整所重下**.
+
+    频率的取值另有一条: 组件 CLI 要的是去掉后缀的数字, 与常数分列的两条必须对得上.
+    """
+
+    assert MARKET_DATA_PRECISION_FREQUENCY == DEFAULT_FREQUENCY
+    assert "bar_period" not in {
+        field.name for field in dataclasses.fields(MarketDataRequest)
+    }
+
+    enable_bar_ingestion(download_component)
     settings = _build_settings(tmp_path, download_component)
 
-    with pytest.raises(MarketDataUnavailableError) as failure:
-        await ensure_market_data_available(
-            settings, _build_request(bar_period="1d"), asyncio.Event()
-        )
+    await ensure_market_data_available(
+        settings, _build_request(), asyncio.Event()
+    )
 
-    assert failure.value.message == MARKET_DATA_PERIOD_UNSUPPORTED_MESSAGE
-    assert count_starts(download_component) == 0
+    recorded_arguments = read_recorded_arguments(download_component)
+    assert recorded_arguments is not None
+
+    recorded_options = dict(
+        zip(recorded_arguments[1::2], recorded_arguments[2::2])
+    )
+
+    assert recorded_options["--frequency"] == MARKET_DATA_PRECISION_FREQUENCY
 
 
 async def test_incomplete_trading_days_are_rejected(tmp_path: Path, download_component: Path) -> None:

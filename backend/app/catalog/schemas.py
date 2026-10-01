@@ -76,8 +76,8 @@ class RunConfigurationRequest(BaseModel):
     `extra="forbid"`: 多写一个字段名 (如 `param` 少了个 s) 会让参数整批静默落空, 而策略随后
     以"配置里没有这个键"的样子报错——把字段名写错这件事必须在提交这一步就拦住.
 
-    `params` 的 key 不在 model 里逐一声明 (声明由 manifest 给, 是数据不是 schema), 故它收一个
-    自由字典, 由提交侧按 manifest 校验.
+    `params` 的 key 不在 model 里逐一声明: 键集由**该版本上传的那份配置 JSON**给出, 是数据不是
+    schema. 故它收一个自由字典, 由提交侧按那份模板校验 (键必须已在模板里).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -216,9 +216,13 @@ class StrategyResponse(BaseModel):
 class StrategyVersionResponse(BaseModel):
     """策略版本对外视图.
 
-    `manifest_json` 是上传时那份文本的**原样透传** (字符串, 不在这里解析): 提交页要按它的
-    `params` 生成参数控件, 故它必须能到前端; 而在读接口里解析会给存量行新增一条失败路径
-    (一份坏 manifest 会让整个策略详情 500), 前端本来也要自己 `JSON.parse`.
+    `configuration_json` 是上传时那份配置的**原样透传** (字符串, 不在这里解析): 提交页要按它的
+    键生成参数控件, 故它必须能到前端; 而在读接口里解析会给存量行新增一条失败路径 (一份坏配置
+    会让整个策略详情 500), 前端本来也要自己 `JSON.parse`.
+
+    **必须是 `str | None`**: 改形态之前落的那些版本这一列是 NULL, 而响应由
+    `model_validate(version)` 逐行造出来——非可选字段会让每一个旧版本的详情页变成 500. 空值
+    表达的是"这个版本作废了, 请重新上传", 前端据此显示一块降级提示.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -229,7 +233,7 @@ class StrategyVersionResponse(BaseModel):
     entry_filename: str
     config_filename: str
     source_hash: str
-    manifest_json: str
+    configuration_json: str | None
     uploaded_at: datetime
 
 

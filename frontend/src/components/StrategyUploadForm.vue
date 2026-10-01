@@ -2,14 +2,15 @@
 /**
  * 上传一个新策略.
  *
- * manifest 有两种填法, 落到同一个请求字段: 直接粘贴 JSON, 或选一份 `manifest.json` 读进来再改.
- * 两条路都保留, 因为「从策略开发目录里直接拖一份过来」和「照着模板手填」都是真实用法.
+ * 一次要两份文件: 策略源码 `.py`, 以及策略启动时真正会读的那份配置 `.json`. 没有让用户"照着模板
+ * 手填"的第二条路 —— 那份 JSON 本来就存在于策略的开发目录里, 平台上现编一份只会与策略实际认的那份
+ * 分叉, 而这个分叉要到跑起来才看得出来.
  *
- * 提交前的 manifest 检查只说「是不是合法 JSON / 有没有顶层那三项」: 完整的 manifest 校验在后端
- * (`app/manifest.py`), 它给的报错带出错位置, 在前端重写一遍只会得到两份会漂移的规则.
+ * 提交前的检查只说「是不是一个 JSON 对象」: 完整的校验在后端 (`routers/strategies.py`), 它给的报错
+ * 带出错的位置, 在前端重写一遍只会得到两份会漂移的规则.
  */
 
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import { ElButton, ElInput, ElOption, ElSelect } from 'element-plus';
 
 import { createStrategy } from '../api/strategies';
@@ -19,8 +20,8 @@ import {
   STRATEGY_VISIBILITIES,
 } from '../api/types';
 import type { StrategyVisibility } from '../api/types';
+import { useConfigurationFileSource } from '../composables/useConfigurationFileSource';
 import { describeApiFailure } from '../composables/use-feedback';
-import { useManifestTextSource } from '../composables/useManifestTextSource';
 import { describeStrategyVisibility } from '../domain/labels';
 import ErrorBanner from './ErrorBanner.vue';
 import FilePicker from './FilePicker.vue';
@@ -30,52 +31,39 @@ const emit = defineEmits<{
 }>();
 
 const {
-  manifestText,
-  problem: manifestProblem,
-  isUsable: isManifestUsable,
-  loadFromFile: loadManifestFromFile,
-  clear: clearManifestText,
-} = useManifestTextSource();
+  configurationFile,
+  problem: configurationProblem,
+  isUsable: isConfigurationUsable,
+  clear: clearConfigurationFile,
+} = useConfigurationFileSource();
 
 const name = ref('');
 const description = ref('');
 const visibilityType = ref<StrategyVisibility>('private');
 const sourceFile = ref<File | null>(null);
-const manifestFile = ref<File | null>(null);
 const errorMessage = ref<string | null>(null);
 const isSubmitting = ref(false);
-
-// 选中文件即读进文本域: 之后用户可以接着改, 或直接重贴一份.
-watch(manifestFile, (selectedFile) => {
-  if (selectedFile === null) {
-    clearManifestText();
-
-    return;
-  }
-
-  void loadManifestFromFile(selectedFile);
-});
 
 const isSubmitDisabled = computed(
   () =>
     isSubmitting.value ||
     !name.value.trim() ||
     sourceFile.value === null ||
-    !isManifestUsable.value,
+    !isConfigurationUsable.value,
 );
 
 function resetForm(): void {
   name.value = '';
   description.value = '';
   sourceFile.value = null;
-  manifestFile.value = null;
-  clearManifestText();
+  clearConfigurationFile();
 }
 
 async function submit(): Promise<void> {
   const selectedSourceFile = sourceFile.value;
+  const selectedConfigurationFile = configurationFile.value;
 
-  if (isSubmitDisabled.value || selectedSourceFile === null) {
+  if (isSubmitDisabled.value || selectedSourceFile === null || selectedConfigurationFile === null) {
     return;
   }
 
@@ -88,7 +76,7 @@ async function submit(): Promise<void> {
       description: description.value.trim(),
       visibilityType: visibilityType.value,
       sourceFile: selectedSourceFile,
-      manifestText: manifestText.value,
+      configurationFile: selectedConfigurationFile,
     });
 
     resetForm();
@@ -164,42 +152,24 @@ async function submit(): Promise<void> {
         <FilePicker
           v-model="sourceFile"
           accept=".py"
-          hint="文件名须与 manifest 的 entry_filename 一致"
+          hint="文件名即作业目录里的文件名"
         />
       </div>
 
       <div class="flex flex-col gap-1">
-        <span class="text-sm font-medium text-slate-700">从文件载入 manifest</span>
+        <span class="text-sm font-medium text-slate-700">策略配置 (*.json)</span>
         <FilePicker
-          v-model="manifestFile"
+          v-model="configurationFile"
           accept=".json"
-          hint="载入后还可以在下面改"
+          hint="策略启动时读的就是这一份, 它的键即提交页的参数"
         />
+        <p
+          v-if="configurationProblem"
+          class="text-xs text-amber-700"
+        >
+          {{ configurationProblem }}
+        </p>
       </div>
-    </div>
-
-    <div class="flex flex-col gap-1">
-      <label
-        class="text-sm font-medium text-slate-700"
-        for="strategy-manifest"
-      >manifest (JSON)</label>
-      <!-- 等宽与字号写在**外层**而不是内层: `.el-textarea__inner` 上是 `font-family: inherit;
-           font-size: inherit`, 故这两个工具类会顺着继承落到真正的编辑区 (已在 2.14.6 的
-           dist/index.css 上核实), 不必动用 `input-style`. -->
-      <ElInput
-        id="strategy-manifest"
-        v-model="manifestText"
-        type="textarea"
-        :rows="8"
-        class="font-mono text-xs"
-        placeholder='{"entry_filename": "strategy.py", "config_filename": "Strategy.json", "supported_match_modes": ["Bar"], "params": []}'
-      />
-      <p
-        v-if="manifestProblem"
-        class="text-xs text-amber-700"
-      >
-        {{ manifestProblem }}
-      </p>
     </div>
 
     <ElButton

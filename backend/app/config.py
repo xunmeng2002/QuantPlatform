@@ -56,9 +56,21 @@ DEFAULT_QUOTE_HUB_ROOT = PLATFORM_ROOT.parent / "QuoteHub"
 QUOTE_HUB_CLI_FILENAME = "BaoStockParquet.py"
 QUOTE_HUB_DATABASE_FILENAME = "stock_data.db"
 
-# 组件的 `--frequency` 就这四个取值 (没有 1m、没有 1d). 平台的 K 线周期因此收成这四个:
-# 引擎按 `Preces` 过滤行情, 周期与落地文件的后缀必须同字面量, 差一个字就是**静默 0 成交**.
-SUPPORTED_MARKET_DATA_FREQUENCIES = ("5", "15", "30", "60")
+# 落盘的行情精度**恒为 5 分钟**, 与用户选什么无关. 引擎装载期按这个字面量过滤 parquet
+# (`Preces = '<BarPreces>'`), 再在运行时把它聚合到策略订阅的目标周期; 于是它成了平台常量,
+# 渲染 `BackTest.json` 时直接取它——**没有任何形参**能让用户的选择流进去 (见
+# `scheduler/engine_config.render_engine_config`).
+#
+# 组件 CLI 的 `--frequency` 要的是去掉后缀的那个数. 单列一条而不是在调用处截字符串: 截法一散,
+# 后缀与精度就可能各改一半, 症状是"下载写的是 5 分钟、引擎读的是 5m 那一族"。
+MARKET_DATA_PRECISION = "5m"
+MARKET_DATA_PRECISION_FREQUENCY = "5"
+
+# 用户在提交页能选的**订阅周期**, 即策略配置里 `BarPreces` 的取值. 四个全是落盘精度 5m 的整数
+# 倍, 故引擎一定能由 5m 聚合出来 (见 `BarAggregator::ValidatePrecesRelation`); 给一个非整数倍
+# (如 `7m`) 引擎在装载期直接拒, 整轮以报错收场. 引擎侧约束是"整数倍", 这里收成四条具体取值,
+# 是因为**组件也只下得动这四个**——放行 10m 会让下一轮卡在下载上.
+SUBSCRIPTION_BAR_PERIODS = ("5m", "15m", "30m", "60m")
 
 # 组件只把 `--codes` 里列到的合约写进年度文件, 少列一个就把那个合约**静默挤出**文件. 故平台每
 # 次都传全集. 全集要拼成一条命令行, 受 Windows 约 32767 字符的上限约束 (每码 9~10 字符), 这里

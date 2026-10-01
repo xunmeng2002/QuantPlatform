@@ -23,6 +23,8 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from ..catalog.enums import MarketDataType
+from ..config import MARKET_DATA_PRECISION
+from ..errors import InvalidRequestError
 
 
 logger = logging.getLogger(__name__)
@@ -42,6 +44,8 @@ COMMISSION_GROUP_ID = 1
 
 MATCH_MODE_FIELD_HINT = "OrderBook:0, LastPrice:1, OppositePrice:2, Bar:3"
 DATABASE_TYPE_FIELD_HINT = "DuckDB:0, SqliteDB:1, MysqlDB:2, MariaDB:3"
+
+CONFIGURATION_NOT_SERIALIZABLE_MESSAGE = "配置里含无法写进 JSON 的数值 (NaN 或 Infinity)"
 
 # 行情模式到引擎 `MatchMode` 的取值. 只收录 Bar: Tick 侧引擎有三档
 # (OrderBook:0 / LastPrice:1 / OppositePrice:2), 撮合价规则由这个 int 决定, 而平台没有推得出
@@ -91,9 +95,17 @@ def serialize_configuration(configuration: Mapping[str, object]) -> str:
     `ensure_ascii` 保持默认的开启状态: 取值可能含用户输入的非 ASCII 字符, 而落成纯 ASCII 的
     `\\uXXXX` 转义后, 这份文件对读取方的编码假设免疫——中文 Windows 上 `open()` 默认按 GBK
     解码, 一份 UTF-8 的中文配置会让策略在启动期直接抛异常.
+
+    `allow_nan=False` 必须显式给出: 标准 JSON 里没有 `NaN` / `Infinity`, 但 `json.loads`
+    默认收得下它们, 于是一份手工构造的请求体能带一个非有限浮点穿过 pydantic 到这里, 再被写成
+    `NaN`——那是**读侧解析不了**的一份文件, 而写的时候毫无动静. 拒在这里, 换一句 400.
     """
 
-    return json.dumps(dict(configuration), indent=2) + "\n"
+    try:
+        return json.dumps(dict(configuration), indent=2, allow_nan=False) + "\n"
+    except ValueError as error:
+        logger.warning("配置含无法写进 JSON 的数值, 已拒绝: %s", error)
+        raise InvalidRequestError(CONFIGURATION_NOT_SERIALIZABLE_MESSAGE) from error
 
 
 def parse_configuration_object(
@@ -124,7 +136,6 @@ def parse_configuration_object(
 def render_engine_config(
     run_id: str,
     match_mode: MarketDataType,
-    bar_period: str,
     start_trading_day: str,
     end_trading_day: str,
     initial_capital: float,
@@ -132,6 +143,12 @@ def render_engine_config(
     seed_database_path: Path,
 ) -> str:
     """渲染 `BackTest.json`.
+
+    **`BarPreces` 没有形参**: 它恒等于 `MARKET_DATA_PRECISION`, 即落盘数据的精度. 这是那条
+    "数据源精度不是订阅周期"的边界本身 —— 从前它收一个 `bar_period`, 于是用户在提交页选的
+    周期被同时写进这里和策略配置, 而磁盘上只有 5m, 结果是一轮注定读不到行情、详情报着通用
+    失败文案的运行. 改成常量之后, **没有任何调用点能把它写错**; 而策略侧的订阅周期由引擎在
+    运行时聚合得到 (见 `BarAggregator`).
 
     `RunId` 既是目录名也是引擎自己派生结果库名 (`BackTest_<RunId>.db`) 的依据, 故它就是平台
     生成的运行主键; `DbHost` 因此写 `./BackTest.db`, 由引擎拼后缀——平台若自己把 id 拼进去,
@@ -142,7 +159,7 @@ def render_engine_config(
         "RunId": run_id,
         "MatchModeType": MATCH_MODE_FIELD_HINT,
         "MatchMode": resolve_match_mode(match_mode),
-        "BarPreces": bar_period,
+        "BarPreces": MARKET_DATA_PRECISION,
         "MdDataPath": str(market_data_path),
         "DumpPath": RELATIVE_DUMP_PATH,
         "SessionFile": RELATIVE_SESSION_FILE,

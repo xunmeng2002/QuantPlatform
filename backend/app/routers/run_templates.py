@@ -4,8 +4,8 @@
 `catalog/visibility`. 授权与公开只影响"能不能给这个策略存模板", 不影响"能看见谁的模板"——与运行
 记录同一条口径 (被授权人能跑, 不等于能看别人的运行).
 
-**没有 apply 端点**. "套用"要与当前 manifest 派生出的控件、当前表单已填的值一起决定, 是纯前端
-动作; 放在服务端就得把提交页那两段派生逻辑 (`createInitialParameterInputs` /
+**没有 apply 端点**. "套用"要与该版本的配置模板派生出的控件、当前表单已填的值一起决定, 是纯
+前端动作; 放在服务端就得把提交页那两段派生逻辑 (`createInitialParameterInputs` /
 `buildPrefilledRunFields`) 抄一份, 而抄出来的那份迟早与界面上真正跑的那份不一致.
 
 **校验与提交共用一份判据** (`services/run_configuration`): 两边各写一份的话, 能存下的取值就与
@@ -39,20 +39,21 @@ from ..catalog.visibility import (
 from ..dependencies import SessionDependency
 from ..errors import ConflictError, InvalidRequestError
 from ..ids import generate_identifier
-from ..manifest import (
+from ..scheduler.engine_config import parse_configuration_object, serialize_configuration
+from ..services.run_configuration import (
     BAR_PERIOD_FIELD_NAME,
     EXCHANGE_ID_FIELD_NAME,
     INSTRUMENT_ID_FIELD_NAME,
-)
-from ..scheduler.engine_config import parse_configuration_object, serialize_configuration
-from ..services.run_configuration import (
-    build_parameter_configuration,
     resolve_run_field_values,
     validate_initial_capital,
     validate_match_mode,
+    validate_submitted_parameters,
     validate_trading_day_range,
 )
-from ..services.run_submission import parse_version_manifest, resolve_strategy_version
+from ..services.run_submission import (
+    parse_version_configuration_template,
+    resolve_strategy_version,
+)
 
 
 router = APIRouter()
@@ -175,7 +176,7 @@ async def create_run_template_handler(
 ) -> RunTemplateResponse:
     """保存一套取值.
 
-    参数的判据取自该策略**最新版本**的 manifest, 而模板**不绑版本**: 模板是策略级的, 换版本
+    参数的判据取自该策略**最新版本**的配置模板, 而模板**不绑版本**: 模板是策略级的, 换版本
     之后仍应可用. 代价是"某个参数在新版本里被删掉了"这件事要等到套用或提交时才暴露——那是
     版本迭代的固有代价, 绑版本换来的"存模板时就报错"会让每一次正常迭代作废全部旧模板.
 
@@ -188,16 +189,16 @@ async def create_run_template_handler(
     template_name = _resolve_template_name(request_body.name)
 
     version = await resolve_strategy_version(session, strategy.id, None)
-    manifest = parse_version_manifest(version)
+    configuration_template = parse_version_configuration_template(version)
 
-    match_mode = validate_match_mode(manifest, request_body.match_mode)
-    run_field_values = resolve_run_field_values(manifest, request_body)
+    match_mode = validate_match_mode(request_body.match_mode)
+    run_field_values = resolve_run_field_values(request_body)
     start_trading_day, end_trading_day = validate_trading_day_range(
         request_body.start_trading_day, request_body.end_trading_day
     )
     initial_capital = validate_initial_capital(request_body.initial_capital)
-    submitted_parameters = build_parameter_configuration(
-        manifest, dict(request_body.params)
+    submitted_parameters = validate_submitted_parameters(
+        configuration_template, dict(request_body.params)
     )
 
     await _ensure_template_quota(session, current_user, strategy.id)
@@ -209,10 +210,10 @@ async def create_run_template_handler(
         name=template_name,
         match_mode=match_mode.value,
         bar_period=run_field_values[BAR_PERIOD_FIELD_NAME],
-        # 缺席即 `None`: 没映射的字段根本没被收下, 存空串会让"没这道取值"与"填了个空值"混成
-        # 同一个样子, 而套用时前者要清空控件、后者要填一个空值.
-        exchange_id=run_field_values.get(EXCHANGE_ID_FIELD_NAME),
-        instrument_id=run_field_values.get(INSTRUMENT_ID_FIELD_NAME),
+        # 三项一律存规范化的取值, 其中空串就是"没指名合约"——平台恒把这三个键写进策略配置, 故
+        # 这里不再有"字段缺席"那一种取值, 空串与 `None` 的区分也就随之消失.
+        exchange_id=run_field_values[EXCHANGE_ID_FIELD_NAME],
+        instrument_id=run_field_values[INSTRUMENT_ID_FIELD_NAME],
         start_trading_day=start_trading_day,
         end_trading_day=end_trading_day,
         initial_capital=initial_capital,

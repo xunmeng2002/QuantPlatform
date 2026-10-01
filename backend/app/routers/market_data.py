@@ -21,6 +21,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from ..auth.dependencies import CurrentUserDependency
+from ..config import MARKET_DATA_PRECISION_FREQUENCY
 from ..dependencies import SettingsDependency
 from ..services import quote_hub
 from ..services.market_data_coverage import judge_coverage
@@ -106,18 +107,21 @@ async def read_coverage_handler(
     current_user: CurrentUserDependency,
     exchange_id: str = Query(..., max_length=64),
     instrument_id: str = Query(..., max_length=64),
-    bar_period: str = Query(..., max_length=64),
     start_trading_day: str = Query(..., min_length=8, max_length=8),
     end_trading_day: str = Query(..., min_length=8, max_length=8),
 ) -> MarketDataCoverageResponse:
-    """这一轮要不要先下载. 组件不在位或参数拼不出合约时回 `available=false`, 不阻断提交."""
+    """这一轮要不要先下载. 组件不在位或参数拼不出合约时回 `available=false`, 不阻断提交.
+
+    **不问用户在提交页选的订阅周期**: 覆盖判据问的是"这份落盘数据在不在", 而落盘精度是平台常量
+    (`MARKET_DATA_PRECISION_FREQUENCY`). 收下那个周期只会让判据看起来依赖它——而用户的周期与
+    "数据在不在"毫无关系, 这份依赖一旦写进签名, 早晚有人照着它去改判据.
+    """
 
     contract_code = quote_hub.build_contract_code(exchange_id, instrument_id)
-    frequency = quote_hub.bar_period_to_frequency(bar_period)
 
-    if contract_code is None or frequency is None:
+    if contract_code is None:
         return MarketDataCoverageResponse(
-            available=False, reason="所选合约或 K 线周期无法用于行情检查"
+            available=False, reason="所选合约无法用于行情检查"
         )
 
     try:
@@ -125,7 +129,7 @@ async def read_coverage_handler(
             quote_hub.read_coverage_facts,
             settings.quote_hub_root,
             contract_code,
-            frequency,
+            MARKET_DATA_PRECISION_FREQUENCY,
             quote_hub.format_component_day(start_trading_day),
             quote_hub.format_component_day(end_trading_day),
         )

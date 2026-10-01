@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { MarketDataContract } from '../api/types';
-import { buildContractCode, formatContractLabel, SUPPORTED_BAR_PERIODS } from './market-data';
+import { buildContractCode, formatContractLabel, SUBSCRIPTION_BAR_PERIODS } from './market-data';
 
 const CONTRACT: MarketDataContract = {
   code: 'sh.600519',
@@ -39,13 +39,13 @@ describe('formatContractLabel', () => {
   });
 });
 
-describe('SUPPORTED_BAR_PERIODS', () => {
-  it('与组件 CLI 的 --frequency choices 一一对应, 没有 1 分钟线也没有日线', () => {
-    expect(SUPPORTED_BAR_PERIODS.map((period) => period.replace('m', ''))).toEqual([
-      '5',
-      '15',
-      '30',
-      '60',
-    ]);
+describe('SUBSCRIPTION_BAR_PERIODS', () => {
+  it('每一项都是落盘 5m 的整数倍, 且没有 1 分钟线也没有日线', () => {
+    const periodMinutes = SUBSCRIPTION_BAR_PERIODS.map((period) =>
+      Number(period.replace('m', '')),
+    );
+
+    expect(periodMinutes).toEqual([5, 15, 30, 60]);
+    expect(periodMinutes.filter((minutes) => minutes % 5 !== 0)).toEqual([]);
   });
 });

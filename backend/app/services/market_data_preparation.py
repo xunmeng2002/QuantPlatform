@@ -22,6 +22,7 @@ from enum import Enum
 from pathlib import Path
 
 from ..config import (
+    MARKET_DATA_PRECISION_FREQUENCY,
     MAXIMUM_MARKET_DATA_CODES,
     QUOTE_HUB_CLI_FILENAME,
     QUOTE_HUB_DATABASE_FILENAME,
@@ -44,9 +45,6 @@ PLATFORM_DAY_LENGTH = 8
 
 MARKET_DATA_COMPONENT_MISSING_MESSAGE = "行情组件不在位 (目录、入口脚本或数据库缺失)"
 MARKET_DATA_COMPONENT_START_FAILED_MESSAGE = "行情组件无法启动"
-MARKET_DATA_PERIOD_UNSUPPORTED_MESSAGE = (
-    "该策略的 K 线周期不在行情组件支持的范围内 (仅 5 / 15 / 30 / 60 分钟)"
-)
 MARKET_DATA_REQUEST_INCOMPLETE_MESSAGE = "该轮运行记录的行情准备参数不完整, 无法确定要准备哪段区间"
 MARKET_DATA_UNIVERSE_TOO_LARGE_MESSAGE = "需要一并刷新的合约过多, 超出单次命令的长度上限"
 MARKET_DATA_LOGIN_FAILED_MESSAGE = "行情数据源登录失败, 请检查行情组件的凭据与网络"
@@ -78,11 +76,15 @@ class MarketDataUnavailableError(Exception):
 
 @dataclass(frozen=True)
 class MarketDataRequest:
-    """一轮回测对行情的诉求. 起止都是平台内部的 8 位 `YYYYMMDD`."""
+    """一轮回测对行情的诉求. 起止都是平台内部的 8 位 `YYYYMMDD`.
+
+    **没有周期**: 覆盖判据问的只是"这只合约在这段区间里的落盘数据在不在", 而落盘精度是平台常量
+    (`MARKET_DATA_PRECISION`). 用户选的订阅周期不改变这个答案——它在引擎装载期由那批 bar 聚合
+    得到, 与组件库里的 `Frequency` 毫无关系.
+    """
 
     exchange_id: str
     instrument_id: str
-    bar_period: str
     start_trading_day: str
     end_trading_day: str
 
@@ -101,10 +103,10 @@ async def ensure_market_data_available(
     )
 
     if contract_code is None:
-        # 这一轮**没有指名合约**: manifest 没映射 `exchange_id` / `instrument_id`, 或只映射了
-        # 其中一个. 没有合约就无从表达"要准备哪一只的行情", 也就没有什么可准备的——引擎照旧去
-        # 行情根里取它自己要的东西. 这不是失败, 更不该拦: 把它判成错, 等于让所有没映射这两个
-        # 字段的策略从"能跑"变成"跑不了", 而它们本来就跑得挺好.
+        # 这一轮**没有指名合约**: 提交时 `exchange_id` / `instrument_id` 留空, 或只填了其中一个.
+        # 没有合约就无从表达"要准备哪一只的行情", 也就没有什么可准备的——引擎照旧去行情根里取
+        # 它自己要的东西. 这不是失败, 更不该拦: 把它判成错, 等于让所有不指名合约的策略从"能跑"
+        # 变成"跑不了", 而它们本来就跑得挺好.
         logger.info(
             "运行所引用的策略未映射合约 (exchange_id=%r, instrument_id=%r), 跳过行情准备",
             request.exchange_id,
@@ -114,10 +116,7 @@ async def ensure_market_data_available(
 
     _assert_component_in_place(quote_hub_root)
 
-    frequency = quote_hub.bar_period_to_frequency(request.bar_period)
-
-    if frequency is None:
-        raise MarketDataUnavailableError(MARKET_DATA_PERIOD_UNSUPPORTED_MESSAGE)
+    frequency = MARKET_DATA_PRECISION_FREQUENCY
 
     if not _is_a_platform_day(request.start_trading_day) or not _is_a_platform_day(
         request.end_trading_day

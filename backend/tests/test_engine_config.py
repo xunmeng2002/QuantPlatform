@@ -8,6 +8,11 @@
 故这里对写路径的断言不止于"渲染结果是相对值", 还包含"调用点根本没有传入绝对写路径的机会":
 `DbHost` / `DumpPath` 在函数里是常量, 形参表里没有对应入口. 少了这一条, 日后有人为了"让库文件
 可配置"加一个形参, 上面那条渲染断言会跟着形参一起被改绿.
+
+`BarPreces` 走的是同一条思路, 也是这个模块的第三条不变式: 它是**落盘精度** (平台常量), 而用户选
+的那个周期是**策略的订阅目标**, 由引擎在读到 bar 之后自己聚合. 两者混为一个的症状不在渲染结果里
+("渲染对了"与"渲染成另一个族"都只是一个字符串), 而在引擎装载期——它按 `Preces = '<用户选的>'`
+去过滤 parquet, 磁盘上没有那一族, 于是整轮以 `ErrorMarketDataNotExist` 收场.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from app.catalog.enums import MarketDataType
+from app.config import MARKET_DATA_PRECISION
 from app.scheduler.engine_config import (
     COMMISSION_GROUP_ID,
     DATABASE_TYPE_FIELD_HINT,
@@ -35,7 +41,6 @@ from app.scheduler.engine_config import (
 
 
 RUN_ID = "6f1a0c2e4b8d49a8b3c5e7f901234567"
-BAR_PERIOD = "5m"
 START_TRADING_DAY = "20241001"
 END_TRADING_DAY = "20241231"
 INITIAL_CAPITAL = 1000000.0
@@ -64,7 +69,6 @@ ENGINE_CONFIGURATION_KEYS = (
 RENDERER_PARAMETER_NAMES = (
     "run_id",
     "match_mode",
-    "bar_period",
     "start_trading_day",
     "end_trading_day",
     "initial_capital",
@@ -84,7 +88,6 @@ def rendered_configuration(tmp_path: Path) -> dict[str, object]:
         render_engine_config(
             run_id=RUN_ID,
             match_mode=MarketDataType.BAR,
-            bar_period=BAR_PERIOD,
             start_trading_day=START_TRADING_DAY,
             end_trading_day=END_TRADING_DAY,
             initial_capital=INITIAL_CAPITAL,
@@ -135,7 +138,6 @@ def test_the_read_paths_are_absolute_and_verbatim(tmp_path: Path) -> None:
         render_engine_config(
             run_id=RUN_ID,
             match_mode=MarketDataType.BAR,
-            bar_period=BAR_PERIOD,
             start_trading_day=START_TRADING_DAY,
             end_trading_day=END_TRADING_DAY,
             initial_capital=INITIAL_CAPITAL,
@@ -197,14 +199,34 @@ def test_the_run_identifier_lands_in_the_configuration_without_being_prefixed(
 def test_the_run_level_values_land_where_the_engine_reads_them(
     rendered_configuration: dict[str, object],
 ) -> None:
-    """运行级取值逐项落到引擎读它们的键上."""
+    """运行级取值逐项落到引擎读它们的键上.
+
+    `BarPreces` 不在这里: 它是**平台常量**而不是运行级取值, 单独由下一条钉着.
+    """
 
     assert rendered_configuration["MatchMode"] == BAR_MATCH_MODE_VALUE
-    assert rendered_configuration["BarPreces"] == BAR_PERIOD
     assert rendered_configuration["StartTradingDay"] == START_TRADING_DAY
     assert rendered_configuration["EndTradingDay"] == END_TRADING_DAY
     assert rendered_configuration["InitialCapital"] == INITIAL_CAPITAL
     assert rendered_configuration["CommissionGroupId"] == COMMISSION_GROUP_ID
+
+
+def test_the_dataset_bar_period_is_a_constant_the_caller_cannot_reach(
+    rendered_configuration: dict[str, object],
+) -> None:
+    """引擎那份 `BarPreces` 恒为落盘精度, 且**形参表里没有任何入口**能改它.
+
+    它决定引擎按 `Preces = '<值>'` 去读哪一族 parquet. 用户在提交页选的那个周期是**策略的订阅目标**
+    (`TestStrategyGrid.json.BarPreces`), 由引擎在**读之后**聚合出来——把这两者混为一个时, 选 15m 会让
+    引擎去读磁盘上不存在的 `15m` 那一族, 一行都取不到, 于是它在装载期以 `ErrorMarketDataNotExist`
+    拒掉整轮, 白跑一次.
+
+    **没有形参**才是这条不变式的实现本身, 与写路径那条同理: 留一个入口的话, 这里比一个常量照样是
+    绿的——绿的却已经在读别的数据族.
+    """
+
+    assert rendered_configuration["BarPreces"] == MARKET_DATA_PRECISION
+    assert "bar_period" not in inspect.signature(render_engine_config).parameters
 
 
 def test_only_the_bar_match_mode_can_be_rendered() -> None:

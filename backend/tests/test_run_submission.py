@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from httpx import AsyncClient, Response
 
@@ -22,21 +24,27 @@ from app.catalog.enums import (
 )
 from app.catalog.models import RunModel
 from app.config import PlatformSettings
-from app.scheduler.runner import MAXIMUM_ERROR_MESSAGE_LENGTH
+from app.scheduler.runner import (
+    HOST_STARTUP_FAILURE_MESSAGE,
+    MAXIMUM_ERROR_MESSAGE_LENGTH,
+)
 from app.services.engine_probe import ENGINE_VERSION_FILENAME, read_engine_version
 from app.services.run_configuration import (
+    BAR_PERIOD_FIELD_NAME,
+    BAR_PERIOD_INVALID_MESSAGE,
     MATCH_MODE_NOT_SUBMITTABLE_MESSAGE,
-    MISSING_PARAMETER_MESSAGE,
-    RUN_FIELD_NOT_MAPPED_MESSAGE,
+    PLATFORM_PARAMETER_MESSAGE,
     RUN_FIELD_REQUIRED_MESSAGE,
     UNKNOWN_PARAMETER_MESSAGE,
 )
 from app.services.run_submission import (
+    CONFIGURATION_UNREADABLE_MESSAGE,
     MARKET_DATA_MISSING_MESSAGE,
     NO_VERSION_MESSAGE,
     SESSION_FILE_MISSING_MESSAGE,
     VERSION_NOT_FOUND_MESSAGE,
 )
+from app.strategy_configuration import BAR_PERIOD_KEY_NAME
 
 from .helpers import (
     SignedInAccount,
@@ -45,6 +53,7 @@ from .helpers import (
     create_signed_in_account,
     create_strategy_grant_record,
     create_strategy_record,
+    create_strategy_version_record,
 )
 from .run_helpers import (
     BEHAVIOR_PARAMETER_KEY,
@@ -55,7 +64,6 @@ from .run_helpers import (
     STUB_CONFIG_FILENAME,
     await_run_status,
     build_run_request,
-    build_stub_manifest,
     count_run_rows,
     create_runnable_strategy,
     post_run,
@@ -74,6 +82,7 @@ OTHER_STRATEGY_NAME = "另一份桩策略"
 GRANT_STRATEGY_NAME = "被授权人的桩策略"
 PUBLIC_STRATEGY_NAME = "公开的桩策略"
 RECORD_ONLY_STRATEGY_NAME = "还没上传源码的桩策略"
+PRE_CHANGE_STRATEGY_NAME = "改形态之前落的桩策略"
 
 BLOCKING_SLEEP_SECONDS = 2
 RUNNING_ELAPSED_LIMIT_SECONDS = 60
@@ -83,10 +92,11 @@ DEFAULT_SLEEP_SECONDS_VALUE = 0
 DEFAULT_FLOOD_BYTES_VALUE = 0
 
 UNSUPPORTED_MATCH_MODE = MarketDataType.TICK
-UNMAPPED_FIELD_VALUE = "SSE"
 UNKNOWN_PARAMETER_KEY = "UndeclaredKnob"
 UNKNOWN_PARAMETER_VALUE = "某个取值"
 UNDECLARED_BEHAVIOR_VALUE = "not-a-declared-behavior"
+NEGATIVE_FLOOD_BYTES = -1
+SUBMITTED_PERIOD = "60m"
 ABSENT_MARKET_DATA_DIRECTORY_NAME = "absent-market-data"
 ABSENT_SESSION_FILENAME = "AbsentSessions.json"
 
@@ -95,10 +105,6 @@ ABSENT_SESSION_FILENAME = "AbsentSessions.json"
 ENGINE_VERSION_TEXT = "build-2026.09.27"
 
 RESULT_LONG_TAIL_KEY = "MissingRateKeys"
-
-# `exchange_id` 在下面的"未映射"用例里是被点名的字段: 报错文案该带**字段名**, 不该带取值.
-EXCHANGE_ID_FIELD_NAME = "exchange_id"
-INSTRUMENT_ID_FIELD_NAME = "instrument_id"
 
 
 async def test_a_missing_rate_key_array_is_not_in_the_response_but_is_on_disk(
@@ -265,49 +271,16 @@ async def test_a_match_mode_the_platform_cannot_submit_is_rejected(
     assert run_directory_names(platform_settings) == directories_before
 
 
-async def test_a_run_field_the_manifest_does_not_map_is_rejected(
+async def test_a_blank_bar_period_is_rejected(
     client: AsyncClient,
     database: PlatformDatabase,
     platform_settings: PlatformSettings,
     run_owner: SignedInAccount,
 ) -> None:
-    """manifest 没映射 `exchange_id` 时提交它 → 400.
+    """`bar_period` 留空 → 400.
 
-    该字段只有策略的 `subscribe_tick` 用, 引擎根本不认识它. 没映射而收下, 它无处落地: 用户以为
-    自己换了个交易所, 而策略收到的配置里连这个键都没有.
-    """
-
-    runnable = await create_runnable_strategy(
-        database,
-        platform_settings,
-        run_owner.user,
-        STRATEGY_NAME,
-        manifest=build_stub_manifest(run_field_keys={"bar_period": "BarPreces"}),
-    )
-
-    rows_before = await count_run_rows(database)
-
-    response = await post_run(
-        client, run_owner.token, build_run_request(runnable.strategy.id)
-    )
-
-    assert_rejected(
-        response,
-        RUN_FIELD_NOT_MAPPED_MESSAGE.format(field=EXCHANGE_ID_FIELD_NAME),
-        UNMAPPED_FIELD_VALUE,
-    )
-    assert await count_run_rows(database) == rows_before
-
-
-async def test_a_mapped_run_field_left_empty_is_rejected(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
-    """manifest 映射了 `instrument_id` 却提交空白 → 400.
-
-    映射了就意味着策略一定会去读那个键; 空取值不会"保持默认", 它会以未捕获异常收场 (退出码 1).
+    三个运行级字段里只有它是必填的: 合约可以留空 (那一轮不指名标的), 而周期决定策略收到多粗的
+    bar——空值不会是"保持默认", 它会以策略读到一个空周期收场.
     """
 
     runnable = await create_runnable_strategy(
@@ -319,13 +292,41 @@ async def test_a_mapped_run_field_left_empty_is_rejected(
     response = await post_run(
         client,
         run_owner.token,
-        build_run_request(runnable.strategy.id, instrument_id="   "),
+        build_run_request(runnable.strategy.id, bar_period="   "),
     )
 
     assert_rejected(
         response,
-        RUN_FIELD_REQUIRED_MESSAGE.format(field=INSTRUMENT_ID_FIELD_NAME),
+        RUN_FIELD_REQUIRED_MESSAGE.format(field=BAR_PERIOD_FIELD_NAME),
     )
+    assert await count_run_rows(database) == rows_before
+
+
+async def test_a_bar_period_outside_the_subscription_list_is_rejected(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    run_owner: SignedInAccount,
+) -> None:
+    """`7m` 这种非 5m 整数倍的周期 → 400, 且文案里带上 `bar_period` 这个字段名.
+
+    它必须**在这里**被拦下: 引擎装载期也会拒 (它聚不出 7 分钟), 但那时整轮已经起过进程、详情报的
+    是一句通用的"引擎报告本轮回测失败", 用户看不出是周期选错了.
+    """
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    rows_before = await count_run_rows(database)
+
+    response = await post_run(
+        client,
+        run_owner.token,
+        build_run_request(runnable.strategy.id, bar_period="7m"),
+    )
+
+    assert_rejected(response, BAR_PERIOD_INVALID_MESSAGE)
     assert await count_run_rows(database) == rows_before
 
 
@@ -335,10 +336,10 @@ async def test_an_undeclared_parameter_is_rejected(
     platform_settings: PlatformSettings,
     run_owner: SignedInAccount,
 ) -> None:
-    """提交 manifest 未声明的参数 → 400, 文案列出参数名.
+    """提交该版本配置里没有的键 → 400, 文案列出键名.
 
-    未声明的键不会"原样透传"进策略配置: 平台按 manifest 渲染, 只写声明过的键. 静默收下等于让
-    用户以为参数生效了, 而策略读到它时是 `KeyError`.
+    键集由**上传的那份配置 JSON**固定, 提交只有"改值"这一种权利. 静默收下等于让用户以为参数生效
+    了, 而策略读到的配置里根本没有那个键.
     """
 
     runnable = await create_runnable_strategy(
@@ -364,16 +365,17 @@ async def test_an_undeclared_parameter_is_rejected(
     assert await count_run_rows(database) == rows_before
 
 
-async def test_a_parameter_value_outside_its_declared_options_is_rejected(
+async def test_a_parameter_of_the_platform_is_rejected_before_the_unknown_key_check(
     client: AsyncClient,
     database: PlatformDatabase,
     platform_settings: PlatformSettings,
     run_owner: SignedInAccount,
 ) -> None:
-    """参数取值不在 `options` 之内 → 400.
+    """参数里写 `BarPreces` → 400, 报的是"别写它"而不是"没有这个键".
 
-    与"未声明的参数"不同: 键是对的、类型也对, 坏的是取值. 这条若漏掉, 桩会以"未知的桩行为"抛
-    异常收场——用户拿到的是一个与他的输入看起来毫无关联的 `failed`.
+    两种说法在这份模板上都成立 (模板里确实没有这个键), 故**报哪一句**是要紧的: 说"键不存在", 用户
+    的动作是去改自己那份配置文件; 而正确的动作是什么都不做——运行级取值由用户在提交页选, 模板里
+    写什么都不作数.
     """
 
     runnable = await create_runnable_strategy(
@@ -386,91 +388,70 @@ async def test_a_parameter_value_outside_its_declared_options_is_rejected(
         client,
         run_owner.token,
         build_run_request(
-            runnable.strategy.id,
-            params={BEHAVIOR_PARAMETER_KEY: UNDECLARED_BEHAVIOR_VALUE},
+            runnable.strategy.id, params={BAR_PERIOD_KEY_NAME: SUBMITTED_PERIOD}
         ),
-    )
-
-    assert response.status_code == 400, response.text
-    assert f"参数 {BEHAVIOR_PARAMETER_KEY}" in response.json()["detail"]
-    assert UNDECLARED_BEHAVIOR_VALUE not in response.text
-    assert await count_run_rows(database) == rows_before
-
-
-async def test_a_parameter_under_its_declared_minimum_is_rejected(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
-    """参数取值低于 `minimum` → 400.
-
-    `minimum` 是 manifest 的声明, 不是平台对某个具体参数的偏好: 桩的 `FloodBytes` 声明了
-    `minimum: 0`, 负值进不了配置.
-    """
-
-    runnable = await create_runnable_strategy(
-        database, platform_settings, run_owner.user, STRATEGY_NAME
-    )
-
-    rows_before = await count_run_rows(database)
-
-    response = await post_run(
-        client,
-        run_owner.token,
-        build_run_request(
-            runnable.strategy.id, params={FLOOD_BYTES_PARAMETER_KEY: -1}
-        ),
-    )
-
-    assert response.status_code == 400, response.text
-    assert f"参数 {FLOOD_BYTES_PARAMETER_KEY}" in response.json()["detail"]
-    assert await count_run_rows(database) == rows_before
-
-
-async def test_a_required_parameter_left_out_is_rejected_naming_the_key(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
-    """没有 `default` 的参数未提交 → 400, 文案列出缺失的 key.
-
-    文案里的 key 取自 **manifest**, 不是调用方的输入. 这一条不设的话, 一次"缺参数"的提交会被
-    策略以 `KeyError` 收场, 而用户看到的是退出码 1.
-    """
-
-    runnable = await create_runnable_strategy(
-        database,
-        platform_settings,
-        run_owner.user,
-        STRATEGY_NAME,
-        manifest=build_stub_manifest(required_parameter_keys=frozenset({BEHAVIOR_PARAMETER_KEY})),
-    )
-
-    rows_before = await count_run_rows(database)
-
-    response = await post_run(
-        client, run_owner.token, build_run_request(runnable.strategy.id)
     )
 
     assert_rejected(
-        response, MISSING_PARAMETER_MESSAGE.format(keys=BEHAVIOR_PARAMETER_KEY)
+        response, PLATFORM_PARAMETER_MESSAGE.format(keys=BAR_PERIOD_KEY_NAME)
     )
     assert await count_run_rows(database) == rows_before
 
 
-async def test_the_declared_defaults_are_written_verbatim(
+async def test_a_parameter_value_is_written_through_without_judgement(
     client: AsyncClient,
     database: PlatformDatabase,
     platform_settings: PlatformSettings,
     run_owner: SignedInAccount,
 ) -> None:
-    """只给必填项的一轮: 未提交的参数取 manifest 声明的默认值.
+    """参数**取值**一律不判: 桩不认识的取值照旧 201, 且逐字进策略配置.
 
-    与"缺必填参数被拒"是一对: 有 `default` 的参数不提交不算错, 没 `default` 的才算. 桩的五个
-    参数默认全带默认值, 故连 `params` 都不给也应当成事——而"平台把默认值写成了 None"这类缺陷
-    只在策略读到 `None` 时才以退出码 1 的面目出现.
+    这是用户拍板的取舍 —— 取值范围、类型、可选项全都不看, 参数合法性由策略自己守. 故这里断的是
+    "原样写下去"而不是"被拒": 平台若能悄悄改一个取值, 策略读到的就不是用户填的那份了.
+    """
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    submitted = await submit_run(
+        client,
+        run_owner.token,
+        runnable.strategy.id,
+        params={
+            BEHAVIOR_PARAMETER_KEY: UNDECLARED_BEHAVIOR_VALUE,
+            FLOOD_BYTES_PARAMETER_KEY: NEGATIVE_FLOOD_BYTES,
+        },
+    )
+
+    stored_run = await read_run_record(database, submitted.id)
+    stored_configuration = json.loads(stored_run.params_json)
+
+    assert stored_configuration[BEHAVIOR_PARAMETER_KEY] == UNDECLARED_BEHAVIOR_VALUE
+    assert stored_configuration[FLOOD_BYTES_PARAMETER_KEY] == NEGATIVE_FLOOD_BYTES
+
+    await await_run_terminal(database, submitted.id, RUNNING_ELAPSED_LIMIT_SECONDS)
+
+    # 值坏到策略自己受不了时, 收场的是策略: 它抛未捕获异常, 宿主以退出码 1 结束. 平台不替它
+    # 判断取值, 故用户看到的是一句"回测宿主启动失败"——这就是那笔取舍的代价, 明写在这里.
+    failed_run = await read_run_record(database, submitted.id)
+
+    assert failed_run.status == RunStatus.FAILED.value
+    assert failed_run.error_msg == HOST_STARTUP_FAILURE_MESSAGE
+
+
+async def test_the_template_values_are_written_verbatim(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    run_owner: SignedInAccount,
+) -> None:
+    """一个参数都不改的一轮: 策略读到的就是**上传那份文件里写的值**.
+
+    这是"上传的配置 JSON 即模板"在提交路径上的直接体现: 平台不替策略填默认值, 它只是把那份文件
+    原样当作底稿. 于是"模板里写着什么, 策略就读到什么"是**结构性**的——不需要另有一张声明表来
+    说明"这个参数默认是几", 也就没有"平台把默认值写成 `None`"这种缺陷可言. 桩的五个参数全在
+    模板里带值, 故连 `params` 都不给也应当成事.
     """
 
     runnable = await create_runnable_strategy(
@@ -544,6 +525,37 @@ async def test_a_version_of_another_strategy_is_rejected(
     )
 
     assert_rejected(response, VERSION_NOT_FOUND_MESSAGE)
+    assert await count_run_rows(database) == rows_before
+
+
+async def test_a_pre_change_version_cannot_be_submitted(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    run_owner: SignedInAccount,
+) -> None:
+    """改形态之前落的版本 → 400 说"重新上传该版本", 而不是 500.
+
+    那种行没有配置模板 (`ConfigurationJson` 是 NULL), 于是平台压根渲染不出策略配置. 它是**最可能
+    撞上**的一格: 库里的存量版本全是这一种, 而用户的动作只是"点一下上次的那个版本再提交". 报 500
+    会把原因归到平台上 ("服务器内部错误, 稍后重试"), 而正确的动作——重新上传——一个字都不会出现.
+    """
+
+    strategy = await create_strategy_record(
+        database, run_owner.user, PRE_CHANGE_STRATEGY_NAME
+    )
+    version = await create_strategy_version_record(
+        database, strategy, run_owner.user, configuration_json=None
+    )
+
+    rows_before = await count_run_rows(database)
+
+    response = await post_run(
+        client,
+        run_owner.token,
+        build_run_request(strategy.id, strategy_version_id=version.id),
+    )
+
+    assert_rejected(response, CONFIGURATION_UNREADABLE_MESSAGE)
     assert await count_run_rows(database) == rows_before
 
 

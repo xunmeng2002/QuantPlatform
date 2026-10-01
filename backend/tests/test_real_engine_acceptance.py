@@ -27,9 +27,12 @@
     set QUANT_REAL_MARKET_DATA_ROOT=D:\\Gitee\\QuantPlatform\\market-data
     python -m pytest -m real_engine tests/test_real_engine_acceptance.py -v
 
-`--basetemp` 落在仓内的 `_acc_tmp/` (已被 `.gitignore` 覆盖): 四个用例各留下一个作业目录,
-共约 22 MB, 而 `%TEMP%` 下的临时根在排查时不好找——验收失败时第一件事就是进去看
+`--basetemp` 落在仓内的 `_acc_tmp/` (已被 `.gitignore` 覆盖): 五个用例各留下一个作业目录,
+共约 25 MB, 而 `%TEMP%` 下的临时根在排查时不好找——验收失败时第一件事就是进去看
 `stdout.txt` 与 `result.json` 到底有没有写出来.
+
+五个用例里有两个是**同一个场景的两档订阅周期** (`5m` 与 `15m`): 后者是"落盘精度与用户订阅周期
+是两件事"这条契约在真引擎上的判据, 见 `test_a_subscription_period_finer_than_the_dataset_is_aggregated`.
 
     python -m pytest -m real_engine tests/test_real_engine_acceptance.py -v --basetemp=_acc_tmp
 
@@ -56,8 +59,7 @@ from httpx import AsyncClient
 
 from app.catalog.database import PlatformDatabase
 from app.catalog.enums import RunStatus
-from app.config import PlatformSettings
-from app.manifest import StrategyManifest
+from app.config import MARKET_DATA_PRECISION, SUBSCRIPTION_BAR_PERIODS, PlatformSettings
 
 from .helpers import SignedInAccount, bearer_headers, create_signed_in_account
 from .quote_hub_stub import build_covered_component
@@ -102,7 +104,6 @@ REAL_SESSION_FILENAME = "Sessions.json"
 REAL_SEED_DATABASE_FILENAME = "BackTestInit.db"
 
 STRATEGY_NAME = "成对网格 (真引擎验收)"
-CLIENT_SIDE_PART_FILENAME = "whatever-the-browser-called-it.py"
 
 ACCOUNT_ID_PARAMETER_KEY = "AccountId"
 LOG_LEVEL_PARAMETER_KEY = "LogLevel"
@@ -116,10 +117,26 @@ DEFAULT_LOG_LEVEL = 2
 DEFAULT_GRID_STEP = 0.01
 DEFAULT_GRID_COUNT = 5
 DEFAULT_VOLUME_PER_GRID = 1
-# 比例的下界取一个严格大于 0 的正数：0 会被策略构造期拒启，故不让它在表单里可选.
-GRID_STEP_MINIMUM = 0.0001
 
-BAR_PERIOD = "5m"
+#: 上传配置模板里 `AccountId` 的占位值. **刻意不等于**引擎那份配置里的账号: 同值的话, "用户改的
+#: 那个值真的落进了策略配置"这一条在真回测上就分不出来——模板默认值与提交值相同时, "覆写生效"与
+#: "覆写被忽略"两种实现都断言得过.
+TEMPLATE_ACCOUNT_ID_PLACEHOLDER = "模板占位账号"
+
+# ── 两种「周期」是两件事 ─────────────────────────────────────────────────────
+#
+# 落盘行情只有 5m, 而引擎读哪一族 parquet 由 `BackTest.json.BarPreces` 决定, 聚合到多粗则由策略
+# 订阅的目标周期 (`TestStrategyGrid.json.BarPreces`) 决定. 把一个值写进这两处, 正是本轮要修的
+# 那个类别错误: 选 15m 时引擎按 `Preces = '15m'` 去过滤, 磁盘上没有这一族, 一行都读不到, 于是它
+# 在**装载期**以 `ErrorMarketDataNotExist` 拒掉整轮 (见 `SimExchange.cpp`), 白跑一次.
+#
+#: 落盘精度, 平台常量. 引擎那份 `BackTest.json` 的 `BarPreces` **恒**为它, 与用户选什么无关.
+DATASET_BAR_PERIOD = MARKET_DATA_PRECISION
+#: 提交页选定的**订阅周期**, 即策略配置里 `BarPreces` 的取值. 取 5m 时与落盘精度同值 (不必聚合).
+SUBSCRIPTION_BAR_PERIOD = "5m"
+#: 与落盘精度**不同**的那一档, 供"用户选了要聚合的周期"那条用例用.
+AGGREGATED_SUBSCRIPTION_BAR_PERIOD = "15m"
+
 EXCHANGE_ID = "SSE"
 INSTRUMENT_ID = "600519"
 START_TRADING_DAY = "20241001"
@@ -162,9 +179,9 @@ ENGINE_FINISHED_MARKER = "RunResult Written"
 # 记录值 (成交 `34` / 委托 `629` / 两份余额) 自 `ebaaab1` 引入起只被手工重取过一次
 # (`60a67e9`, 网格步长改比例 `84 → 34`)、又过期过一次 (2026-10-01 实跑 `435`, 原因在仓外),
 # **没有一次指向平台缺陷**. 它当初是用来验 "(P3) 作业目录构造与配置渲染没有改变回测结果" 的
-# 脚手架, 那个开发阶段早已结束; 它想验的东西现在由下面的断言**直接**钉着 —— `BarPreces` 两份
-# 配置同值 (静默 0 成交那条失效路径)、运行级字段按 manifest 映射、`DbHost` → `DbPath` 的派生、
-# 预填往返 —— 那些断言的是**契约本身**, 不依赖任何记录值, 也永远不会过期.
+# 脚手架, 那个开发阶段早已结束; 它想验的东西现在由下面的断言**直接**钉着 —— 引擎那份 `BarPreces`
+# 恒为落盘精度而策略那份是提交的订阅周期、三个运行级键按固定键名落进策略配置、`DbHost` →
+# `DbPath` 的派生、预填往返 —— 那些断言的是**契约本身**, 不依赖任何记录值, 也永远不会过期.
 BAR_MARKET_DATA_COUNT = 2928
 
 # 结果表那一页故意取一个**小于**行数的页大小: 取 100 (上界) 时 `total` 与 `len(records)` 恰好
@@ -227,8 +244,8 @@ def real_settings(platform_settings: PlatformSettings, tmp_path: Path) -> Platfo
 def read_engine_account_id() -> str:
     """账号取自引擎目录里的那份配置, 不抄进平台仓库.
 
-    这个值只对引擎有意义 (它按账号找资金与持仓), 与平台无关, 故平台的 manifest 把它声明成"无
-    默认值的参数"、由提交方给出——本用例的提交方是这里, 取值直接读引擎那份配置.
+    这个值只对引擎有意义 (它按账号找资金与持仓), 与平台无关, 故它不是平台那三个运行级键之一,
+    而是策略自己的一个参数——模板里给它一个占位值, 提交时由本用例换成引擎那份配置里的真账号.
     """
 
     configuration = json.loads(
@@ -238,84 +255,53 @@ def read_engine_account_id() -> str:
     return str(configuration["AccountId"])
 
 
-def build_real_manifest() -> StrategyManifest:
-    """真策略的 manifest: 声明它从策略配置里读的每一个键.
+def build_real_configuration_template() -> dict[str, object]:
+    """真策略那份配置 JSON 的内容, 也就是它的参数模板.
 
-    `grid_strategy.py` 读 `LogLevel` / `AccountId` / `GridStep` / `GridCount` /
-    `VolumePerGrid` 以及三个运行级字段 (`ExchangeId` / `InstrumentId` / `BarPreces`).
-    少声明一个, 平台渲染出来的配置里就少一个键, 策略在启动期以 `KeyError` 收场——而那一轮的
-    `stderr.txt` 里只有一行 traceback, 看起来像策略写坏了.
+    **这份模板即上传的那份 `.json` 的正文**, 而它的键就是提交页要渲染的全部控件. `grid_strategy.py`
+    在启动时读 `LogLevel` / `AccountId` / `GridStep` / `GridCount` / `VolumePerGrid` 五个键以及三个
+    运行级键 (`ExchangeId` / `InstrumentId` / `BarPreces`); 少一个, 策略在启动期以 `KeyError` 收场
+    ——而那一轮的 `stderr.txt` 里只有一行 traceback, 看起来像策略写坏了.
 
-    三个运行级字段经 `run_field_keys` 映射: 平台于是把**同一个** `BarPreces` 既写进
-    `BackTest.json` (引擎实际聚合周期) 又写进策略配置 (策略 `declare_bar_period` 的期望周期),
-    §1.2 那条"静默 0 成交"的失效路径因此是结构性关闭的.
+    三个运行级键**不在这里**: 平台渲染时按固定键名覆写 (模板里没有就新增), 模板自己声明它们反而
+    会被覆盖掉. 两者的分工见 `app/strategy_configuration.py` 的模块 docstring.
     """
 
-    return StrategyManifest.model_validate(
-        {
-            "entry_filename": REAL_ENTRY_FILENAME,
-            "config_filename": REAL_CONFIG_FILENAME,
-            "supported_match_modes": ["Bar"],
-            "run_field_keys": {
-                "exchange_id": "ExchangeId",
-                "instrument_id": "InstrumentId",
-                "bar_period": "BarPreces",
-            },
-            "params": [
-                {
-                    "key": LOG_LEVEL_PARAMETER_KEY,
-                    "label": "日志级别",
-                    "type": "integer",
-                    "default": DEFAULT_LOG_LEVEL,
-                    "minimum": 0,
-                },
-                {
-                    "key": ACCOUNT_ID_PARAMETER_KEY,
-                    "label": "引擎账号",
-                    "type": "string",
-                },
-                {
-                    "key": GRID_STEP_PARAMETER_KEY,
-                    "label": "网格步长(比例, 0.01=1%)",
-                    "type": "number",
-                    "default": DEFAULT_GRID_STEP,
-                    "minimum": GRID_STEP_MINIMUM,
-                },
-                {
-                    "key": GRID_COUNT_PARAMETER_KEY,
-                    "label": "单向格数",
-                    "type": "integer",
-                    "default": DEFAULT_GRID_COUNT,
-                    "minimum": 1,
-                },
-                {
-                    "key": VOLUME_PER_GRID_PARAMETER_KEY,
-                    "label": "每格手数",
-                    "type": "integer",
-                    "default": DEFAULT_VOLUME_PER_GRID,
-                    "minimum": 1,
-                },
-            ],
-        }
-    )
+    return {
+        LOG_LEVEL_PARAMETER_KEY: DEFAULT_LOG_LEVEL,
+        ACCOUNT_ID_PARAMETER_KEY: TEMPLATE_ACCOUNT_ID_PLACEHOLDER,
+        GRID_STEP_PARAMETER_KEY: DEFAULT_GRID_STEP,
+        GRID_COUNT_PARAMETER_KEY: DEFAULT_GRID_COUNT,
+        VOLUME_PER_GRID_PARAMETER_KEY: DEFAULT_VOLUME_PER_GRID,
+    }
 
 
 async def upload_real_strategy(
     client: AsyncClient, token: str
 ) -> tuple[str, str]:
-    """经上传接口落一份真策略, 返回 (策略 id, 版本 id)."""
+    """经上传接口落一份真策略, 返回 (策略 id, 版本 id).
 
-    manifest_text = build_real_manifest().model_dump_json()
+    上传的是**两份文件**, 而它们的文件名就是作业目录里的文件名——策略源码里 `open("TestStrategyGrid.json")`
+    写死了那一个, 故这里的部件名必须用它本身, 另取一个 (如"浏览器叫它什么") 会让策略在启动期读不到
+    配置. 这一条正是新契约与旧 manifest 的分界: 名字不再由平台另填一份元数据声明, 而是文件带的.
+    """
 
     response = await client.post(
         STRATEGIES_PATH,
-        data={"manifest": manifest_text, "name": STRATEGY_NAME},
+        data={"name": STRATEGY_NAME},
         files={
             "source": (
-                CLIENT_SIDE_PART_FILENAME,
+                REAL_ENTRY_FILENAME,
                 (REAL_ENGINE_ROOT / REAL_ENTRY_FILENAME).read_bytes(),
                 "text/x-python",
-            )
+            ),
+            "configuration": (
+                REAL_CONFIG_FILENAME,
+                json.dumps(
+                    build_real_configuration_template(), ensure_ascii=False, indent=2
+                ).encode("utf-8"),
+                "application/json",
+            ),
         },
         headers=bearer_headers(token),
     )
@@ -455,27 +441,31 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
 
     assert engine_configuration["RunId"] == submitted.id
 
-    # 「静默 0 成交」那条失效路径 (D.01): 引擎实际聚合周期 (`BackTest.json.BarPreces`) 与策略自己
-    # 期望的周期 (`grid_strategy.py:declare_bar_period`) 必须同值. 不一致时策略收不到 bar、**不
-    # 报错、只 0 成交**, 故这里直接比两份配置——它们同值才是"平台写的是同一个值"。
-    assert engine_configuration["BarPreces"] == BAR_PERIOD
-    assert strategy_configuration["BarPreces"] == BAR_PERIOD
+    # 两份配置里的 `BarPreces` 是**两件事**, 而它们的取值差正是本轮修掉的类别错误 (见常量区):
+    # 引擎那份决定读哪一族 parquet, 恒为落盘精度; 策略那份是策略订阅的目标周期, 取自提交值.
+    assert engine_configuration["BarPreces"] == DATASET_BAR_PERIOD
+    assert strategy_configuration["BarPreces"] == SUBSCRIPTION_BAR_PERIOD
 
-    # 三个运行级字段经 `run_field_keys` 落到了策略配置里 (引擎不认识它们, 只有策略订阅用).
+    # 三个运行级键按**固定键名**落进策略配置 (引擎不认识它们, 只有策略订阅与下单用). 它们不在上传
+    # 的模板里, 故这三条同时说明平台确实补上了这三个.
     assert strategy_configuration["ExchangeId"] == EXCHANGE_ID
     assert strategy_configuration["InstrumentId"] == INSTRUMENT_ID
 
+    # `AccountId` 是**用户改过的**那个参数: 模板里是占位值, 提交时换成引擎那份配置里的真账号.
+    # 少了这一条, "覆写真的写进了策略配置"就分不出来——模板值与提交值相同时两种实现都对得上.
+    assert strategy_configuration[ACCOUNT_ID_PARAMETER_KEY] == read_engine_account_id()
+
     # 提交页预填 (D.10): 读回来的必须是**刚提交的那一份**, 逐字段对上. 这一条落在真回测上, 故它
     # 同时证明三件事: 提交写库的两份文本解得出原值; `BackTest.json` 里 `MatchMode` 那个 int 反查
-    # 得回枚举; 参数**恰好**是 manifest 声明的五个——三个运行级键名 (`BarPreces` / `ExchangeId` /
-    # `InstrumentId`) 已被按映射剔掉, 不会混进参数控件.
+    # 得回枚举; 参数**恰好**是模板声明的那五个——三个运行级键名 (`BarPreces` / `ExchangeId` /
+    # `InstrumentId`) 已被按固定键名剔掉, 不会混进参数控件.
     assert prefill_response.status_code == 200, prefill_response.text
 
     prefill = prefill_response.json()
 
     assert prefill["run_id"] == submitted.id
     assert prefill["match_mode"] == "Bar"
-    assert prefill["bar_period"] == BAR_PERIOD
+    assert prefill["bar_period"] == SUBSCRIPTION_BAR_PERIOD
     assert prefill["exchange_id"] == EXCHANGE_ID
     assert prefill["instrument_id"] == INSTRUMENT_ID
     assert prefill["start_trading_day"] == START_TRADING_DAY
@@ -522,6 +512,59 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
     # `Order` 是 SQLite 保留字: 这条能回数据才说明表名真的被引号包住 (裸拼会 500).
     assert order_table_response.status_code == 200, order_table_response.text
     assert order_table_response.json()["total"] == finished.order_count
+
+
+async def test_a_subscription_period_finer_than_the_dataset_is_aggregated(
+    real_settings: PlatformSettings,
+) -> None:
+    """② 用户选 15m 时跑得通: 引擎那份 `BarPreces` 仍是落盘精度, 聚合发生在读之后.
+
+    这一条直接钉住本轮修掉的类别错误. 磁盘上的行情只有 5m, 引擎按 `BackTest.json.BarPreces` 去
+    过滤 parquet; 把用户选的周期写进那处时, 引擎按 `Preces = '15m'` 一行都读不到, 于是它在**装载
+    期**即以 `ErrorMarketDataNotExist` 收场 (不是"安静地零成交"), 整轮白跑——而运行详情只会说
+    "引擎报告本轮回测失败", 用户看不出是周期选错了.
+
+    判据分两层, 缺一不可: "跑通了"只说明没报错; 而**读到的 bar 条数与 5m 那一档完全相同**才说明
+    它读的确实是那批 5m 数据——聚合发生在读之后, 故 `BarMarketDataCount` 不随订阅周期动. 它若变
+    了, 就是引擎真按 15m 去过滤了, 那正是"一行都读不到"的另一面.
+    """
+
+    assert AGGREGATED_SUBSCRIPTION_BAR_PERIOD in SUBSCRIPTION_BAR_PERIODS
+    assert AGGREGATED_SUBSCRIPTION_BAR_PERIOD != DATASET_BAR_PERIOD
+
+    async with running_client(real_settings) as (application, client):
+        database = application.state.database
+        owner = await create_signed_in_account(
+            database, client, "real-aggregation-owner"
+        )
+
+        strategy_id, version_id = await upload_real_strategy(client, owner.token)
+
+        submitted = await submit_run(
+            client,
+            owner.token,
+            strategy_id,
+            strategy_version_id=version_id,
+            bar_period=AGGREGATED_SUBSCRIPTION_BAR_PERIOD,
+            params={ACCOUNT_ID_PARAMETER_KEY: read_engine_account_id()},
+        )
+
+        finished = await await_run_terminal(
+            database, submitted.id, TERMINAL_TIMEOUT_SECONDS
+        )
+
+        engine_configuration = read_job_json(
+            real_settings, submitted.id, "BackTest.json"
+        )
+        strategy_configuration = read_job_json(
+            real_settings, submitted.id, REAL_CONFIG_FILENAME
+        )
+
+    assert finished.status == RunStatus.SUCCEEDED.value, finished.error_msg
+    assert finished.bar_market_data_count == BAR_MARKET_DATA_COUNT
+
+    assert engine_configuration["BarPreces"] == DATASET_BAR_PERIOD
+    assert strategy_configuration["BarPreces"] == AGGREGATED_SUBSCRIPTION_BAR_PERIOD
 
 
 async def test_two_real_runs_at_once_keep_their_databases_apart(

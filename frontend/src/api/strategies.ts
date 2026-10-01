@@ -1,9 +1,10 @@
 /**
  * 策略本体、版本与授权.
  *
- * 上传是 multipart 而不是 JSON: 源码是文件, 而 manifest 是**同一个请求里的一个文本字段**
- * (见 `routers/strategies.py` 的模块 docstring). 前端两条录入路径 (手填 / 读入一份
- * manifest.json) 最终落到同一个字段, 故服务端只有一条路径.
+ * 上传是 multipart, 且是**两个文件字段**: 源码 `.py` 与配置 `.json`. 配置必须是文件而不是文本
+ * 字段, 因为它要带着自己的文件名落到作业目录里 —— 策略启动时按那个名字读它 (见
+ * `docs/job-workspace.md`), 平台替它编一个名字就等于改掉了策略本来就认的那份配置名. 那份 JSON 同
+ * 时是提交页的参数模板 (见 `domain/strategy-configuration`).
  */
 
 import { request } from './client';
@@ -23,7 +24,7 @@ export interface StrategyCreateInput {
   description: string;
   visibilityType: StrategyVisibility;
   sourceFile: File;
-  manifestText: string;
+  configurationFile: File;
 }
 
 export function fetchStrategies(
@@ -40,7 +41,7 @@ export function fetchStrategyDetail(strategyId: string): Promise<StrategyDetail>
 export function createStrategy(input: StrategyCreateInput): Promise<StrategyDetail> {
   const formData = new FormData();
   formData.append('source', input.sourceFile);
-  formData.append('manifest', input.manifestText);
+  formData.append('configuration', input.configurationFile);
   formData.append('name', input.name);
   formData.append('description', input.description);
   formData.append('visibility_type', input.visibilityType);
@@ -51,11 +52,11 @@ export function createStrategy(input: StrategyCreateInput): Promise<StrategyDeta
 export function uploadStrategyVersion(
   strategyId: string,
   sourceFile: File,
-  manifestText: string,
+  configurationFile: File,
 ): Promise<StrategyVersion> {
   const formData = new FormData();
   formData.append('source', sourceFile);
-  formData.append('manifest', manifestText);
+  formData.append('configuration', configurationFile);
 
   return request<StrategyVersion>(
     `/strategies/${encodeURIComponent(strategyId)}/versions`,

@@ -131,8 +131,15 @@ export interface StrategyVersion {
   entry_filename: string;
   config_filename: string;
   source_hash: string;
-  /** 上传时那份 manifest 文本的原样透传 (字符串). 提交页按它生成参数控件, 故须自行解析. */
-  manifest_json: string;
+  /**
+   * 上传的那份配置 JSON 的**原样透传** (字符串, 不在这里解析): 提交页按它的键生成参数控件, 故
+   * 必须能到前端; 而在读接口里解析会给存量行新增一条失败路径 (一份坏配置会让整个策略详情 500),
+   * 前端本来也要自己 `JSON.parse`.
+   *
+   * `null` 表示**改形态之前**落的版本 (那时存的是 manifest), 它没有模板, 提交时后端会回 400 让
+   * 用户重传. 前端据此把"这份版本不能用来提交"说在前面.
+   */
+  configuration_json: string | null;
   uploaded_at: string;
 }
 
@@ -157,49 +164,32 @@ export interface StrategyGrantPayload {
   permission_type: GrantPermission;
 }
 
-/* ── manifest (策略作者与平台的契约, 经 manifest_json 到达前端) ── */
-
-export const PARAMETER_TYPES = ['integer', 'number', 'string', 'boolean'] as const;
-export type ParameterType = (typeof PARAMETER_TYPES)[number];
-
-export interface ManifestParameterOption {
-  value: unknown;
-  /** 缺省空串 (`StrategyParameterOption`), 界面上回落成取值的字面量. */
-  label?: string;
-}
+/* ── 策略配置模板 (上传的那份 JSON, 经 configuration_json 到达前端) ── */
 
 /**
- * manifest 里的一个参数.
+ * 参数取值的 JSON 类型, 也就是**控件形态的判据**.
  *
- * 除 `key` 外**全部可省**: 后端 `StrategyParameter` 给 `label` / `type` / `options` / `group`
- * 都写了默认值, 故「只声明 key 与 default」是一份完全合法的 manifest. 这里跟着放宽类型, 读取侧
- * 才能按后端的默认值补全 (`domain/manifest.ts` 的 `toParameterDescriptor`).
+ * 平台不看取值范围、不看标题、更不认识类型声明——它只看这个键当前取值的 JSON 类型. 故这里没有
+ * `integer` 与 `number` 之分 (JSON 只有一种数), `integer` 那个名字留给"用户手填时必须是个整数"
+ * 的输入约束.
  */
-export interface ManifestParameter {
-  key: string;
-  label?: string;
-  type?: ParameterType;
-  default?: unknown;
-  minimum?: number | null;
-  maximum?: number | null;
-  options?: ManifestParameterOption[];
-  group?: string;
-}
+export const PARAMETER_VALUE_TYPES = ['boolean', 'number', 'string'] as const;
+export type ParameterValueType = (typeof PARAMETER_VALUE_TYPES)[number];
 
-/** 运行级字段在策略配置里的键名; 未映射的字段不该出现在提交表单上. */
-export interface ManifestRunFieldKeys {
-  exchange_id?: string | null;
-  instrument_id?: string | null;
-  bar_period?: string | null;
-}
+/**
+ * 平台按固定键名**覆写**的三个键; 它们不在参数区渲染 (提交页各有自己的控件).
+ *
+ * 与后端 `strategy_configuration.PLATFORM_KEY_NAMES` 逐字对应, 含 `BarPreces` 这个引擎侧既有
+ * 拼写. 模板里若本来就有它们, 用户改的值不作数 (平台覆写), 故把它们留在参数区只会误导.
+ */
+export const PLATFORM_CONFIGURATION_KEY_NAMES = [
+  'ExchangeId',
+  'InstrumentId',
+  'BarPreces',
+] as const;
 
-export interface StrategyManifest {
-  entry_filename: string;
-  config_filename: string;
-  supported_match_modes: MarketDataType[];
-  run_field_keys?: ManifestRunFieldKeys;
-  params?: ManifestParameter[];
-}
+/** 上传的配置模板: 键即参数, 值即默认值. 键集由这份文件固定, 提交只有"改值"这一种权利. */
+export type StrategyConfigurationTemplate = Record<string, unknown>;
 
 /* ── 运行 ─────────────────────────────────────────────────── */
 
@@ -277,9 +267,13 @@ export interface RunDetail extends RunSummary {
 /**
  * 提交请求体.
  *
- * 后端是 `extra="forbid"`: 多一个键即 422, 键名写错不会被静默忽略. 而 `exchange_id` /
- * `instrument_id` 只在 manifest 声明了映射时才该出现在这里——没映射而提交, 后端回 400
- * 「该策略未映射 {field}」(见 `run_submission.RUN_FIELD_NOT_MAPPED_MESSAGE`).
+ * 后端是 `extra="forbid"`: 多一个键即 422, 键名写错不会被静默忽略.
+ *
+ * `bar_period` 是**策略的订阅周期** (`5m` / `15m` / `30m` / `60m`, 即落盘精度的整数倍), 不是数据源
+ * 精度: 引擎那份 `BackTest.json.BarPreces` 恒为落盘精度, 由平台写死, 用户选的值只进策略配置.
+ *
+ * `params` 只需给**用户改过的**键; 没给的键取那份上传的配置里的值 (见
+ * `run_configuration.build_strategy_configuration`). 三个运行级键不许出现在这里: 后端回 400.
  */
 export interface RunSubmitPayload {
   strategy_id: string;
@@ -346,7 +340,7 @@ export interface RunTemplateCreatePayload {
  *
  * 与 `catalog/schemas.py:LastSubmittedParametersResponse` 逐字对应, 字段全可空: `run_id` 为
  * `null` 即**没有历史运行** (正常状态, 不是错误). 取值一律照原样带回来, 不在这里判能不能用——
- * 判据是当前那份 manifest 给的控件, 见 `domain/manifest.createInitialParameterInputs`.
+ * 判据是当前那份配置模板给的控件, 见 `domain/strategy-configuration.createInitialParameterInputs`.
  *
  * `params` 里只有策略参数: 运行级字段已拆成下面的具名字段, 故前端不必认识引擎 `BackTest.json`
  * 的键名 (其中有 `BarPreces` 这种引擎侧拼写).
@@ -513,15 +507,15 @@ export interface MarketDataCoverage {
 /**
  * 预检查询的参数, 与 `routers/market_data.read_coverage_handler` 的查询参数逐字对应.
  *
- * 四个字段都取自表单本身 (`domain/run-form.buildCoverageQuery`), 故"预检说缺数据"与"提交被拒"
- * 用的是同一批判据, 不会各说各话.
+ * **没有 `bar_period`**: 覆盖判据问的是"本地有没有那段日期的数据", 而落盘只有 5m 一档, 用户的订阅
+ * 周期不影响"数据在不在". 四个字段都取自表单本身 (`domain/run-form.buildCoverageQuery`), 故"预检
+ * 说缺数据"与"提交被拒"用的是同一批判据, 不会各说各话.
  */
 export interface MarketDataCoverageQuery {
   exchange_id: string;
   instrument_id: string;
-  bar_period: string;
   start_trading_day: string;
   end_trading_day: string;
-  /** 它整份交给 `request` 的 `query`, 那边收的是开放键集; 五个字段拼错名字是这里唯一的防线. */
+  /** 它整份交给 `request` 的 `query`, 那边收的是开放键集; 四个字段拼错名字是这里唯一的防线. */
   [parameterName: string]: string;
 }

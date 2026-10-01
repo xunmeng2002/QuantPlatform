@@ -333,12 +333,13 @@ async def create_strategy_version_record(
     strategy: StrategyModel,
     uploaded_by: UserModel,
     entry_filename: str = "entry.py",
-    manifest_json: str = "{}",
+    configuration_json: str | None = "{}",
 ) -> StrategyVersionModel:
     """直接落库建一个策略版本.
 
-    `manifest_json` 默认是空对象 (读它的路径都当"没有声明"处理); 需要按 manifest 做判据的用例
-    自己给一份文本, 不必为了拿一个声明走一遍上传接口.
+    `configuration_json` 默认是空对象 (即"这个策略一个参数都没有"), 需要按模板做判据的用例自己
+    给一份文本, 不必为了拿一个模板走一遍上传接口. 传 `None` 表达的是**改形态之前的旧版本**, 只有
+    验证"旧版本被明确拒绝"的用例才给这个取值.
     """
 
     return await persist_record(
@@ -349,7 +350,7 @@ async def create_strategy_version_record(
             version_no=1,
             entry_filename=entry_filename,
             config_filename="StrategyConfig.json",
-            manifest_json=manifest_json,
+            configuration_json=configuration_json,
             source_hash=generate_identifier(),
             storage_path=f"{uploaded_by.id}/strategies/{strategy.id}/1",
             uploaded_by_user_id=uploaded_by.id,

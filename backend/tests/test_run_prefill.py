@@ -25,7 +25,7 @@ from app.catalog.enums import MarketDataType, RunStatus, StrategyVisibility
 from app.catalog.models import RunModel, StrategyModel, StrategyVersionModel, UserModel
 from app.catalog.schemas import LastSubmittedParametersResponse
 from app.clock import utc_now
-from app.config import PlatformSettings
+from app.config import MARKET_DATA_PRECISION, PlatformSettings
 
 from .helpers import (
     DEFAULT_MEMBER_PASSWORD,
@@ -72,51 +72,27 @@ RECORDED_FLOOD_BYTES = 16
 
 RECORDED_PARAMETER_KEY = "GridStep"
 RECORDED_PARAMETER_VALUE = 0.02
-RECORDED_PARAMETER_DEFAULT = 0.01
 
-# 三个运行级字段在**策略配置**里的键名, 与引擎侧那份 `BarPreces` 有意不同: 平台按 manifest 渲染,
-# 不硬编码策略侧键名, 这份差异就是那句声明的可测形式.
-RECORDED_EXCHANGE_KEY_NAME = "ExchangeKey"
-RECORDED_INSTRUMENT_KEY_NAME = "InstrumentKey"
-RECORDED_PERIOD_KEY_NAME = "PeriodKey"
-
-RECORD_MANIFEST_JSON = json.dumps(
-    {
-        "entry_filename": "entry.py",
-        "config_filename": "StrategyConfig.json",
-        "supported_match_modes": [MarketDataType.BAR.value],
-        "run_field_keys": {
-            "exchange_id": RECORDED_EXCHANGE_KEY_NAME,
-            "instrument_id": RECORDED_INSTRUMENT_KEY_NAME,
-            "bar_period": RECORDED_PERIOD_KEY_NAME,
-        },
-        "params": [
-            {
-                "key": RECORDED_PARAMETER_KEY,
-                "label": "网格步长",
-                "type": "number",
-                "default": RECORDED_PARAMETER_DEFAULT,
-            }
-        ],
-    }
-)
-
-# 策略配置: 运行级键名与参数键齐全.
+# 策略配置: 三个运行级键名是**平台固定的那三个**, 外加一个用户参数.
 RECORDED_STRATEGY_CONFIGURATION = json.dumps(
     {
         RECORDED_PARAMETER_KEY: RECORDED_PARAMETER_VALUE,
-        RECORDED_EXCHANGE_KEY_NAME: RECORDED_EXCHANGE_ID,
-        RECORDED_INSTRUMENT_KEY_NAME: RECORDED_INSTRUMENT_ID,
-        RECORDED_PERIOD_KEY_NAME: RECORDED_BAR_PERIOD,
+        EXCHANGE_ID_CONFIGURATION_KEY: RECORDED_EXCHANGE_ID,
+        INSTRUMENT_ID_CONFIGURATION_KEY: RECORDED_INSTRUMENT_ID,
+        BAR_PERIOD_CONFIGURATION_KEY: RECORDED_BAR_PERIOD,
     }
 )
 
 # 引擎配置: 只留这条读路径真正会碰的键 (`BarPreces` 是引擎侧既有拼写, 非笔误).
+#
+# 引擎那份 `BarPreces` 取**落盘精度**而不是 `RECORDED_BAR_PERIOD`: 两份配置里的 `BarPreces` 本来
+# 就是两件事 (引擎按它选读哪一族 parquet, 策略按它说自己要聚合到多粗), 故真实数据里它们多半不同.
+# 这里刻意让它们不等, "周期取自策略配置"这条才可分: 一个从引擎配置读的实现会读回 `5m`.
 RECORDED_ENGINE_CONFIGURATION = json.dumps(
     {
         "RunId": "recorded-run",
         "MatchMode": 3,
-        "BarPreces": RECORDED_BAR_PERIOD,
+        "BarPreces": MARKET_DATA_PRECISION,
         "StartTradingDay": RECORDED_START_TRADING_DAY,
         "EndTradingDay": RECORDED_END_TRADING_DAY,
         "InitialCapital": RECORDED_INITIAL_CAPITAL,
@@ -207,13 +183,15 @@ async def publish_strategy(database: PlatformDatabase, board: RecordBoard) -> No
 async def record_board(
     client: AsyncClient, database: PlatformDatabase
 ) -> RecordBoard:
-    """记录级的一个账号、一个私有策略与一份带映射声明的版本."""
+    """记录级的一个账号、一个私有策略与它的一份版本.
+
+    版本本身不参与预填 (取数只读那一轮的两份配置文本), 故用 `create_strategy_version_record` 的
+    默认模板即可——预填路径根本不碰 `configuration_json`.
+    """
 
     owner = await create_user_record(database, OWNER_USERNAME)
     strategy = await create_strategy_record(database, owner, RECORD_STRATEGY_NAME)
-    version = await create_strategy_version_record(
-        database, strategy, owner, manifest_json=RECORD_MANIFEST_JSON
-    )
+    version = await create_strategy_version_record(database, strategy, owner)
 
     return RecordBoard(
         token=await login(client, OWNER_USERNAME, DEFAULT_MEMBER_PASSWORD),
@@ -285,11 +263,11 @@ async def test_a_submitted_run_is_read_back_as_its_own_parameters(
 async def test_run_level_key_names_are_not_reported_as_parameters(
     client: AsyncClient, submitted_board: SubmittedBoard
 ) -> None:
-    """三个运行级键名不出现在 `params` 里, 参数**恰好**是 manifest 声明的那几个.
+    """三个运行级键名不出现在 `params` 里, 参数**恰好**是模板里的那几个.
 
-    它们已经在具名字段上; 再作为参数带回去, 前端就得拿 manifest 的控件去认一个引擎键名
-    (`BarPreces` 这种), 而"哪些键是运行级"只有 manifest 说得清. 断言取等而非"不含": 渲染结果
-    恰好等于 `{映射声明的键} ∪ {manifest 声明的参数 key}`, 没有第三类键.
+    它们已经在具名字段上; 再作为参数带回去, 前端就会给一个引擎键名 (`BarPreces` 这种) 渲染出一个
+    参数控件. 断言取等而非"不含": 渲染结果恰好等于 `{平台那三个键} ∪ {模板的键}`, 没有第三类键
+    ——"参数 = 策略配置减去平台那三个"是一条**常量差集**, 不再需要去查版本的 manifest.
     """
 
     prefill = await read_prefill(
@@ -353,13 +331,15 @@ async def test_a_failed_run_is_read_back_like_any_other(
     assert prefill.params[RECORDED_PARAMETER_KEY] == RECORDED_PARAMETER_VALUE
 
 
-async def test_the_run_field_keys_are_read_from_the_manifest_mapping(
+async def test_the_run_level_values_are_read_from_the_strategy_configuration(
     client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard
 ) -> None:
-    """运行级取值按**该版本的 manifest** 给的键名读出来, 且映射键不进参数.
+    """三项运行级取值都取自**策略配置**里的固定键名, 且那三个键不进参数.
 
-    交换/标的两项只存在于策略配置里 (引擎不认识它们), 故这两项成立才说明映射真的被用上了. 键名
-    取的是与引擎侧不同的名字: 硬编码 `ExchangeId` 那种实现会在这里读回空串.
+    交换/标的两项只存在于策略配置里 (引擎不认识它们), 故这两项成立就说明读的确实是那一份.
+
+    周期这一项是**两份配置取值不同**的那一格, 也是本条真正的位置: 引擎配置里也有一模一样的
+    `BarPreces` 键 (引擎按它选读哪一族 parquet, 恒为落盘精度), 从那里读的实现会读回 `5m`.
     """
 
     await submit_recording_run(database, record_board)
@@ -369,6 +349,7 @@ async def test_the_run_field_keys_are_read_from_the_manifest_mapping(
     assert prefill.exchange_id == RECORDED_EXCHANGE_ID
     assert prefill.instrument_id == RECORDED_INSTRUMENT_ID
     assert prefill.bar_period == RECORDED_BAR_PERIOD
+    assert prefill.bar_period != MARKET_DATA_PRECISION
     assert prefill.params == {RECORDED_PARAMETER_KEY: RECORDED_PARAMETER_VALUE}
 
 
@@ -506,6 +487,9 @@ async def test_a_single_bad_value_only_costs_its_own_field(
 
     一个字段是坏数据, 没有理由让其余十来个字段的预填一起失效. `true` 冒充 `1` 这一档是显式的:
     `bool` 是 `IntEnum`/`int` 的子类, 不挡的话 `MatchMode: true` 会被当成 1 去查表.
+
+    坏的是**引擎那一份**, 故策略配置侧那几项 (合约/标的/周期) 照常读回: 两份配置是两个来源, 一边
+    坏掉不该把另一边也带下去.
     """
 
     await submit_recording_run(
@@ -514,7 +498,6 @@ async def test_a_single_bad_value_only_costs_its_own_field(
         backtest_config_json=json.dumps(
             {
                 "MatchMode": True,
-                "BarPreces": RECORDED_BAR_PERIOD,
                 "StartTradingDay": RECORDED_START_TRADING_DAY,
                 "EndTradingDay": RECORDED_END_TRADING_DAY,
                 # 数值列给字符串: 转换是另一件事, 这里只降级不猜.

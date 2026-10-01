@@ -18,7 +18,7 @@ from httpx import AsyncClient
 from app.catalog.database import PlatformDatabase
 from app.catalog.enums import RunStatus
 from app.catalog.models import RunModel
-from app.config import PlatformSettings
+from app.config import MARKET_DATA_PRECISION, SUBSCRIPTION_BAR_PERIODS, PlatformSettings
 from app.services import quote_hub
 from app.services.market_data_preparation import (
     MARKET_DATA_COMPONENT_MISSING_MESSAGE,
@@ -49,6 +49,7 @@ from .quote_hub_stub import (
 )
 from .run_helpers import (
     ARGV0_FILENAME,
+    DEFAULT_BAR_PERIOD,
     DEFAULT_END_TRADING_DAY,
     DEFAULT_EXCHANGE_ID,
     DEFAULT_INITIAL_CAPITAL,
@@ -66,7 +67,7 @@ from .run_helpers import (
     STUB_SPACE_ENTRY_FILENAME,
     await_run_status,
     await_run_terminal,
-    build_stub_manifest,
+    build_stub_configuration_template,
     count_span_end_lines,
     create_runnable_strategy,
     job_directory,
@@ -111,12 +112,17 @@ FOREIGN_RUN_ID = "run-id-the-platform-never-issued"
 GBK_ERROR_MESSAGE = "引擎报告: 行情数据缺失"
 REPORTED_FAILURE_ERROR_ID = 4242
 
-# 平台按 manifest 的映射与参数声明写进策略配置的全部键. 用例把它与盘上的键集合对起来, 于是
-# "渲染结果恰好等于 {映射声明的键} ∪ {请求的参数键}" 成了可验的性质.
-CONFIGURATION_KEYS_WRITTEN_BY_PLATFORM = frozenset(
+# 桩那份模板里的全部键 (即它的五个参数旋钮). 用例把它与盘上的键集合对起来, 于是"渲染结果恰好
+# 等于 {模板的键} ∪ {平台那三个}"成了可验的性质.
+PARAMETER_CONFIGURATION_KEYS = frozenset(
     {"Behavior", "SleepSeconds", "ExitDelaySeconds", "FloodBytes", "StderrFloodBytes"}
 )
 RUN_FIELD_CONFIGURATION_KEYS = frozenset({"ExchangeId", "InstrumentId", "BarPreces"})
+#: 平台渲染不出控件、但**必须原样透传**的三类取值 (对象 / 数组 / `null`). 它们不在上面那个集合里
+#: 是因为「参数」指的是"提交页会给它渲染一个控件"的那些键, 而这三类键只跟着模板走.
+INTRANSPARENT_TEMPLATE_KEYS = frozenset(
+    {"NestedRule", "EmptySlots", "OptionalWindow"}
+)
 
 MIRROR_COLUMN_BY_RESULT_KEY = dict(RESULT_MIRROR_COLUMN_NAMES)
 
@@ -133,11 +139,14 @@ async def _submit_and_wait(
     token: str,
     strategy_id: str,
     params: dict[str, object] | None = None,
+    bar_period: str = DEFAULT_BAR_PERIOD,
     timeout_seconds: float = CONCURRENT_ELAPSED_LIMIT_SECONDS,
 ) -> RunModel:
     """提交一轮并等它落终态."""
 
-    submitted = await submit_run(client, token, strategy_id, params=params)
+    submitted = await submit_run(
+        client, token, strategy_id, bar_period=bar_period, params=params
+    )
 
     return await await_run_terminal(database, submitted.id, timeout_seconds)
 
@@ -261,69 +270,84 @@ async def test_the_job_directory_matches_the_launch_contract(
     ], "作业目录构造留下了临时目录"
 
 
-async def test_the_strategy_configuration_carries_exactly_the_declared_keys(
+async def test_the_strategy_configuration_carries_exactly_the_template_keys_plus_three(
     client: AsyncClient,
     database: PlatformDatabase,
     platform_settings: PlatformSettings,
     run_owner: SignedInAccount,
 ) -> None:
-    """策略配置的键集合**恰好等于** {映射声明的键} ∪ {请求的参数键}.
+    """策略配置的键集合**恰好**是 {模板的键} ∪ {平台那三个}——不多, 也不少.
 
-    再换一组映射键名重跑一次, 输出必须跟着变. 这一条专杀"平台把策略侧的键名硬编码进渲染逻辑"
-    ——只断言第一轮的话, 一组恰好撞对的常量也能过.
+    不多: 平台不提任何自己的键进去, 策略读到的每一个键都能在那份上传的 JSON 里找到出处.
+    不少: 模板里平台控不了的键 (`null` / 对象 / 数组) 一个都不许消失——它们进不了表单, 但**必须
+    原样透传**, 否则"模板即真相"这句话对那几类键就不成立了.
+
+    **四个取值互不相同**是刻意的 (模板里的 `60m`/`SZSE`、提交的 `15m`/默认合约): 两两相等的话,
+    "覆写生效"与"照抄模板"就会给出同一个结果, 上面那两条断言也就分不出实现了.
     """
 
-    renamed_run_field_keys = {
-        "exchange_id": "ExchangeCode",
-        "instrument_id": "Symbol",
-        "bar_period": "PeriodName",
+    submitted_bar_period = "15m"
+
+    assert submitted_bar_period in SUBSCRIPTION_BAR_PERIODS
+    assert submitted_bar_period != MARKET_DATA_PRECISION
+
+    intransparent_template: dict[str, object] = {
+        **build_stub_configuration_template(),
+        # 平台渲染不出控件的三类取值各来一个, 外加模板里**本来就写着**的平台键 (取值与平台将写入
+        # 的不同, 好让"覆写"与"恰好相同"区分得开).
+        "NestedRule": {"Levels": [1, 2, 3], "Fallback": None},
+        "EmptySlots": [],
+        "OptionalWindow": None,
+        "BarPreces": "60m",
+        "ExchangeId": "SZSE",
     }
 
     runnable = await create_runnable_strategy(
-        database, platform_settings, run_owner.user, STRATEGY_NAME
+        database,
+        platform_settings,
+        run_owner.user,
+        STRATEGY_NAME,
+        configuration_template=intransparent_template,
     )
 
-    run = await _submit_and_wait(client, database, run_owner.token, runnable.strategy.id)
+    run = await _submit_and_wait(
+        client,
+        database,
+        run_owner.token,
+        runnable.strategy.id,
+        bar_period=submitted_bar_period,
+    )
 
     written_configuration = read_job_json(
         platform_settings, run.id, STUB_CONFIG_FILENAME
     )
 
     assert set(written_configuration) == (
-        CONFIGURATION_KEYS_WRITTEN_BY_PLATFORM | RUN_FIELD_CONFIGURATION_KEYS
+        PARAMETER_CONFIGURATION_KEYS
+        | RUN_FIELD_CONFIGURATION_KEYS
+        | INTRANSPARENT_TEMPLATE_KEYS
     )
+
+    for template_key, template_value in intransparent_template.items():
+        if template_key in RUN_FIELD_CONFIGURATION_KEYS:
+            continue
+
+        assert written_configuration[template_key] == template_value, template_key
+
+    # 模板里本来就写着这两个平台键 (取值**故意**与平台将写入的不同), 故这三条同时证明"有则覆写".
     assert written_configuration["ExchangeId"] == DEFAULT_EXCHANGE_ID
     assert written_configuration["InstrumentId"] == DEFAULT_INSTRUMENT_ID
-    assert written_configuration["BarPreces"] == "5m"
+    assert written_configuration["BarPreces"] == submitted_bar_period
 
-    renamed = await create_runnable_strategy(
-        database,
-        platform_settings,
-        run_owner.user,
-        f"{STRATEGY_NAME}(改名映射)",
-        manifest=build_stub_manifest(run_field_keys=renamed_run_field_keys),
+    # **两份配置里的 `BarPreces` 是两件事**, 而这一条正是本轮修掉的那个类别错误: 引擎那份决定读
+    # 哪一族 parquet, 恒为落盘精度; 策略那份是策略订阅的目标周期, 写用户选的那个. 把一个值写进
+    # 两处时, 选 15m 会让引擎去读磁盘上不存在的 15m 那一族, 一行都取不到, 于是它在**装载期**以
+    # `ErrorMarketDataNotExist` 收场, 整轮白跑——不是"安静地零成交".
+    engine_configuration = read_job_json(
+        platform_settings, run.id, ENGINE_CONFIGURATION_FILENAME
     )
 
-    renamed_run = await _submit_and_wait(
-        client, database, run_owner.token, renamed.strategy.id
-    )
-
-    renamed_configuration = read_job_json(
-        platform_settings, renamed_run.id, STUB_CONFIG_FILENAME
-    )
-
-    assert set(renamed_configuration) == (
-        CONFIGURATION_KEYS_WRITTEN_BY_PLATFORM | set(renamed_run_field_keys.values())
-    )
-    assert renamed_configuration["PeriodName"] == "5m"
-
-    # 换的只是**策略侧**的键名: 引擎那一份仍写在 `BarPreces` 上, 而两者的取值必须一致——不一致
-    # 时策略收不到 bar, 表现是**静默 0 成交**.
-    renamed_engine_configuration = read_job_json(
-        platform_settings, renamed_run.id, ENGINE_CONFIGURATION_FILENAME
-    )
-
-    assert renamed_engine_configuration["BarPreces"] == "5m"
+    assert engine_configuration["BarPreces"] == MARKET_DATA_PRECISION
 
 
 async def test_concurrency_never_exceeds_the_configured_limit(

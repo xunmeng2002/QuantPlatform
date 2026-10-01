@@ -23,10 +23,10 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..catalog.enums import MarketDataType
-from ..catalog.models import RunModel, StrategyVersionModel, UserModel
+from ..catalog.models import RunModel, UserModel
 from ..catalog.visibility import build_owned_run_query
 from ..scheduler.engine_config import parse_configuration_object
-from .run_configuration import decode_run_fields, read_run_field_key_names
+from .run_configuration import decode_run_fields
 
 
 logger = logging.getLogger(__name__)
@@ -53,8 +53,8 @@ async def read_last_submitted_parameters(
 ) -> LastSubmittedParameters | None:
     """该用户在该策略下最近一次提交的参数; 没有历史运行 (或配置文本读不动) 时回 `None`.
 
-    回 `None` 是**正常结果**而不是错误: 首次使用某个策略走的就是这条路, 提交页据此用 manifest
-    默认值填表.
+    回 `None` 是**正常结果**而不是错误: 首次使用某个策略走的就是这条路, 提交页据此拿该版本的
+    配置模板填表.
     """
 
     run = (
@@ -81,12 +81,7 @@ async def read_last_submitted_parameters(
     if engine_configuration is None or strategy_configuration is None:
         return None
 
-    version = await session.get(StrategyVersionModel, run.strategy_version_id)
-    decoded_fields = decode_run_fields(
-        engine_configuration,
-        strategy_configuration,
-        read_run_field_key_names(None if version is None else version.manifest_json),
-    )
+    decoded_fields = decode_run_fields(engine_configuration, strategy_configuration)
 
     return LastSubmittedParameters(
         run_id=run.id,

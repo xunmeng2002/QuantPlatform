@@ -2,20 +2,20 @@
 /**
  * 给既有策略上传一个新版本.
  *
- * 与「上传新策略」分开而不合并成一个带 `mode` 的组件: 后者除了名字与 manifest, 一个字段都不共用
- * (版本没有名字、说明、可见性), 合成一个就得在每个字段上写「这个模式下显示吗」—— 那是把两个页面
- * 揉成一段谁也读不懂的分支.
+ * 与「上传新策略」分开而不合并成一个带 `mode` 的组件: 后者除了两份文件, 一个字段都不共用 (版本没有
+ * 名字、说明、可见性), 合成一个就得在每个字段上写「这个模式下显示吗」—— 那是把两个页面揉成一段谁
+ * 也读不懂的分支.
  *
  * 判重是「与既有**任一**版本同内容」而不是「与最新版本同内容」, 故重复上传老内容不会产生新版本号.
  */
 
-import { computed, ref, watch } from 'vue';
-import { ElButton, ElInput } from 'element-plus';
+import { computed, ref } from 'vue';
+import { ElButton } from 'element-plus';
 
 import { uploadStrategyVersion } from '../api/strategies';
 import type { StrategyVersion } from '../api/types';
+import { useConfigurationFileSource } from '../composables/useConfigurationFileSource';
 import { describeApiFailure } from '../composables/use-feedback';
-import { useManifestTextSource } from '../composables/useManifestTextSource';
 import ErrorBanner from './ErrorBanner.vue';
 import FilePicker from './FilePicker.vue';
 
@@ -26,42 +26,30 @@ const emit = defineEmits<{
 }>();
 
 const {
-  manifestText,
-  problem: manifestProblem,
-  isUsable: isManifestUsable,
-  loadFromFile: loadManifestFromFile,
-  clear: clearManifestText,
-} = useManifestTextSource();
+  configurationFile,
+  problem: configurationProblem,
+  isUsable: isConfigurationUsable,
+  clear: clearConfigurationFile,
+} = useConfigurationFileSource();
 
 const sourceFile = ref<File | null>(null);
-const manifestFile = ref<File | null>(null);
 const errorMessage = ref<string | null>(null);
 const isSubmitting = ref(false);
 
-watch(manifestFile, (selectedFile) => {
-  if (selectedFile === null) {
-    clearManifestText();
-
-    return;
-  }
-
-  void loadManifestFromFile(selectedFile);
-});
-
 const isSubmitDisabled = computed(
-  () => isSubmitting.value || sourceFile.value === null || !isManifestUsable.value,
+  () => isSubmitting.value || sourceFile.value === null || !isConfigurationUsable.value,
 );
 
 function resetForm(): void {
   sourceFile.value = null;
-  manifestFile.value = null;
-  clearManifestText();
+  clearConfigurationFile();
 }
 
 async function submit(): Promise<void> {
   const selectedSourceFile = sourceFile.value;
+  const selectedConfigurationFile = configurationFile.value;
 
-  if (isSubmitDisabled.value || selectedSourceFile === null) {
+  if (isSubmitDisabled.value || selectedSourceFile === null || selectedConfigurationFile === null) {
     return;
   }
 
@@ -72,7 +60,7 @@ async function submit(): Promise<void> {
     const uploadedVersion = await uploadStrategyVersion(
       props.strategyId,
       selectedSourceFile,
-      manifestText.value,
+      selectedConfigurationFile,
     );
 
     resetForm();
@@ -101,40 +89,24 @@ async function submit(): Promise<void> {
         <FilePicker
           v-model="sourceFile"
           accept=".py"
-          hint="文件名须与 manifest 的 entry_filename 一致"
+          hint="文件名即作业目录里的文件名"
         />
       </div>
 
       <div class="flex flex-col gap-1">
-        <span class="text-sm font-medium text-slate-700">从文件载入 manifest</span>
+        <span class="text-sm font-medium text-slate-700">策略配置 (*.json)</span>
         <FilePicker
-          v-model="manifestFile"
+          v-model="configurationFile"
           accept=".json"
-          hint="载入后还可以在下面改"
+          hint="策略启动时读的就是这一份, 它的键即提交页的参数"
         />
+        <p
+          v-if="configurationProblem"
+          class="text-xs text-amber-700"
+        >
+          {{ configurationProblem }}
+        </p>
       </div>
-    </div>
-
-    <div class="flex flex-col gap-1">
-      <label
-        class="text-sm font-medium text-slate-700"
-        for="version-manifest"
-      >manifest (JSON)</label>
-      <!-- 等宽与字号写在外层: `.el-textarea__inner` 是 `font-family: inherit; font-size: inherit`,
-           见 `StrategyUploadForm` 里同一处的说明. -->
-      <ElInput
-        id="version-manifest"
-        v-model="manifestText"
-        type="textarea"
-        :rows="8"
-        class="font-mono text-xs"
-      />
-      <p
-        v-if="manifestProblem"
-        class="text-xs text-amber-700"
-      >
-        {{ manifestProblem }}
-      </p>
     </div>
 
     <ElButton

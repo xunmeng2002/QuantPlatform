@@ -5,6 +5,10 @@
 且只在特定取值上出现. 故除"取哪个版本"与文件系统相关的那几道闸 (它们只对提交成立) 之外,
 提交侧的判据全部收在这里.
 
+本模块也是**两套词汇表之间的唯一那道桥**: API 与库用 snake_case (`bar_period`), 策略配置里用
+引擎侧的 PascalCase (`BarPreces`). 对应关系集中在 `RUN_FIELD_KEY_NAMES` 一张表上, 渲染与解码
+都按它走——于是"写进去的键"与"读回来的键"不可能不是同一个.
+
 模块是**纯函数**: 不碰库、不碰文件系统. 于是"哪些取值能过"可以不起服务就逐条测.
 """
 
@@ -17,27 +21,45 @@ from dataclasses import dataclass
 
 from ..catalog.enums import MarketDataType
 from ..catalog.schemas import RunConfigurationRequest
+from ..config import SUBSCRIPTION_BAR_PERIODS
 from ..errors import InvalidRequestError
-from ..manifest import (
-    BAR_PERIOD_FIELD_NAME,
-    EXCHANGE_ID_FIELD_NAME,
-    INSTRUMENT_ID_FIELD_NAME,
-    RUN_LEVEL_FIELD_NAMES,
-    StrategyManifest,
-    validate_parameter_value,
-)
 from ..scheduler.engine_config import (
     SUBMITTABLE_MATCH_MODES,
     resolve_market_data_type,
+)
+from ..strategy_configuration import (
+    BAR_PERIOD_KEY_NAME,
+    EXCHANGE_ID_KEY_NAME,
+    INSTRUMENT_ID_KEY_NAME,
+    PLATFORM_KEY_NAMES,
 )
 
 
 logger = logging.getLogger(__name__)
 
-# 引擎 `BackTest.json` 的键名. `BarPreces` 是引擎侧既有拼写, 非笔误, 不可擅改——它读的就是
-# 这个名字, 平台改一个字母就静默读不到周期.
+# 运行级字段名 (API 与库的 snake_case). 它们同时也是 `RunConfigurationRequest` 的字段名与
+# `RunTemplateModel` 的具名列, 故只在这里声明一次.
+EXCHANGE_ID_FIELD_NAME = "exchange_id"
+INSTRUMENT_ID_FIELD_NAME = "instrument_id"
+BAR_PERIOD_FIELD_NAME = "bar_period"
+
+RUN_LEVEL_FIELD_NAMES = (
+    EXCHANGE_ID_FIELD_NAME,
+    INSTRUMENT_ID_FIELD_NAME,
+    BAR_PERIOD_FIELD_NAME,
+)
+
+#: 运行级字段名 → 策略配置里的键名. 两套词汇表的全部对应关系就在这一张表上.
+RUN_FIELD_KEY_NAMES: dict[str, str] = {
+    EXCHANGE_ID_FIELD_NAME: EXCHANGE_ID_KEY_NAME,
+    INSTRUMENT_ID_FIELD_NAME: INSTRUMENT_ID_KEY_NAME,
+    BAR_PERIOD_FIELD_NAME: BAR_PERIOD_KEY_NAME,
+}
+
+# 引擎 `BackTest.json` 的键名. 它读的就是这些名字, 平台改一个字母就静默读不到那项取值.
+# `BarPreces` 不在这里: 引擎那份是平台常量, 平台只写不读; 策略那份由 `strategy_configuration`
+# 侧的同名常量管.
 MATCH_MODE_KEY = "MatchMode"
-BAR_PERIOD_KEY = "BarPreces"
 START_TRADING_DAY_KEY = "StartTradingDay"
 END_TRADING_DAY_KEY = "EndTradingDay"
 INITIAL_CAPITAL_KEY = "InitialCapital"
@@ -46,25 +68,19 @@ INITIAL_CAPITAL_KEY = "InitialCapital"
 TRADING_DAY_LENGTH = 8
 MAXIMUM_RUN_FIELD_VALUE_LENGTH = 64
 
-MAXIMUM_PARAMETER_KEY_LENGTH = 64
-MAXIMUM_SUBMITTED_PARAMETERS = 200
 MAXIMUM_REPORTED_PARAMETER_KEYS = 10
 
 MATCH_MODE_NOT_SUBMITTABLE_MESSAGE = "当前版本只支持 Bar 行情模式"
-MATCH_MODE_UNSUPPORTED_MESSAGE = "该策略不支持所选的行情模式"
 RUN_FIELD_REQUIRED_MESSAGE = "{field} 不能为空"
-RUN_FIELD_NOT_MAPPED_MESSAGE = "该策略未映射 {field}, 无法传递该字段"
+BAR_PERIOD_INVALID_MESSAGE = "bar_period 只能是 " + " / ".join(SUBSCRIPTION_BAR_PERIODS)
 TRADING_DAY_ORDER_MESSAGE = "start_trading_day 不得晚于 end_trading_day"
 
 RUN_FIELD_TOO_LONG_MESSAGE = "{field} 不得超过 {length} 个字符"
 RUN_FIELD_INVALID_CHARACTERS_MESSAGE = "{field} 不得含控制字符"
 TRADING_DAY_INVALID_MESSAGE = "{field} 须为 8 位数字"
 INITIAL_CAPITAL_INVALID_MESSAGE = "initial_capital 须为大于 0 的有限数值"
-TOO_MANY_PARAMETERS_MESSAGE = f"params 的参数个数不得超过 {MAXIMUM_SUBMITTED_PARAMETERS}"
-PARAMETER_KEY_TOO_LONG_MESSAGE = f"params 的参数名不得超过 {MAXIMUM_PARAMETER_KEY_LENGTH} 个字符"
-UNKNOWN_PARAMETER_MESSAGE = "params 含未声明的参数: {keys}"
-MISSING_PARAMETER_MESSAGE = "params 缺少必填参数: {keys}"
-PARAMETER_INVALID_MESSAGE = "参数 {key} {reason}"
+UNKNOWN_PARAMETER_MESSAGE = "params 含该版本配置里没有的键: {keys}"
+PLATFORM_PARAMETER_MESSAGE = "params 不得含平台按运行级字段写入的键: {keys}"
 TRUNCATED_KEY_LIST_SUFFIX = " 等"
 
 
@@ -124,7 +140,9 @@ def validate_initial_capital(raw_value: float) -> float:
     return float(raw_value)
 
 
-def validate_trading_day_range(start_trading_day: str, end_trading_day: str) -> tuple[str, str]:
+def validate_trading_day_range(
+    start_trading_day: str, end_trading_day: str
+) -> tuple[str, str]:
     """校验两个交易日各自合法且 `start <= end`, 返回规范化后的取值.
 
     两件事合成一个入口: 分成两步的话, 调用方可以只做前一步, 而"起止倒置"那种提交会照常入队
@@ -140,130 +158,106 @@ def validate_trading_day_range(start_trading_day: str, end_trading_day: str) -> 
     return normalized_start, normalized_end
 
 
-def validate_match_mode(
-    manifest: StrategyManifest, requested_match_mode: MarketDataType
-) -> MarketDataType:
-    """两道闸: 平台当前能提交哪些模式, 以及该策略声明支持哪些.
+def validate_match_mode(requested_match_mode: MarketDataType) -> MarketDataType:
+    """平台当前能提交哪些行情模式.
 
-    缺一不可. 只有第一道, 一个只写了 Bar 的策略会被允许提交 Tick; 只有第二道, 平台上没人验证
-    过的那三档 Tick 撮合方式会照收——而它们跑出来的结果看起来完全正常 (静默 0 成交).
+    只有 `Bar`. 从前这里还有第二道闸 (该策略声明支持哪些模式), 那是 manifest 的一部分; 随着
+    manifest 整个摘掉, 平台没验证过的那三档 Tick 撮合方式**根本没有入口**——`SUBMITTABLE_MATCH_MODES`
+    就是那唯一一道, 因为没有任何版本能声明出比它更宽的可提交集合.
     """
 
     if requested_match_mode not in SUBMITTABLE_MATCH_MODES:
         raise InvalidRequestError(MATCH_MODE_NOT_SUBMITTABLE_MESSAGE)
 
-    if requested_match_mode not in manifest.supported_match_modes:
-        raise InvalidRequestError(MATCH_MODE_UNSUPPORTED_MESSAGE)
-
     return requested_match_mode
 
 
 def resolve_run_field_values(
-    manifest: StrategyManifest, submitted_values: RunConfigurationRequest
+    submitted_values: RunConfigurationRequest,
 ) -> dict[str, str]:
-    """按 manifest 的映射决定运行级字段收不收, 并给出**唯一一份**取值.
+    """三个运行级字段的**唯一一份**取值; 空值一律收成空串.
 
-    `bar_period` 是个特例: 它有映射时写两份 (BackTest.json 与策略配置), 没映射时只写引擎那份,
-    但**两种情形下都必填**——引擎一定要它. 而"有映射则必填"另有一层意义: 映射了却不给值, 策略
-    读到的就是缺键, 而它会以未捕获异常收场.
-
-    `exchange_id` / `instrument_id` 则只在有映射时收: 引擎根本不认识它们 (只有策略 `subscribe_tick`
-    用), 没映射而提交就是无处落地——收下它等于给用户一个"点了没反应".
-
-    返回表里**只有收下的那些字段**, 故缺键与空值是同一件事 (都缺席): 调用方据此写库, 可空列
-    拿到 `None` 而不是空串.
+    三项现在**恒被收下**: 平台按固定键名把它们写进策略配置, 模板里有没有这几个键都一样.
+    `exchange_id` / `instrument_id` 留空是正常的 (那一轮不指名合约, 行情准备会跳过), 而
+    `bar_period` 必填且必须是订阅周期清单里的一项——它同时决定策略收到多粗的 bar, 填错的
+    表现是从"策略读到一个不认识的周期"到"引擎装载期直接拒", 都不该等跑完才发现.
     """
 
-    mapped_field_names = set(manifest.named_run_field_keys())
-    run_field_values: dict[str, str] = {}
+    exchange_id = normalize_run_field_value(
+        EXCHANGE_ID_FIELD_NAME, submitted_values.exchange_id
+    )
+    instrument_id = normalize_run_field_value(
+        INSTRUMENT_ID_FIELD_NAME, submitted_values.instrument_id
+    )
+    bar_period = normalize_run_field_value(
+        BAR_PERIOD_FIELD_NAME, submitted_values.bar_period
+    )
 
-    for field_name in RUN_LEVEL_FIELD_NAMES:
-        supplied_value = normalize_run_field_value(
-            field_name, getattr(submitted_values, field_name)
+    if bar_period is None:
+        raise InvalidRequestError(
+            RUN_FIELD_REQUIRED_MESSAGE.format(field=BAR_PERIOD_FIELD_NAME)
         )
-        is_required = field_name == BAR_PERIOD_FIELD_NAME or field_name in mapped_field_names
 
-        if supplied_value is None:
-            if is_required:
-                raise InvalidRequestError(RUN_FIELD_REQUIRED_MESSAGE.format(field=field_name))
-            continue
+    if bar_period not in SUBSCRIPTION_BAR_PERIODS:
+        raise InvalidRequestError(BAR_PERIOD_INVALID_MESSAGE)
 
-        if not is_required:
-            raise InvalidRequestError(
-                RUN_FIELD_NOT_MAPPED_MESSAGE.format(field=field_name)
-            )
-
-        run_field_values[field_name] = supplied_value
-
-    return run_field_values
+    return {
+        EXCHANGE_ID_FIELD_NAME: exchange_id or "",
+        INSTRUMENT_ID_FIELD_NAME: instrument_id or "",
+        BAR_PERIOD_FIELD_NAME: bar_period,
+    }
 
 
-def build_parameter_configuration(
-    manifest: StrategyManifest, submitted_parameters: dict[str, object]
+def validate_submitted_parameters(
+    template: Mapping[str, object], submitted_parameters: Mapping[str, object]
 ) -> dict[str, object]:
-    """按 manifest 声明的参数渲染策略配置的**参数部分**.
+    """提交的参数: 每一个键都必须是模板里已有的、且不是平台那三个.
 
-    结果恰好等于 `{manifest 声明的参数 key}`: 未声明的键拒收, 未给值的必填参数拒收, 给了值的
-    按声明类型与范围校验. 运行级字段不在这里——它们由 manifest 的映射键另加.
+    键集由**上传的那份文件**固定, 提交只有"改值"这一种权利. 于是"多传了一个键"不再是"多存一个
+    参数", 而是一个明确的错——旧 manifest 靠声明表挡住了这一类, 现在挡住它的是模板本身.
     """
 
-    if len(submitted_parameters) > MAXIMUM_SUBMITTED_PARAMETERS:
-        raise InvalidRequestError(TOO_MANY_PARAMETERS_MESSAGE)
+    # 撞平台键先判: 那种提交同时也会撞上"模板里没这个键" (模板通常不写那三个), 先说后者的话,
+    # 用户只会看到"键不存在", 于是转头去改配置文件——而正确的动作是什么都不做.
+    collided_keys = sorted(set(submitted_parameters) & set(PLATFORM_KEY_NAMES))
 
-    if any(len(key) > MAXIMUM_PARAMETER_KEY_LENGTH for key in submitted_parameters):
-        raise InvalidRequestError(PARAMETER_KEY_TOO_LONG_MESSAGE)
+    if collided_keys:
+        raise InvalidRequestError(
+            PLATFORM_PARAMETER_MESSAGE.format(keys=_abbreviate_keys(collided_keys))
+        )
 
-    declared_parameters = {parameter.key: parameter for parameter in manifest.params}
-
-    unknown_keys = sorted(set(submitted_parameters) - set(declared_parameters))
+    unknown_keys = sorted(set(submitted_parameters) - set(template))
 
     if unknown_keys:
         raise InvalidRequestError(
             UNKNOWN_PARAMETER_MESSAGE.format(keys=_abbreviate_keys(unknown_keys))
         )
 
-    missing_keys = sorted(
-        key
-        for key, parameter in declared_parameters.items()
-        if key not in submitted_parameters and parameter.default is None
-    )
-
-    if missing_keys:
-        raise InvalidRequestError(
-            MISSING_PARAMETER_MESSAGE.format(keys=_abbreviate_keys(missing_keys))
-        )
-
-    configuration: dict[str, object] = {}
-
-    for key, parameter in declared_parameters.items():
-        parameter_value = submitted_parameters.get(key, parameter.default)
-
-        try:
-            validate_parameter_value(parameter, parameter_value)
-        except ValueError as error:
-            raise InvalidRequestError(
-                PARAMETER_INVALID_MESSAGE.format(key=key, reason=error)
-            ) from error
-
-        configuration[key] = parameter_value
-
-    return configuration
+    return dict(submitted_parameters)
 
 
 def build_strategy_configuration(
-    manifest: StrategyManifest,
-    run_field_values: dict[str, str],
-    submitted_parameters: dict[str, object],
+    template: Mapping[str, object],
+    run_field_values: Mapping[str, str],
+    submitted_parameters: Mapping[str, object],
 ) -> dict[str, object]:
-    """渲染策略配置: 运行级字段 (有映射的那些) + 全部参数.
+    """渲染策略配置: 模板 + 用户改过的参数 + 平台覆写的三个运行级键.
 
-    结果**恰好**等于 `{映射声明的键} ∪ {manifest 声明的参数 key}`——没有第三类键. 这条性质是
-    "平台不硬编码策略侧键名"的可测形式: 把 manifest 的映射键名换一组, 渲染结果要跟着变.
+    三条性质都由这三行保证, 每条都值得一条用例:
+
+    1. **从模板整份拷贝出发**, 不是从零拼起. 于是模板里平台控不了的键 (`null`、对象、数组)
+       原样留下——旧 manifest 靠"声明期禁止参数键与运行级键撞名"来保证策略不丢键, 这里改成
+       了结构性的: 没被显式改过的键, 其值就是文件里那个.
+    2. **三个平台键是赋值而不是新增**, 故模板里本来就有的会被覆写、没有的会被追加, 两种情况
+       是同一句话. 用户选的是那三个控件, 模板里写什么都不作数.
+    3. **键序确定**: 模板的键保持原序 (覆写不改变位置), 平台键按 `RUN_FIELD_KEY_NAMES` 的次序
+       追加. 于是落库的 `ParamsJson` 在测试里可比对, 在界面上也不会有莫名其妙的抖动.
     """
 
-    configuration = build_parameter_configuration(manifest, submitted_parameters)
+    configuration = dict(template)
+    configuration.update(validate_submitted_parameters(template, submitted_parameters))
 
-    for field_name, key_name in manifest.named_run_field_keys().items():
+    for field_name, key_name in RUN_FIELD_KEY_NAMES.items():
         configuration[key_name] = run_field_values[field_name]
 
     return configuration
@@ -304,61 +298,32 @@ class DecodedRunFields:
     parameter_values: dict[str, object]
 
 
-def read_run_field_key_names(manifest_json: str | None) -> dict[str, str]:
-    """该版本 manifest 里"运行级字段名 → 配置键名"的映射.
-
-    用**那一轮自己那个版本**的 manifest, 而不是最新版本: 键名是渲染当时定的, 事后改版不影响
-    历史那份配置里的键叫什么.
-
-    manifest 读不动时回空映射: 于是策略配置里的每个键都会被当成参数, 而调用方按各自那份
-    manifest 的控件逐项判断, 多出来的键被忽略——故不必把整轮解码作废.
-    """
-
-    if not manifest_json:
-        return {}
-
-    try:
-        manifest = StrategyManifest.model_validate_json(manifest_json)
-    except ValueError as error:
-        logger.warning("策略版本的 manifest 无法解析, 按无映射处理: %s", error)
-        return {}
-
-    return manifest.named_run_field_keys()
-
-
 def decode_run_fields(
     engine_configuration: Mapping[str, object],
     strategy_configuration: Mapping[str, object],
-    run_field_key_names: Mapping[str, str],
 ) -> DecodedRunFields:
     """把渲染好的两份配置文本读回取值. 它是 `build_strategy_configuration` 的逆.
 
-    两个来源**不能互换**: 运行级字段里 `bar_period` 只在有映射时才写进策略配置, 而引擎那份
-    一定有它; `exchange_id` / `instrument_id` 则相反——引擎根本不认识它们. 故前三个从引擎
-    配置取, 后两个从策略配置取.
+    **两个来源不能互换**: 撮合模式与两个交易日在引擎那份里, 合约与订阅周期在策略那份里.
+    尤其 `bar_period` 只能从**策略配置**取——引擎那份的 `BarPreces` 是平台常量 (落盘精度),
+    从那里读会让每一次预填都报 `5m`, 无论用户当初选的是什么.
 
-    manifest 保证参数键不会与运行级键撞名 (见 `manifest._check_declared_keys_do_not_collide`),
-    故按键名做差集是精确的: 差集之外的都是参数, 连同类型原样带回去.
+    "参数 = 策略配置减去平台那三个键"因此是**常量差集**, 不再需要去查那个版本的 manifest:
+    写路径与读路径引用的是同一个 `PLATFORM_KEY_NAMES`, 两处不可能不一致.
     """
-
-    declared_key_names = set(run_field_key_names.values())
-    run_field_values = {
-        field_name: _read_text(strategy_configuration, key_name)
-        for field_name, key_name in run_field_key_names.items()
-    }
 
     return DecodedRunFields(
         match_mode=resolve_market_data_type(engine_configuration.get(MATCH_MODE_KEY)),
-        bar_period=_read_text(engine_configuration, BAR_PERIOD_KEY),
-        exchange_id=run_field_values.get(EXCHANGE_ID_FIELD_NAME, ""),
-        instrument_id=run_field_values.get(INSTRUMENT_ID_FIELD_NAME, ""),
+        bar_period=_read_text(strategy_configuration, BAR_PERIOD_KEY_NAME),
+        exchange_id=_read_text(strategy_configuration, EXCHANGE_ID_KEY_NAME),
+        instrument_id=_read_text(strategy_configuration, INSTRUMENT_ID_KEY_NAME),
         start_trading_day=_read_text(engine_configuration, START_TRADING_DAY_KEY),
         end_trading_day=_read_text(engine_configuration, END_TRADING_DAY_KEY),
         initial_capital=_read_finite_number(engine_configuration, INITIAL_CAPITAL_KEY),
         parameter_values={
             key_name: value
             for key_name, value in strategy_configuration.items()
-            if key_name not in declared_key_names
+            if key_name not in PLATFORM_KEY_NAMES
         },
     )
 

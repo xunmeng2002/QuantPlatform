@@ -1,8 +1,8 @@
 """策略上传、版本留档与软删除.
 
-上传是唯一把外部内容写进盘与库的入口, 故这里逐条钉住三件事: 落盘的字节与上传的一致、
-版本判重看的是源码加 manifest 这一对、以及 manifest 里的文件名约束 (它是启动期致命的
-`argv[0]` 约束的入口).
+上传是唯一把外部内容写进盘与库的入口, 故这里逐条钉住三件事: 落盘的字节与上传的一致、版本判重
+看的是**源码加配置模板**这一对、以及两份文件名的约束——入口名是启动期致命的 `argv[0]`, 配置名是
+策略按硬编码名字 `open()` 的那份文件, 两个都由上传方给定, 故都得逐条挡住.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import Message
 
 from app.catalog.database import PlatformDatabase
-from app.catalog.enums import MarketDataType, StrategyVisibility
+from app.catalog.enums import StrategyVisibility
 from app.catalog.schemas import (
     MAXIMUM_STRATEGY_DESCRIPTION_LENGTH,
     MAXIMUM_STRATEGY_NAME_LENGTH,
@@ -33,20 +33,25 @@ from app.main import (
     MAXIMUM_REQUEST_BODY_BYTES,
     REQUEST_TOO_LARGE_DETAIL,
 )
-from app.manifest import (
-    CONFIG_FILENAME_SUFFIX,
-    ENTRY_FILENAME_SUFFIX,
-    MANIFEST_INVALID_MESSAGE,
-    MANIFEST_TOO_LARGE_MESSAGE,
-    MAXIMUM_FILENAME_LENGTH,
-    MAXIMUM_MANIFEST_BYTES,
-)
 from app.routers.strategies import (
+    CONFIGURATION_NOT_UTF8_MESSAGE,
+    CONFIGURATION_TOO_LARGE_MESSAGE,
+    EMPTY_CONFIGURATION_MESSAGE,
     EMPTY_SOURCE_MESSAGE,
     MAXIMUM_SOURCE_BYTES,
+    MISSING_UPLOAD_FILENAME_MESSAGE,
     SOURCE_TOO_LARGE_MESSAGE,
     STRATEGY_DELETED_MESSAGE,
     STRATEGY_NAME_TAKEN_MESSAGE,
+)
+from app.strategy_configuration import (
+    CONFIGURATION_FILENAME_SUFFIX,
+    CONFIGURATION_NOT_AN_OBJECT_MESSAGE,
+    ENTRY_FILENAME_SUFFIX,
+    MAXIMUM_CONFIGURATION_BYTES,
+    MAXIMUM_CONFIGURATION_KEY_COUNT,
+    MAXIMUM_CONFIGURATION_KEY_LENGTH,
+    MAXIMUM_FILENAME_LENGTH,
 )
 
 from .helpers import (
@@ -54,6 +59,8 @@ from .helpers import (
     SignedInAccount,
     bearer_headers,
     create_signed_in_account,
+    create_strategy_record,
+    create_strategy_version_record,
     fetch_page,
     read_strategy_detail,
     read_strategy_status_code,
@@ -66,13 +73,19 @@ OTHER_USERNAME = "strategy-other-owner"
 STRATEGY_NAME = "成对网格"
 ENTRY_FILENAME = "grid_entry.py"
 CONFIG_FILENAME = "GridConfig.json"
-CLIENT_SIDE_PART_FILENAME = "whatever-the-browser-called-it.py"
-MANIFEST_FILENAME = "manifest.json"
 
-PARAMETER_LIST = [
-    {"key": "GridStep", "label": "网格步长", "type": "number", "default": 10.0},
-    {"key": "GridCount", "label": "网格层数", "type": "integer", "default": 5},
-]
+#: 一份像样的配置模板: 四种 JSON 取值各来一个, 好让"取值类型决定控件形态"这件事有真样本.
+#: 其中 `NestedRule` 与 `OptionalWindow` 是平台渲染不出控件的那两类——它们必须**原样透传**.
+CONFIGURATION_TEMPLATE: dict[str, object] = {
+    "GridStep": 10.0,
+    "GridCount": 5,
+    "UseLimitPrice": True,
+    "GridLabel": "第一组",
+    "NestedRule": {"Levels": [1, 2, 3], "Fallback": None},
+    "OptionalWindow": None,
+}
+
+CONFIGURATION_TEXT = json.dumps(CONFIGURATION_TEMPLATE, ensure_ascii=False, indent=2)
 
 STRATEGY_SOURCE = """\
 import sys
@@ -88,31 +101,32 @@ if __name__ == "__main__":
 
 SECOND_STRATEGY_SOURCE = b"import sys\n\n\nsys.exit(0)\n"
 
-REMOVED = object()
-
 VALUE_MARKER = "marker-that-must-not-be-echoed"
 
+UPLOAD_BOUNDARY = "probe-upload-boundary"
 
-def manifest_payload(**overrides: object) -> str:
-    """一份合法 manifest 的 JSON 文本, 按 overrides 逐键覆盖.
 
-    传 REMOVED 表示把该键整个删掉, 用于制造"缺了某个必需键"的样例.
+def build_multipart_body(parts: dict[str, tuple[str | None, str]]) -> bytes:
+    """手搓一份 multipart 体, 分部按 `{"字段名": (文件名或 None, 内容)}` 给.
+
+    走 `httpx` 的 `files=` 表达不出 `filename=""`——它会把这个分部**降级成普通字段** (实测:
+    `Content-Disposition` 里干脆没有 `filename` 那一项), 于是请求在框架层就被拒, 根本轮不到
+    处理函数. 要测的正是"客户端发得出、高层 API 却写不出"的那种体, 故自己拼.
     """
 
-    manifest: dict[str, object] = {
-        "entry_filename": ENTRY_FILENAME,
-        "config_filename": CONFIG_FILENAME,
-        "supported_match_modes": [MarketDataType.BAR.value],
-        "params": PARAMETER_LIST,
-    }
+    lines: list[str] = []
 
-    for key, value in overrides.items():
-        if value is REMOVED:
-            manifest.pop(key, None)
-        else:
-            manifest[key] = value
+    for field_name, (filename, content) in parts.items():
+        disposition = f'Content-Disposition: form-data; name="{field_name}"'
 
-    return json.dumps(manifest, ensure_ascii=False)
+        if filename is not None:
+            disposition = f'{disposition}; filename="{filename}"'
+
+        lines.append(f"--{UPLOAD_BOUNDARY}\r\n{disposition}\r\n\r\n{content}\r\n")
+
+    lines.append(f"--{UPLOAD_BOUNDARY}--\r\n")
+
+    return "".join(lines).encode("utf-8")
 
 
 @pytest_asyncio.fixture
@@ -129,27 +143,47 @@ async def other_account(
     return await create_signed_in_account(database, client, OTHER_USERNAME)
 
 
+def build_configuration_text(
+    template: dict[str, object] | None = None,
+) -> str:
+    return json.dumps(
+        CONFIGURATION_TEMPLATE if template is None else template,
+        ensure_ascii=False,
+    )
+
+
 async def post_strategy(
     client: AsyncClient,
     token: str,
     *,
-    manifest_text: str | None = None,
+    configuration_text: str | None = None,
     source_bytes: bytes = STRATEGY_SOURCE.encode("utf-8"),
     name: str = STRATEGY_NAME,
+    entry_filename: str = ENTRY_FILENAME,
+    configuration_filename: str = CONFIG_FILENAME,
     **form_overrides: str,
 ) -> Response:
-    """经接口上传一个新策略."""
+    """经接口上传一个新策略.
 
-    form = {
-        "manifest": manifest_payload() if manifest_text is None else manifest_text,
-        "name": name,
-        **form_overrides,
-    }
+    两个分部的文件名**就是载荷**: 平台拿它们当作业目录里的文件名, 故这里默认给的是"作者在策略
+    源码里硬编码的那个名字", 而不是浏览器随手编的名字.
+    """
+
+    resolved_configuration_text = (
+        build_configuration_text() if configuration_text is None else configuration_text
+    )
 
     return await client.post(
         STRATEGIES_PATH,
-        data=form,
-        files={"source": (CLIENT_SIDE_PART_FILENAME, source_bytes, "text/x-python")},
+        data={"name": name, **form_overrides},
+        files={
+            "source": (entry_filename, source_bytes, "text/x-python"),
+            "configuration": (
+                configuration_filename,
+                resolved_configuration_text.encode("utf-8"),
+                "application/json",
+            ),
+        },
         headers=bearer_headers(token),
     )
 
@@ -159,16 +193,57 @@ async def post_strategy_version(
     token: str,
     strategy_id: str,
     *,
-    manifest_text: str | None = None,
+    configuration_text: str | None = None,
     source_bytes: bytes = STRATEGY_SOURCE.encode("utf-8"),
 ) -> Response:
     """给既有策略上传一个版本."""
 
+    resolved_configuration_text = (
+        build_configuration_text() if configuration_text is None else configuration_text
+    )
+
     return await client.post(
         f"{STRATEGIES_PATH}/{strategy_id}/versions",
-        data={"manifest": manifest_payload() if manifest_text is None else manifest_text},
-        files={"source": (CLIENT_SIDE_PART_FILENAME, source_bytes, "text/x-python")},
+        files={
+            "source": (ENTRY_FILENAME, source_bytes, "text/x-python"),
+            "configuration": (
+                CONFIG_FILENAME,
+                resolved_configuration_text.encode("utf-8"),
+                "application/json",
+            ),
+        },
         headers=bearer_headers(token),
+    )
+
+
+async def post_raw_upload(
+    client: AsyncClient,
+    token: str,
+    *,
+    entry_filename: str,
+    configuration_filename: str,
+) -> Response:
+    """按**线上原样的字节**发一次上传, 绕开 `httpx` 的 multipart 编码器.
+
+    编码器会替客户端"规整"文件名: 空名降级成普通字段, 引号与控制字符被抹掉. 于是它写不出的那些
+    体, 恰恰是最该测的那些. 体的拼法见 `build_multipart_body`.
+    """
+
+    body = build_multipart_body(
+        {
+            "name": (None, STRATEGY_NAME),
+            "source": (entry_filename, STRATEGY_SOURCE),
+            "configuration": (configuration_filename, build_configuration_text()),
+        }
+    )
+
+    return await client.post(
+        STRATEGIES_PATH,
+        content=body,
+        headers={
+            **bearer_headers(token),
+            "Content-Type": f"multipart/form-data; boundary={UPLOAD_BOUNDARY}",
+        },
     )
 
 
@@ -226,11 +301,17 @@ async def test_upload_creates_the_strategy_and_its_first_version(
     assert detail.versions[0].config_filename == CONFIG_FILENAME
 
 
-async def test_uploaded_source_lands_on_disk_byte_for_byte(
+async def test_both_uploads_land_on_disk_byte_for_byte(
     client: AsyncClient,
     owner_account: SignedInAccount,
     platform_settings: PlatformSettings,
 ) -> None:
+    """两份原文都按上传的字节落盘, 平台一个字都不改.
+
+    这是"上传的配置即模板"的前提: 作者照着自己在版本目录里看到的文件核对, 必须与提交页的参数
+    区逐键对得上. 任何"顺手格式化一下"都会让这个前提悄悄失效.
+    """
+
     detail = await create_strategy(client, owner_account.token)
     version = detail.versions[0]
 
@@ -239,17 +320,20 @@ async def test_uploaded_source_lands_on_disk_byte_for_byte(
     )
 
     assert (directory / ENTRY_FILENAME).read_bytes() == STRATEGY_SOURCE.encode("utf-8")
-    assert (directory / MANIFEST_FILENAME).is_file()
+    assert (directory / CONFIG_FILENAME).read_text(encoding="utf-8") == (
+        build_configuration_text()
+    )
 
 
-async def test_the_stored_entry_filename_comes_from_the_manifest_not_the_upload(
+async def test_the_stored_filenames_are_the_uploaded_part_filenames(
     client: AsyncClient,
     owner_account: SignedInAccount,
     platform_settings: PlatformSettings,
 ) -> None:
-    """入口文件名即 job 目录里的裸文件名与 argv[0], 故只能由 manifest 决定.
+    """文件名由**上传方**给定, 平台照抄, 不另起名字.
 
-    浏览器给的分部文件名由客户端说了算, 拿它当文件名等于把 argv[0] 交给上传方.
+    这两个名字各有下游: 入口名会成为 job 目录里的裸文件名与 `argv[0]`, 配置名是策略硬编码
+    `open()` 的那个名字 (见 `job-workspace.md`). 平台换一个名字, 症状是"跑起来了但读不到配置".
     """
 
     detail = await create_strategy(client, owner_account.token)
@@ -261,8 +345,12 @@ async def test_the_stored_entry_filename_comes_from_the_manifest_not_the_upload(
         detail.versions[0].version_no,
     )
 
-    assert (directory / ENTRY_FILENAME).is_file()
-    assert not (directory / CLIENT_SIDE_PART_FILENAME).exists()
+    assert sorted(path.name for path in directory.iterdir()) == sorted(
+        [ENTRY_FILENAME, CONFIG_FILENAME]
+    )
+
+    assert detail.versions[0].entry_filename == ENTRY_FILENAME
+    assert detail.versions[0].config_filename == CONFIG_FILENAME
 
 
 async def test_uploaded_strategy_shows_up_in_the_owners_list(
@@ -321,10 +409,10 @@ async def test_identical_content_reuses_the_version_instead_of_minting_a_new_one
     ) == 1
 
 
-async def test_changing_only_the_manifest_mints_a_new_version(
+async def test_changing_only_the_configuration_mints_a_new_version(
     client: AsyncClient, owner_account: SignedInAccount
 ) -> None:
-    """同一份源码配不同 manifest 是一份新版本.
+    """同一份源码配不同配置模板是一份新版本.
 
     判重若只看源码, 这条路径要么被判成"内容未变"而吞掉, 要么撞上唯一约束——两者都逼着用户
     "改参数必须连源码一起改".
@@ -332,15 +420,15 @@ async def test_changing_only_the_manifest_mints_a_new_version(
 
     detail = await create_strategy(client, owner_account.token)
 
-    changed_manifest = manifest_payload(
-        params=[
-            *PARAMETER_LIST,
-            {"key": "VolumePerGrid", "type": "integer", "default": 1},
-        ]
+    changed_configuration = build_configuration_text(
+        {**CONFIGURATION_TEMPLATE, "GridStep": 25.0}
     )
 
     response = await post_strategy_version(
-        client, owner_account.token, detail.strategy.id, manifest_text=changed_manifest
+        client,
+        owner_account.token,
+        detail.strategy.id,
+        configuration_text=changed_configuration,
     )
 
     assert response.status_code == 201, response.text
@@ -396,15 +484,15 @@ async def test_reusing_a_version_does_not_claim_the_strategy_was_updated(
     assert reread.strategy.updated_at == detail.strategy.updated_at
 
 
-async def test_stored_manifest_keeps_the_declared_parameter_fields_unchanged(
+async def test_the_stored_configuration_is_the_uploaded_text_verbatim(
     client: AsyncClient,
     owner_account: SignedInAccount,
     platform_settings: PlatformSettings,
 ) -> None:
-    """落盘的 manifest 里, 作者声明过的字段一个不改.
+    """落盘的配置与上传的**逐字节**相同——平台不补默认值、不重排键、不改取值类型.
 
-    这是"平台按 manifest 渲染策略配置"的前提: 入库快照若与作者写下的取值有出入, 作者照着
-    自己的文件核对就永远对不上, 而配置渲染正是读这份快照.
+    提交页的参数区直接由这份文本渲染, 故任何归一化都会让"我上传的 JSON"与"表单上看到的"对不
+    上; 而作者核对时看的是前者, 提交的是后者.
     """
 
     detail = await create_strategy(client, owner_account.token)
@@ -415,249 +503,315 @@ async def test_stored_manifest_keeps_the_declared_parameter_fields_unchanged(
         detail.strategy.id,
         detail.versions[0].version_no,
     )
-    stored = json.loads((directory / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    stored_text = (directory / CONFIG_FILENAME).read_text(encoding="utf-8")
 
-    stored_parameters = stored["params"]
+    assert stored_text == build_configuration_text()
+    assert json.loads(stored_text) == CONFIGURATION_TEMPLATE
 
-    assert len(stored_parameters) == len(PARAMETER_LIST)
+    # 逐键相等且**取值类型不变**: `10.0` 不许变成 `10`, `True` 不许变成 `1`.
+    stored_template = json.loads(stored_text)
 
-    for stored_parameter, declared_parameter in zip(
-        stored_parameters, PARAMETER_LIST, strict=True
-    ):
-        # 声明过的字段逐项相等: 归一化只补默认值, 不改作者写下的取值.
-        for field_name, declared_value in declared_parameter.items():
-            assert stored_parameter[field_name] == declared_value, field_name
-
-    # 归一化确实发生过: 缺省字段被补成了空值, 而不是原样留了个空.
-    assert stored_parameters[0]["group"] == ""
-    assert stored_parameters[0]["options"] == []
+    for key_name, template_value in CONFIGURATION_TEMPLATE.items():
+        assert stored_template[key_name] == template_value, key_name
+        assert type(stored_template[key_name]) is type(template_value), key_name
 
 
-async def test_the_detail_endpoint_exposes_the_stored_manifest(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    platform_settings: PlatformSettings,
+async def test_the_detail_endpoint_exposes_the_stored_configuration(
+    client: AsyncClient, owner_account: SignedInAccount
 ) -> None:
-    """版本视图里带着 manifest 全文: 提交页要按它的 `params` 生成参数控件, 按
-    `run_field_keys` 决定哪几个运行级字段是必填.
+    """版本视图里带着配置全文: 提交页要按它的键生成参数控件.
 
-    期望值取**盘上那份**而不是请求体: 入库的是归一化后的快照 (缺省字段已补), 请求体与快照的
-    一致性由上面那条管; 这一条只管"接口把库里的快照原样交出去了", 两条各查一件事.
+    期望值取**盘上那份**而不是请求体, 两者的一致性由上一条管; 这一条只管"接口把库里的快照原样
+    交出去了", 两条各查一件事.
     """
 
     detail = await create_strategy(client, owner_account.token)
     version = detail.versions[0]
 
-    directory = version_directory(
-        platform_settings,
-        owner_account.user_id,
-        detail.strategy.id,
-        version.version_no,
-    )
-    stored_on_disk = json.loads(
-        (directory / MANIFEST_FILENAME).read_text(encoding="utf-8")
-    )
-    exposed = json.loads(version.manifest_json)
+    assert version.configuration_json == build_configuration_text()
+    assert json.loads(version.configuration_json) == CONFIGURATION_TEMPLATE
 
-    assert exposed == stored_on_disk
-    assert [entry["key"] for entry in exposed["params"]] == [
-        parameter["key"] for parameter in PARAMETER_LIST
+
+async def test_a_pre_change_version_exposes_a_null_configuration(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    owner_account: SignedInAccount,
+) -> None:
+    """改形态之前落的版本, 配置是 NULL —— 详情页必须照样出得来.
+
+    这一列若写成非可选, 每一个旧版本的详情都会被响应模型拒掉而变成 500: 用户看到的不是"这个版本
+    作废了, 请重新上传", 而是"我的策略打不开了".
+    """
+
+    strategy = await create_strategy_record(database, owner_account.user, STRATEGY_NAME)
+
+    await create_strategy_version_record(
+        database, strategy, owner_account.user, configuration_json=None
+    )
+
+    response = await client.get(
+        f"{STRATEGIES_PATH}/{strategy.id}",
+        headers=bearer_headers(owner_account.token),
+    )
+
+    assert response.status_code == 200, response.text
+
+    exposed_versions = [
+        StrategyVersionResponse.model_validate(version_row)
+        for version_row in response.json()["versions"]
     ]
 
-    # 前端按这两个键渲染, 故它们必须**恒在**: 缺一个键会让表单静默少一整块内容.
-    assert isinstance(exposed["run_field_keys"], dict)
-    assert isinstance(exposed["supported_match_modes"], list)
+    assert [version.configuration_json for version in exposed_versions] == [None]
 
 
-async def test_undeclared_parameter_fields_survive_verbatim(
+async def test_template_values_the_form_cannot_render_survive_verbatim(
     client: AsyncClient,
     owner_account: SignedInAccount,
     platform_settings: PlatformSettings,
 ) -> None:
-    """参数项里平台还不认识的键必须原样留存.
+    """控件渲染不出来的那几类取值 (对象、数组、`null`) 一个不丢, 也不被"顺手"改掉.
 
-    这是 `StrategyParameter` 用 `extra="allow"` 的兑现处: 界面提示、分组图标这类键平台此刻不
-    参与计算, 但写成 `extra="forbid"` 就会让作者加一个键就被整个上传拒掉, 而报错文案里只有
-    位置没有取值, 作者得逐个键试出来是哪个多余.
+    平台不是按声明渲染的, 所以它**没有**一份"这个键我管不了"的名单可查; 于是保证只剩一条:
+    整份文本原样留存. 少了这条, 一个带嵌套配置的策略上传后参数区少一块, 而提交出去的配置里
+    那个键已经没了——策略那边看到的是"配置缺键", 归因要翻到版本目录才想得明白.
     """
 
-    undeclared_fields = {
-        "ui_hint": "取值范围 0.1 ~ 100",
-        "advanced": True,
-        "widget": {"kind": "slider", "step": 0.5},
-    }
-
     detail = await create_strategy(client, owner_account.token)
-
-    response = await post_strategy_version(
-        client,
-        owner_account.token,
-        detail.strategy.id,
-        manifest_text=manifest_payload(
-            params=[{**PARAMETER_LIST[0], **undeclared_fields}, PARAMETER_LIST[1]]
-        ),
-    )
-
-    assert response.status_code == 201, response.text
 
     directory = version_directory(
         platform_settings,
         owner_account.user_id,
         detail.strategy.id,
-        StrategyVersionResponse.model_validate(response.json()).version_no,
+        detail.versions[0].version_no,
     )
-    stored = json.loads((directory / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    stored_template = json.loads(
+        (directory / CONFIG_FILENAME).read_text(encoding="utf-8")
+    )
 
-    for field_name, field_value in undeclared_fields.items():
-        assert stored["params"][0][field_name] == field_value, field_name
+    assert stored_template["NestedRule"] == {"Levels": [1, 2, 3], "Fallback": None}
+    assert stored_template["OptionalWindow"] is None
+    assert "OptionalWindow" in stored_template
 
 
 @pytest.mark.parametrize(
-    "manifest_overrides",
+    ("entry_filename", "configuration_filename"),
     [
-        {"entry_filename": f"nested/directory/entry{ENTRY_FILENAME_SUFFIX}"},
-        {"entry_filename": f"..\\entry{ENTRY_FILENAME_SUFFIX}"},
-        {"entry_filename": "entry.txt"},
-        {"entry_filename": "  entry.py"},
-        {"entry_filename": ""},
-        {"entry_filename": "."},
-        {"entry_filename": f"con{ENTRY_FILENAME_SUFFIX}"},
-        {"entry_filename": f"com1{ENTRY_FILENAME_SUFFIX}"},
-        {"entry_filename": f"lpt9{ENTRY_FILENAME_SUFFIX}"},
-        {"entry_filename": f"grid:entry{ENTRY_FILENAME_SUFFIX}"},
-        {"entry_filename": f"grid|entry{ENTRY_FILENAME_SUFFIX}"},
-        {"entry_filename": f"grid?entry{ENTRY_FILENAME_SUFFIX}"},
-        {"entry_filename": f"grid<entry{ENTRY_FILENAME_SUFFIX}"},
-        {"entry_filename": f"grid>entry{ENTRY_FILENAME_SUFFIX}"},
-        {"entry_filename": f'grid"entry{ENTRY_FILENAME_SUFFIX}'},
-        {"entry_filename": f"grid*entry{ENTRY_FILENAME_SUFFIX}"},
-        {"entry_filename": f"grid\tentry{ENTRY_FILENAME_SUFFIX}"},
-        {"entry_filename": "x" * (MAXIMUM_FILENAME_LENGTH + 1) + ".py"},
-        {"config_filename": f"Grid:Config{CONFIG_FILENAME_SUFFIX}"},
-        {"config_filename": "GridConfig"},
-        {"config_filename": "BackTest.json"},
-        {"config_filename": "Sessions.json"},
-        {"config_filename": "result.json"},
-        {"config_filename": "sub/GridConfig.json"},
+        (f"nested/directory/entry{ENTRY_FILENAME_SUFFIX}", CONFIG_FILENAME),
+        (f"..\\entry{ENTRY_FILENAME_SUFFIX}", CONFIG_FILENAME),
+        ("entry.txt", CONFIG_FILENAME),
+        ("  entry.py", CONFIG_FILENAME),
+        (".", CONFIG_FILENAME),
+        (f"con{ENTRY_FILENAME_SUFFIX}", CONFIG_FILENAME),
+        (f"com1{ENTRY_FILENAME_SUFFIX}", CONFIG_FILENAME),
+        (f"lpt9{ENTRY_FILENAME_SUFFIX}", CONFIG_FILENAME),
+        (f"grid:entry{ENTRY_FILENAME_SUFFIX}", CONFIG_FILENAME),
+        (f"grid|entry{ENTRY_FILENAME_SUFFIX}", CONFIG_FILENAME),
+        (f"grid?entry{ENTRY_FILENAME_SUFFIX}", CONFIG_FILENAME),
+        (f"grid<entry{ENTRY_FILENAME_SUFFIX}", CONFIG_FILENAME),
+        (f"grid>entry{ENTRY_FILENAME_SUFFIX}", CONFIG_FILENAME),
+        (f'grid"entry{ENTRY_FILENAME_SUFFIX}', CONFIG_FILENAME),
+        (f"grid*entry{ENTRY_FILENAME_SUFFIX}", CONFIG_FILENAME),
+        (f"grid\tentry{ENTRY_FILENAME_SUFFIX}", CONFIG_FILENAME),
+        ("x" * (MAXIMUM_FILENAME_LENGTH + 1) + ENTRY_FILENAME_SUFFIX, CONFIG_FILENAME),
+        (ENTRY_FILENAME, f"Grid:Config{CONFIGURATION_FILENAME_SUFFIX}"),
+        (ENTRY_FILENAME, "GridConfig"),
+        (ENTRY_FILENAME, "sub/GridConfig.json"),
+        # 引擎与平台都会往作业目录根部写这三个名字; 配置与它们重名会**覆盖掉**其中之一, 不报错.
+        (ENTRY_FILENAME, "BackTest.json"),
+        (ENTRY_FILENAME, "Sessions.json"),
+        (ENTRY_FILENAME, "result.json"),
     ],
 )
 async def test_a_filename_that_cannot_be_a_bare_argv0_is_rejected(
     client: AsyncClient,
     owner_account: SignedInAccount,
-    manifest_overrides: dict[str, str],
+    entry_filename: str,
+    configuration_filename: str,
 ) -> None:
-    """带分隔符的 argv[0] 会让引擎日志器打不开文件, 宿主在启动期终止; 堵在上传口最省事."""
+    """带分隔符的 `argv[0]` 会让引擎日志器打不开文件, 宿主在启动期终止; 堵在上传口最省事.
 
-    response = await post_strategy(
-        client, owner_account.token, manifest_text=manifest_payload(**manifest_overrides)
-    )
+    配置名多两条约束: 后缀必须是 `.json`, 且不得与引擎、平台写进同一个目录的文件重名——重名的
+    后果是**静默覆盖**, 谁后写谁赢.
 
-    assert response.status_code == 400, response.text
+    经 `build_multipart_body` 直发而不是走 `post_strategy`: 引号与控制字符这类取值会被 `httpx`
+    的编码器抹掉, 用它反而测不到想测的东西.
+    """
 
-
-@pytest.mark.parametrize(
-    "manifest_overrides",
-    [
-        {"supported_match_modes": REMOVED},
-        {"supported_match_modes": []},
-        {"supported_match_modes": ["Quote"]},
-        {"supported_match_modes": [MarketDataType.BAR.value, MarketDataType.TICK.value,
-                                   MarketDataType.BAR.value]},
-        {"params": [{"key": "GridStep"}, {"key": "GridStep"}]},
-        {"params": [{"key": "", "type": "number"}]},
-        {"params": [{"label": "没有键"}]},
-        {"params": ["GridStep"]},
-        {"entry_filename": REMOVED},
-        {"config_filename": REMOVED},
-        {"unexpected_top_level_key": "anything"},
-    ],
-)
-async def test_a_structurally_invalid_manifest_is_rejected(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    manifest_overrides: dict[str, object],
-) -> None:
-    response = await post_strategy(
-        client, owner_account.token, manifest_text=manifest_payload(**manifest_overrides)
-    )
-
-    assert response.status_code == 400, response.text
-
-
-async def test_a_missing_supported_match_mode_is_named_in_the_error(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
-    """缺模式正是 P2 的验收项之一: 引擎在 Bar 模式下遇到漏写 on_bar 的策略会静默 0 成交."""
-
-    response = await post_strategy(
+    response = await post_raw_upload(
         client,
         owner_account.token,
-        manifest_text=manifest_payload(supported_match_modes=REMOVED),
+        entry_filename=entry_filename,
+        configuration_filename=configuration_filename,
     )
 
-    assert response.status_code == 400
-    assert "supported_match_modes" in response.json()["detail"]
+    assert response.status_code == 400, response.text
 
 
-async def test_a_malformed_manifest_is_rejected(
+async def test_an_upload_part_without_a_filename_is_rejected(
     client: AsyncClient, owner_account: SignedInAccount
 ) -> None:
-    response = await post_strategy(client, owner_account.token, manifest_text="{not json")
+    """`filename` 是空的分部照样能发出, 而文件名是**载荷**: 没有它这次上传就不完整.
 
-    assert response.status_code == 400
-    assert MANIFEST_INVALID_MESSAGE in response.json()["detail"]
+    兜底在这里而不是在校验函数里: 空名在"路径分隔符/非法字符/后缀"那几条上都查不出问题, 会一路
+    走到落盘, 落成一个名字是空串的文件.
+    """
 
-
-async def test_an_oversized_manifest_is_rejected(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
-    """label 是参数项上的未知键, 长度不受限, 正好用来撑爆 manifest."""
-
-    oversized_manifest = manifest_payload(
-        params=[{"key": "GridStep", "label": "x" * MAXIMUM_MANIFEST_BYTES}]
+    response = await post_raw_upload(
+        client,
+        owner_account.token,
+        entry_filename="",
+        configuration_filename=CONFIG_FILENAME,
     )
 
-    response = await post_strategy(
-        client, owner_account.token, manifest_text=oversized_manifest
-    )
-
-    assert response.status_code == 400
-    assert response.json()["detail"] == MANIFEST_TOO_LARGE_MESSAGE
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == MISSING_UPLOAD_FILENAME_MESSAGE
 
 
 @pytest.mark.parametrize(
-    "manifest_overrides",
+    "configuration_text",
     [
-        {"entry_filename": f"{VALUE_MARKER}/entry{ENTRY_FILENAME_SUFFIX}"},
-        {"entry_filename": f"{VALUE_MARKER}:entry{ENTRY_FILENAME_SUFFIX}"},
-        {"entry_filename": f"{VALUE_MARKER}.txt"},
-        {"entry_filename": f" {VALUE_MARKER}{ENTRY_FILENAME_SUFFIX}"},
-        {"config_filename": f"{VALUE_MARKER}|Grid{CONFIG_FILENAME_SUFFIX}"},
-        {"params": [{"key": f"{VALUE_MARKER}!"}]},
-        {"unexpected_top_level_key": VALUE_MARKER},
+        "{not json",
+        "[1, 2, 3]",
+        '"just a string"',
+        "42",
+        "null",
+        "",
     ],
 )
-async def test_manifest_errors_never_echo_the_field_values(
+async def test_a_configuration_that_is_not_a_json_object_is_rejected(
     client: AsyncClient,
     owner_account: SignedInAccount,
-    manifest_overrides: dict[str, object],
+    configuration_text: str,
 ) -> None:
-    """报错只回位置与原因: 回显值等于把整份 manifest 抄进响应体与接入层日志.
+    """顶层必须是一个对象.
 
-    守住这条的是 `_describe_validation_errors` **只取 `loc` 与 `msg`**——pydantic 交出来的
-    报错项里**是带 `input` 的** (实测: 未知顶层键、参数 key 不合模式、合法字符检查失败三条
-    都带), 所以"没人会把值抄出去"并不自动成立, 全靠那个函数不取它.
-
-    取值因此刻意撒在**两类分支上**: 我们自己写的那几条 (分隔符、非法字符、后缀、首尾空白)
-    与 pydantic 自带的那几条。两类都会经手那个函数, 只覆盖一类的话, 另一类上的回显改动
-    不会被发现。
+    数组或标量照样会被原样写进策略配置, 而它在提交页渲染不出任何控件——症状是"参数区是空的,
+    提交也能过", 用户对着一个没有参数的表单点提交, 然后收到一句策略抛的 `TypeError`.
     """
 
     response = await post_strategy(
-        client, owner_account.token, manifest_text=manifest_payload(**manifest_overrides)
+        client, owner_account.token, configuration_text=configuration_text
     )
 
     assert response.status_code == 400, response.text
+
+
+async def test_a_malformed_configuration_is_named_and_located(
+    client: AsyncClient, owner_account: SignedInAccount
+) -> None:
+    response = await post_strategy(
+        client, owner_account.token, configuration_text='{\n  "GridStep": ,\n}'
+    )
+
+    assert response.status_code == 400
+
+    detail = response.json()["detail"]
+
+    assert "策略配置不合法" in detail
+    assert "第 2 行" in detail
+
+
+@pytest.mark.parametrize(
+    "configuration_text",
+    [
+        build_configuration_text({f"Key{index}": index for index in range(MAXIMUM_CONFIGURATION_KEY_COUNT + 1)}),
+        build_configuration_text({"K" * (MAXIMUM_CONFIGURATION_KEY_LENGTH + 1): 1}),
+        build_configuration_text({"": 1}),
+    ],
+)
+async def test_a_configuration_the_form_cannot_render_is_rejected(
+    client: AsyncClient,
+    owner_account: SignedInAccount,
+    configuration_text: str,
+) -> None:
+    """形状约束只有三条, 且都与"表单能不能渲染"直接相关: 一个键一个控件, 键名是那格控件的唯一
+    标识——键太多、键名太长、键名为空, 都会让参数区渲染不出来或渲染出两块分不清的格子.
+
+    取值范围与类型一律不看: 那是策略自己的事.
+    """
+
+    response = await post_strategy(
+        client, owner_account.token, configuration_text=configuration_text
+    )
+
+    assert response.status_code == 400, response.text
+
+
+async def test_a_configuration_that_is_not_utf8_is_rejected(
+    client: AsyncClient, owner_account: SignedInAccount
+) -> None:
+    """非 UTF-8 的配置两份读者都读不动, 早一点说清楚好过留一句"策略报告说读不到配置"."""
+
+    response = await client.post(
+        STRATEGIES_PATH,
+        data={"name": STRATEGY_NAME},
+        files={
+            "source": (ENTRY_FILENAME, STRATEGY_SOURCE.encode("utf-8"), "text/x-python"),
+            "configuration": (
+                CONFIG_FILENAME,
+                '{"GridStep": 10}'.encode("gbk") + b"\xff\xfe",
+                "application/json",
+            ),
+        },
+        headers=bearer_headers(owner_account.token),
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == CONFIGURATION_NOT_UTF8_MESSAGE
+
+
+async def test_an_oversized_configuration_is_rejected(
+    client: AsyncClient, owner_account: SignedInAccount
+) -> None:
+    """键名受限而取值不受限, 故撑爆配置靠一个长字符串取值即可."""
+
+    oversized_configuration = build_configuration_text(
+        {"GridStep": "x" * MAXIMUM_CONFIGURATION_BYTES}
+    )
+
+    response = await post_strategy(
+        client, owner_account.token, configuration_text=oversized_configuration
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == CONFIGURATION_TOO_LARGE_MESSAGE
+
+
+async def test_an_empty_configuration_is_rejected(
+    client: AsyncClient, owner_account: SignedInAccount
+) -> None:
+    response = await post_strategy(client, owner_account.token, configuration_text="")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == EMPTY_CONFIGURATION_MESSAGE
+
+
+@pytest.mark.parametrize(
+    "configuration_text",
+    [
+        f'{{"{VALUE_MARKER}": }}',
+        build_configuration_text({VALUE_MARKER * 20: 1}),
+    ],
+)
+async def test_configuration_errors_never_echo_the_configuration_text(
+    client: AsyncClient,
+    owner_account: SignedInAccount,
+    configuration_text: str,
+) -> None:
+    """报错只回位置与原因: 回显原文等于把整份配置抄进响应体与接入层日志, 而配置里可能写着
+    账户号一类的东西.
+
+    两个分支各一例: 解析失败那条只回行列号 (`_parse_json_object` 刻意不带原文), 键名过长那条
+    只回一句固定文案 (`_check_configuration_keys` 不把键名放进消息). 两条都会经手响应体, 只
+    覆盖一条的话, 另一条上的回显改动不会被发现.
+    """
+
+    response = await post_strategy(
+        client, owner_account.token, configuration_text=configuration_text
+    )
+
+    assert response.status_code == 400, response.text
+    assert VALUE_MARKER * 20 not in response.text
     assert VALUE_MARKER not in response.text
 
 
@@ -704,8 +858,9 @@ async def test_a_request_body_beyond_the_cap_is_rejected_before_it_is_parsed(
 ) -> None:
     """两道闸各管一段, 这一条钉的是外面那道.
 
-    源码那道闸在处理函数里, 挡得住内存, 挡不住磁盘: 它执行时整个 multipart 体早已被解析完,
-    超出的部分已经落进磁盘临时文件. 外面这道按 `Content-Length` 在路由之前回 413.
+    两份原文各有一道自己的闸, 它们都在处理函数里: 挡得住内存, 挡不住磁盘——它们执行时整个
+    multipart 体早已被解析完, 超出的部分已经落进磁盘临时文件. 外面这道按 `Content-Length` 在
+    路由之前回 413.
 
     413 而非 400 是关键判据: 两者都能说明"被拒了", 但只有 413 才是路由之前那道闸给的——
     拿到 400 就意味着请求已经被解析过一遍了, 那时限多大都已经晚了.
@@ -819,36 +974,36 @@ async def test_a_malformed_content_length_cannot_skip_the_body_guard(
     assert receive_call_count == 0
 
 
-async def test_a_legal_upload_at_the_source_and_manifest_limits_is_accepted(
+async def test_a_legal_upload_at_both_size_limits_is_accepted(
     client: AsyncClient, owner_account: SignedInAccount
 ) -> None:
-    """体积闸的余量必须装得下合法上限.
+    """体积闸的余量必须装得下**两份原文各自的合法上限**.
 
-    只钉"超限被拒"是不够的: 把余量改小到装不下"源码 1 MB + manifest 64 KB"这个**允许**的
-    组合, 全部既有测试照样是绿的, 而用户正常上传会莫名拿到 413. 体积闸有两个方向, 这里钉的是
-    另一头——四次变异检查全在"改大/摘掉"那一侧, 恰好漏掉它.
+    只钉"超限被拒"是不够的: 把余量改小到装不下"源码 1 MB + 配置 64 KB"这个**允许**的组合, 全部
+    既有测试照样是绿的, 而用户正常上传会莫名拿到 413. 体积闸有两个方向, 这里钉的是另一头——
+    四次变异检查全在"改大/摘掉"那一侧, 恰好漏掉它.
 
-    填充必须落在**平台不参与校验的键**上: 声明过的字符串字段各有自己的长度上限 (`label` 128),
-    拿它们去凑 64 KB 会先被 manifest 校验拒掉, 那测的就不是体积闸了.
+    填充落在**取值**上而不是键名上: 键名有 64 字符的上限, 键数有 200 的上限, 拿它们去凑 64 KB
+    会先被配置形状校验拒掉, 那测的就不是体积闸了.
     """
 
-    manifest_padding = MAXIMUM_MANIFEST_BYTES - len(
-        manifest_payload(params=[{"key": "GridStep", "ui_padding": ""}]).encode("utf-8")
+    configuration_padding = MAXIMUM_CONFIGURATION_BYTES - len(
+        build_configuration_text({"GridStep": ""}).encode("utf-8")
     )
-    sized_manifest = manifest_payload(
-        params=[{"key": "GridStep", "ui_padding": "x" * manifest_padding}]
+    sized_configuration = build_configuration_text(
+        {"GridStep": "x" * configuration_padding}
     )
     sized_source = b"#" * MAXIMUM_SOURCE_BYTES
 
-    assert len(sized_manifest.encode("utf-8")) == MAXIMUM_MANIFEST_BYTES
-    assert len(sized_source) + len(sized_manifest.encode("utf-8")) <= (
+    assert len(sized_configuration.encode("utf-8")) == MAXIMUM_CONFIGURATION_BYTES
+    assert len(sized_source) + len(sized_configuration.encode("utf-8")) <= (
         MAXIMUM_REQUEST_BODY_BYTES
     )
 
     response = await post_strategy(
         client,
         owner_account.token,
-        manifest_text=sized_manifest,
+        configuration_text=sized_configuration,
         source_bytes=sized_source,
         description="d" * MAXIMUM_STRATEGY_DESCRIPTION_LENGTH,
     )
@@ -922,8 +1077,15 @@ async def test_out_of_range_metadata_is_rejected(
 async def test_an_anonymous_upload_is_rejected(client: AsyncClient) -> None:
     response = await client.post(
         STRATEGIES_PATH,
-        data={"manifest": manifest_payload(), "name": STRATEGY_NAME},
-        files={"source": (CLIENT_SIDE_PART_FILENAME, b"pass\n", "text/x-python")},
+        data={"name": STRATEGY_NAME},
+        files={
+            "source": (ENTRY_FILENAME, b"pass\n", "text/x-python"),
+            "configuration": (
+                CONFIG_FILENAME,
+                b"{}",
+                "application/json",
+            ),
+        },
     )
 
     assert response.status_code == 401
@@ -1066,6 +1228,7 @@ async def test_deleting_a_strategy_keeps_the_version_files(
     )
 
     assert (directory / ENTRY_FILENAME).is_file()
+    assert (directory / CONFIG_FILENAME).is_file()
 
 
 async def test_another_owner_cannot_delete_a_strategy(

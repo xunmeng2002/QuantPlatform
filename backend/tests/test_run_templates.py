@@ -22,17 +22,19 @@ from app.catalog.enums import MarketDataType, StrategyVisibility
 from app.catalog.models import RunTemplateModel, StrategyModel
 from app.config import PlatformSettings
 from app.ids import generate_identifier
-from app.manifest import EXCHANGE_ID_FIELD_NAME, INSTRUMENT_ID_FIELD_NAME
 from app.routers.run_templates import MAXIMUM_TEMPLATES_PER_STRATEGY
 from app.services.run_configuration import (
+    BAR_PERIOD_FIELD_NAME,
+    BAR_PERIOD_INVALID_MESSAGE,
     INITIAL_CAPITAL_INVALID_MESSAGE,
     MATCH_MODE_NOT_SUBMITTABLE_MESSAGE,
-    RUN_FIELD_NOT_MAPPED_MESSAGE,
+    PLATFORM_PARAMETER_MESSAGE,
     RUN_FIELD_REQUIRED_MESSAGE,
     TRADING_DAY_INVALID_MESSAGE,
     TRADING_DAY_ORDER_MESSAGE,
     UNKNOWN_PARAMETER_MESSAGE,
 )
+from app.strategy_configuration import BAR_PERIOD_KEY_NAME
 
 from .helpers import (
     STRATEGIES_PATH,
@@ -43,16 +45,14 @@ from .helpers import (
     persist_record,
 )
 from .run_helpers import (
-    BAR_PERIOD_CONFIGURATION_KEY,
-    BEHAVIOR_PARAMETER_KEY,
     DEFAULT_BAR_PERIOD,
     DEFAULT_END_TRADING_DAY,
     DEFAULT_EXCHANGE_ID,
     DEFAULT_INITIAL_CAPITAL,
     DEFAULT_INSTRUMENT_ID,
     DEFAULT_START_TRADING_DAY,
+    FLOOD_BYTES_PARAMETER_KEY,
     build_run_request,
-    build_stub_manifest,
     create_runnable_strategy,
 )
 
@@ -65,7 +65,6 @@ OUTSIDER_USERNAME = "template-outsider"
 STRATEGY_NAME = "模板用的桩策略"
 OTHER_STRATEGY_NAME = "模板用的第二份桩策略"
 OUTSIDER_STRATEGY_NAME = "外人的桩策略"
-NARROW_MAPPING_STRATEGY_NAME = "只映射周期的桩策略"
 
 TEMPLATE_NAME = "默认参数"
 RENAMED_TEMPLATE_NAME = "改名之后"
@@ -73,13 +72,14 @@ FIFTIETH_TEMPLATE_NAME = "第五十个"
 FIFTY_FIRST_TEMPLATE_NAME = "第五十一个"
 
 UNKNOWN_PARAMETER_KEY = "NotDeclared"
-INVALID_BEHAVIOR_VALUE = "not-a-behavior"
-STORED_BAR_PERIOD = "30m"
+
+#: 一个非默认的参数取值, 用来证"存进去的是提交的那一份、且保持原类型".
+RECORDED_FLOOD_BYTES = 16
 
 BROKEN_PARAMS_JSON = "{ 这不是 JSON"
 
-# 运行级字段在策略配置里的键名 (引擎侧那份 `BarPreces` 见 `run_helpers`): 断言参数块里不含它们
-# 时按这些键名去找, 而不是按字段名——参数块用的是 manifest 声明的键名.
+# 参数块里**不许**出现的键: 平台那三个运行级键在表上各有具名列, 再进 `ParamsJson` 就有了两份
+# 真相. 按策略配置里的键名去找, 而不是按字段名——参数块用的就是策略那一侧的词汇.
 RUN_FIELD_CONFIGURATION_KEYS = frozenset({"BarPreces", "ExchangeId", "InstrumentId"})
 
 
@@ -134,12 +134,19 @@ async def post_template(
 
 
 async def create_template(
-    client: AsyncClient, token: str, strategy_id: str, name: str = TEMPLATE_NAME
+    client: AsyncClient,
+    token: str,
+    strategy_id: str,
+    name: str = TEMPLATE_NAME,
+    **overrides: object,
 ) -> dict[str, object]:
     """经接口存一个模板, 断言 201 再解出响应体."""
 
     response = await post_template(
-        client, token, strategy_id, build_template_request(strategy_id, name)
+        client,
+        token,
+        strategy_id,
+        build_template_request(strategy_id, name, **overrides),
     )
 
     assert response.status_code == 201, response.text
@@ -320,13 +327,17 @@ async def test_a_saved_template_comes_back_whole(
     assert removed_again.status_code == 404
 
 
-async def test_parameters_are_stored_in_the_engine_value_form(
+async def test_submitted_parameters_are_stored_in_the_engine_value_form(
     client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard
 ) -> None:
-    """`ParamsJson` 与 `Runs.ParamsJson` 同形同义, 且**不含运行级字段**.
+    """`ParamsJson` 与 `Runs.ParamsJson` 同形同义: **只存用户改过的键**、原类型, 不含运行级字段.
 
-    不含是关键: 运行级字段在这张表上各有具名列, 再写进参数块就有了两份真相, 而两份真相迟早
+    不含运行级字段是关键: 那三个在这张表上各有具名列, 再写进参数块就有了两份真相, 而两份真相迟早
     不一致——届时套用模板读到的是哪一份, 取决于实现细节而不是设计.
+
+    **只存改过的键**也是这版契约的一部分: 没提交的键由"模板 + 那份上传的配置"补上. 平台在这里替
+    策略抄一份默认值反而有害——那份抄本会盖住模板里后来改过的值, 于是"上传的 JSON 即所见"在套用
+    旧模板时不再成立.
     """
 
     board = template_board
@@ -336,6 +347,7 @@ async def test_parameters_are_stored_in_the_engine_value_form(
         board.owner.token,
         board.strategy.id,
         name=TEMPLATE_NAME,
+        params={FLOOD_BYTES_PARAMETER_KEY: RECORDED_FLOOD_BYTES},
     )
 
     rows = await read_template_rows(database, board.strategy.id)
@@ -344,8 +356,10 @@ async def test_parameters_are_stored_in_the_engine_value_form(
 
     stored_parameters = json.loads(rows[0].params_json)
 
+    assert stored_parameters == {FLOOD_BYTES_PARAMETER_KEY: RECORDED_FLOOD_BYTES}
     assert stored_parameters == created["params"]
-    assert stored_parameters[BEHAVIOR_PARAMETER_KEY] == "success"
+    # 原类型, 不是字符串化的 `"16"`: 策略读到的必须是它当初写进那份文件里的数.
+    assert type(stored_parameters[FLOOD_BYTES_PARAMETER_KEY]) is int
     assert RUN_FIELD_CONFIGURATION_KEYS.isdisjoint(stored_parameters)
     assert DEFAULT_BAR_PERIOD not in stored_parameters.values()
 
@@ -464,12 +478,20 @@ async def test_the_run_field_and_parameter_judgements_are_the_submission_ones(
         client,
         board.owner.token,
         strategy_id,
-        build_template_request(strategy_id, instrument_id=None),
+        build_template_request(strategy_id, bar_period=""),
     )
     assert_rejected(
         missing_required_field,
-        RUN_FIELD_REQUIRED_MESSAGE.format(field=INSTRUMENT_ID_FIELD_NAME),
+        RUN_FIELD_REQUIRED_MESSAGE.format(field=BAR_PERIOD_FIELD_NAME),
     )
+
+    unsupported_period = await post_template(
+        client,
+        board.owner.token,
+        strategy_id,
+        build_template_request(strategy_id, bar_period="7m"),
+    )
+    assert_rejected(unsupported_period, BAR_PERIOD_INVALID_MESSAGE)
 
     invalid_trading_day = await post_template(
         client,
@@ -514,10 +536,15 @@ async def test_the_run_field_and_parameter_judgements_are_the_submission_ones(
     )
 
 
-async def test_a_parameter_value_outside_its_declared_range_is_rejected(
+async def test_a_parameter_key_of_the_platform_is_rejected(
     client: AsyncClient, template_board: TemplateBoard
 ) -> None:
-    """取值不合声明: 400, 文案点名**参数名**, 不回显取值."""
+    """参数里写平台那三个键 → 400, 且文案说的是"别写它", 不是"没有这个键".
+
+    两者在模板里通常都成立 (模板一般不写那三个), 故**报哪一句**是要紧的: 说"键不存在", 用户的
+    动作是去改自己那份配置文件; 而正确的动作是什么都不做——用户选的是那三个控件, 模板里写什么
+    都不作数. 这条用例钉的正是这个先后次序.
+    """
 
     board = template_board
 
@@ -526,49 +553,12 @@ async def test_a_parameter_value_outside_its_declared_range_is_rejected(
         board.owner.token,
         board.strategy.id,
         build_template_request(
-            board.strategy.id,
-            params={BEHAVIOR_PARAMETER_KEY: INVALID_BEHAVIOR_VALUE},
+            board.strategy.id, params={BAR_PERIOD_KEY_NAME: "60m"}
         ),
-    )
-
-    assert response.status_code == 400, response.text
-    assert response.json()["detail"].startswith(f"参数 {BEHAVIOR_PARAMETER_KEY} ")
-    assert INVALID_BEHAVIOR_VALUE not in response.text
-
-
-async def test_a_field_the_manifest_does_not_map_is_rejected(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    template_board: TemplateBoard,
-) -> None:
-    """manifest 没映射 `exchange_id` 时提交它 → 400, 文案与提交侧相同.
-
-    这份 manifest 只映射 `bar_period`: 引擎不认识交易所与标的, 没映射而收下它等于给用户一个
-    "点了没反应".
-    """
-
-    board = template_board
-
-    narrow_strategy = await create_runnable_strategy(
-        database,
-        platform_settings,
-        board.owner.user,
-        NARROW_MAPPING_STRATEGY_NAME,
-        manifest=build_stub_manifest(
-            run_field_keys={"bar_period": BAR_PERIOD_CONFIGURATION_KEY}
-        ),
-    )
-
-    response = await post_template(
-        client,
-        board.owner.token,
-        narrow_strategy.strategy.id,
-        build_template_request(narrow_strategy.strategy.id),
     )
 
     assert_rejected(
-        response, RUN_FIELD_NOT_MAPPED_MESSAGE.format(field=EXCHANGE_ID_FIELD_NAME)
+        response, PLATFORM_PARAMETER_MESSAGE.format(keys=BAR_PERIOD_KEY_NAME)
     )
 
 

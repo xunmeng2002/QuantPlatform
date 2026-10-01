@@ -28,7 +28,6 @@ from .errors import (
     PermissionDeniedError,
     ResourceNotFoundError,
 )
-from .manifest import MAXIMUM_MANIFEST_BYTES
 from .routers import (
     auth,
     health,
@@ -42,6 +41,7 @@ from .routers.strategies import MAXIMUM_SOURCE_BYTES
 from .scheduler.recovery import recover_interrupted_runs
 from .scheduler.scheduler import RunScheduler
 from .services.run_retention import prune_superseded_runs
+from .strategy_configuration import MAXIMUM_CONFIGURATION_BYTES
 
 
 APPLICATION_TITLE = "QuantPlatform"
@@ -65,7 +65,9 @@ MARKET_DATA_PREFIX = "/api/market-data"
 MULTIPART_FRAMING_ALLOWANCE_BYTES = 64 * 1024
 
 MAXIMUM_REQUEST_BODY_BYTES = (
-    MAXIMUM_SOURCE_BYTES + MAXIMUM_MANIFEST_BYTES + MULTIPART_FRAMING_ALLOWANCE_BYTES
+    MAXIMUM_SOURCE_BYTES
+    + MAXIMUM_CONFIGURATION_BYTES
+    + MULTIPART_FRAMING_ALLOWANCE_BYTES
 )
 
 UNEXPECTED_ERROR_DETAIL = "服务器内部错误"
@@ -235,7 +237,7 @@ def _register_request_size_guard(application: FastAPI) -> None:
     内部**——注册的异常处理器在用户中间件栈的内侧, 从这里抛出去的异常会绕开它, 客户端拿到的是
     Starlette 的纯文本 500, 中文固定文案与 `logger.exception` 都不生效.
 
-    上限的余量取 64 KB, 按两个真实上限推出来, 不另设魔数: 源码与 manifest 各有一道自己的闸,
+    上限的余量取 64 KB, 按两个真实上限推出来, 不另设魔数: 源码与配置各有一道自己的闸,
     这一道只是把二者之前的那段 (multipart 分隔符、各部件头、名字与说明) 也圈进来.
     """
 

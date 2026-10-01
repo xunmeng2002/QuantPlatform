@@ -1,5 +1,5 @@
 /**
- * 行情组件的两侧镜像: 受支持的 K 线周期, 以及平台字段与组件主键之间的换算.
+ * 行情组件的两侧镜像: 可选的订阅周期, 以及平台字段与组件主键之间的换算.
  *
  * 「两侧」指本仓与 `../QuoteHub`. 组件按自己的一套字面量解释这些取值, 而平台**不 import 它**,
  * 只能把约定镜像过来; 镜像因此集中在这一个模块里 —— 散到各处的结果是改组件时只改得动一半.
@@ -8,16 +8,20 @@
 import type { MarketDataContract } from '../api/types';
 
 /**
- * 与 `backend/app/config.SUPPORTED_MARKET_DATA_FREQUENCIES` 逐字对应, 也就是行情组件 CLI 的
- * `--frequency` choices.
+ * 用户可选的**策略订阅周期**, 与 `backend/app/config.SUBSCRIPTION_BAR_PERIODS` 逐字对应.
  *
- * 取值即引擎 `BackTest.json` 的 `BarPreces`, 也是 parquet 的文件名后缀 (`2024_5m.parquet`): 引擎
- * 读行情时按 `Preces` 过滤, 三者不一致的表现是**静默零成交**而不是报错, 故界面上只给清单内的值,
- * 不给自由文本. 组件没有 1 分钟线, 也没有日线.
+ * 这不是数据源精度: 落盘的 parquet 只有 5m (`MARKET_DATA_PRECISION`), 引擎那份
+ * `BackTest.json.BarPreces` 恒为它; 用户选的值写进**策略配置**, 由策略声明成订阅目标, 5m → 15m /
+ * 30m / 60m 由引擎在运行时聚合. 故这里的清单是"5m 的整数倍且能被聚合出来"的那几个, 组件没有 1
+ * 分钟线也没有日线.
+ *
+ * 选一个引擎聚合不出来的周期**不是静默零成交**: 引擎在装载期就判 `ErrorMarketDataNotExist` 拒掉
+ * 整轮 (`BarAggregator::ValidatePrecesRelation`), 用户拿到的是明确失败而不是一份空结果 —— 但那一轮
+ * 已经白跑了, 故界面上只给清单内的值, 不给自由文本.
  */
-export const SUPPORTED_BAR_PERIODS = ['5m', '15m', '30m', '60m'] as const;
+export const SUBSCRIPTION_BAR_PERIODS = ['5m', '15m', '30m', '60m'] as const;
 
-export type BarPeriod = (typeof SUPPORTED_BAR_PERIODS)[number];
+export type SubscriptionBarPeriod = (typeof SUBSCRIPTION_BAR_PERIODS)[number];
 
 /**
  * 交易所字面量 → 组件主键前缀. 与 `backend/app/services/quote_hub.EXCHANGE_PREFIX_TO_IDENTIFIER`

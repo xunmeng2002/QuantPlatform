@@ -36,7 +36,7 @@ from ..services.market_data_preparation import (
     MarketDataUnavailableError,
     ensure_market_data_available,
 )
-from ..services.run_configuration import decode_run_fields, read_run_field_key_names
+from ..services.run_configuration import decode_run_fields
 from .engine_config import parse_configuration_object
 from .output import OUTPUT_READ_CHUNK_BYTES, JobOutputCapture
 from .registry import JobHandle, RunningJobRegistry
@@ -168,12 +168,14 @@ class LaunchContext:
     """起进程所需的全部输入, 一次性从库里读齐.
 
     两个配置文本取自运行行 (`BacktestConfigJson` / `ParamsJson`): 提交侧渲染时就把它们连同
-    运行行一起提交了, 于是调度侧不必回头去解 manifest、也不必重算一遍——"库里记的"与"盘上写的"
-    永远是同一份.
+    运行行一起提交了, 于是调度侧不必回头重算一遍——"库里记的"与"盘上写的"永远是同一份.
 
-    末尾五个行情字段是从那两份文本里**解**出来的, 不是另读一列: 运行行不存它们, 存的就是那两份
-    文本 (见 `run_prefill` 的同一条理由). 空串表示这一轮没映射该字段——`exchange_id` /
-    `instrument_id` 为空是正常的, manifest 没声明就不收.
+    末尾四个行情字段是从那两份文本里**解**出来的, 不是另读一列: 运行行不存它们, 存的就是那两份
+    文本 (见 `run_prefill` 的同一条理由). `exchange_id` / `instrument_id` 为空串是正常的
+    ——那一轮没指名合约, 行情准备会跳过.
+
+    用户的订阅周期**不在这里**: 它不影响"行情备不备得齐" (那只看数据源精度, 是个平台常量), 故
+    起进程前没有任何一处要用到它.
     """
 
     run_id: str
@@ -185,7 +187,6 @@ class LaunchContext:
     started_at: datetime | None
     exchange_id: str
     instrument_id: str
-    bar_period: str
     start_trading_day: str
     end_trading_day: str
 
@@ -337,7 +338,6 @@ class JobRunner:
         request = MarketDataRequest(
             exchange_id=launch_context.exchange_id,
             instrument_id=launch_context.instrument_id,
-            bar_period=launch_context.bar_period,
             start_trading_day=launch_context.start_trading_day,
             end_trading_day=launch_context.end_trading_day,
         )
@@ -551,7 +551,7 @@ class JobRunner:
             if version is None:
                 raise UnrunnableJob(MISSING_VERSION_MESSAGE)
 
-            decoded_fields = self._decode_launch_fields(run, version)
+            decoded_fields = self._decode_launch_fields(run)
 
             return LaunchContext(
                 run_id=run.id,
@@ -567,26 +567,25 @@ class JobRunner:
                 started_at=run.started_at,
                 exchange_id=decoded_fields.exchange_id,
                 instrument_id=decoded_fields.instrument_id,
-                bar_period=decoded_fields.bar_period,
                 # 两个交易日也来自配置文本, **不能**取行上那两列: 它们在提交时并不写, 要等引擎
                 # 结果回写才有值——起进程那一刻它们还是 NULL.
                 start_trading_day=decoded_fields.start_trading_day,
                 end_trading_day=decoded_fields.end_trading_day,
             )
 
-    def _decode_launch_fields(
-        self, run: RunModel, version: StrategyVersionModel
-    ) -> DecodedRunFields:
-        """从运行行那两份配置文本里解出行情准备要用的那三个取值.
+    def _decode_launch_fields(self, run: RunModel) -> DecodedRunFields:
+        """从运行行那两份配置文本里解出行情准备要用的那几个取值.
 
         读不动**不抛**: 配置文本坏掉时引擎侧自会以它的方式失败, 而这里若提前抛, 就会把一个
         "文本坏了"说成"行情备不齐". 解不出来只表现为空串, 随后由行情准备给出确切文案.
+
+        订阅周期 (`bar_period`) **不在其列**——行情准备只认数据源精度 (平台常量), 用户选的周期
+        不改变"这份数据在不在", 故它不参与起进程前的任何判断.
         """
 
         return decode_run_fields(
             parse_configuration_object(run.id, run.backtest_config_json) or {},
             parse_configuration_object(run.id, run.params_json) or {},
-            read_run_field_key_names(version.manifest_json),
         )
 
     def _build_job_file_set(self, launch_context: LaunchContext) -> JobFileSet:

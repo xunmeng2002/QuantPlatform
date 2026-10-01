@@ -90,7 +90,7 @@ describe('request 的失败归一化', () => {
               input: '这是提交上去的取值',
               ctx: { note: '这是上下文' },
             },
-            { loc: ['body', 'manifest'], msg: 'String should have at most 1048576 characters' },
+            { loc: ['body', 'configuration'], msg: 'Field required' },
           ],
         },
         422,
@@ -101,7 +101,7 @@ describe('request 的失败归一化', () => {
 
     expect(apiError.status).toBe(422);
     expect(apiError.detail).toBe(
-      'body.name: Field required; body.manifest: String should have at most 1048576 characters',
+      'body.name: Field required; body.configuration: Field required',
     );
     expect(apiError.detail).not.toContain('这是提交上去的取值');
     expect(apiError.detail).not.toContain('这是上下文');

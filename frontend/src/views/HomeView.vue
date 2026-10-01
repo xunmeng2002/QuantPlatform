@@ -62,17 +62,17 @@ const session = useSessionStore();
 const capabilityCards: readonly CapabilityCard[] = [
   {
     title: '上传策略, 按版本留档',
-    description: '只收 .py 源码与一份 manifest.',
+    description: '只收 .py 源码与它自己要读的那份 .json 配置.',
     detail:
-      'manifest 声明入口文件, 配置文件与支持的行情模式, 平台据此校验. 内容没变就不产生新版本号: ' +
-      '同一份代码传两次, 仍是同一个版本.',
+      '两份文件都带自己的文件名落到作业目录里, 平台不替策略改名. 内容没变就不产生新版本号: ' +
+      '同一份代码加同一份配置传两次, 仍是同一个版本.',
   },
   {
-    title: '参数表单由 manifest 生成',
-    description: '策略作者改 manifest, 平台不用改一行代码.',
+    title: '参数表单由配置生成',
+    description: '策略作者加一个配置键, 平台不用改一行代码.',
     detail:
-      '参数的键, 标签, 类型, 默认值, 范围与枚举都写在 manifest 里, 提交页据此渲染表单; ' +
-      '没有默认值的参数必须填, 越界与不在枚举里的取值当场被拒.',
+      '那份配置 JSON 的键就是参数, 值就是默认值; 提交页按取值的 JSON 类型长出复选框 / 数字框 / ' +
+      '文本框. 键集固定, 只能改值; 取值合不合法由策略自己守.',
   },
   {
     title: '排队运行, 随时可取消',
@@ -94,15 +94,15 @@ const capabilityCards: readonly CapabilityCard[] = [
 const workflowSteps: readonly WorkflowStep[] = [
   {
     title: '上传策略',
-    detail: '一份 .py 源码加一份 manifest. 平台校验 manifest 与源码, 通过后成为该策略的一个版本.',
+    detail: '一份 .py 源码加一份 .json 配置. 平台校验两份文件, 通过后成为该策略的一个版本.',
   },
   {
     title: '选策略与版本',
-    detail: '缺省选最新版本. 选中后参数表单按该版本的 manifest 生成, 并按你上次提交的那一份预填.',
+    detail: '缺省选最新版本. 选中后参数表单按该版本的配置生成, 并按你上次提交的那一份预填.',
   },
   {
     title: '填运行级字段',
-    detail: '开始与结束交易日, 初始资金, K 线周期; 行情模式当前固定 Bar.',
+    detail: '合约, 开始与结束交易日, 初始资金, 以及策略的订阅周期; 行情模式当前固定 Bar.',
   },
   {
     title: '排队执行',
@@ -125,7 +125,11 @@ const engineEnvironmentRows: readonly EngineEnvironmentRow[] = [
   },
   {
     term: '行情模式',
-    detail: '当前只支持 Bar; manifest 可以声明 Tick, 但提交侧一律拒绝.',
+    detail: '当前只支持 Bar; 引擎也支持 Tick, 但提交侧一律拒绝.',
+  },
+  {
+    term: 'K 线周期',
+    detail: '落盘的行情只有 5m 一档; 提交页选的是策略的订阅周期, 更长的周期由引擎在运行时聚合.',
   },
   {
     term: '一轮的产物',

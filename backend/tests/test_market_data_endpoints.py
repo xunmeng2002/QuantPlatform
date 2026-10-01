@@ -26,19 +26,18 @@ WINDOW_START_DAY = "20240102"
 WINDOW_END_DAY = "20240105"
 WINDOW_TRADING_DAY_COUNT = 4
 
-#: 桩库只灌了 5 分钟线, 故这个周期下"一行都没有" —— 期望满、覆盖零, 是真实缺口那种不够.
-UNCOVERED_FREQUENCY = "15"
-UNSUPPORTED_BAR_PERIOD = "1d"
+#: 桩库只灌了 5 分钟线. 这不是"缺数据": 落盘精度恒为 5m, 别的订阅周期由引擎在装载期聚合出来.
+#: 用它当"用户选了这个周期"的样本, 验的是预检**不受它影响**.
+STRAY_SUBSCRIPTION_PERIOD = "15m"
 
 DEFAULT_EXCHANGE_ID = "SSE"
 DEFAULT_INSTRUMENT_ID = "600519"
 
 
-def _coverage_query(bar_period: str = "5m") -> dict[str, str]:
+def _coverage_query() -> dict[str, str]:
     return {
         "exchange_id": DEFAULT_EXCHANGE_ID,
         "instrument_id": DEFAULT_INSTRUMENT_ID,
-        "bar_period": bar_period,
         "start_trading_day": WINDOW_START_DAY,
         "end_trading_day": WINDOW_END_DAY,
     }
@@ -101,18 +100,20 @@ async def test_coverage_is_sufficient_for_the_covered_window(
     assert body["missing_day_count"] == 0
 
 
-async def test_coverage_is_insufficient_when_only_another_frequency_is_ingested(
+async def test_coverage_ignores_whatever_subscription_period_the_page_sends(
     client: AsyncClient, run_owner: SignedInAccount
 ) -> None:
-    """提交页的预检必须与调度侧的判据**同一条**: 频率不同就是不够, 不能按合约放行.
+    """预检只回答"这份落盘数据在不在", 故带上订阅周期也不改变答案.
 
-    这一条是频率盲回归在 HTTP 层的镜像 —— 桩库里这只合约 5 分钟线齐全, 换成别的分钟周期就必须
-    报不够, 否则提交页会说"够了"而调度侧会说"不够", 两个界面各说各话.
+    这一条是原先那条"频率不同就必须报不够"的**反面**. 落盘精度恒为 5m, 15m 那根 bar 由引擎在
+    装载期聚合出来, 与组件库里有没有 15 分钟线无关; 于是把它当"用户选了 15m"问一次, 仍须回
+    "够了". 若哪天有人把周期重新收进签名并照着它过滤, 提交页就会说"不够"而调度侧说"够了"——
+    两个界面各说各话, 而这条会先红.
     """
 
     response = await client.get(
         COVERAGE_PATH,
-        params=_coverage_query(bar_period=f"{UNCOVERED_FREQUENCY}m"),
+        params={**_coverage_query(), "bar_period": STRAY_SUBSCRIPTION_PERIOD},
         headers=bearer_headers(run_owner.token),
     )
 
@@ -121,26 +122,9 @@ async def test_coverage_is_insufficient_when_only_another_frequency_is_ingested(
     body = response.json()
 
     assert body["available"] is True
-    assert body["sufficient"] is False
+    assert body["sufficient"] is True
     assert body["expected_day_count"] == WINDOW_TRADING_DAY_COUNT
-    assert body["missing_day_count"] == WINDOW_TRADING_DAY_COUNT
-
-
-async def test_coverage_degrades_for_an_unsupported_bar_period(
-    client: AsyncClient, run_owner: SignedInAccount
-) -> None:
-    response = await client.get(
-        COVERAGE_PATH,
-        params=_coverage_query(bar_period=UNSUPPORTED_BAR_PERIOD),
-        headers=bearer_headers(run_owner.token),
-    )
-
-    assert response.status_code == 200
-
-    body = response.json()
-
-    assert body["available"] is False
-    assert body["reason"]
+    assert body["missing_day_count"] == 0
 
 
 async def test_coverage_requires_authentication(client: AsyncClient) -> None:

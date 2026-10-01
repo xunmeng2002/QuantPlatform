@@ -4,8 +4,8 @@
  * 模板挂在**策略**下 (路径里的 `strategy_id`), 而可见性只按归属人: 共享或公开的策略下列出来的
  * 仍是你自己那几份. 权限与不存在都回 404, 前端无从分辨, 故也不必分辨.
  *
- * **没有 apply 端点**: "套用"要与当前 manifest 派生出的控件、当前表单已填的值一起决定, 是纯前端
- * 动作 (见 `domain/run-form` 与 `domain/manifest`). 服务端只负责存与取.
+ * **没有 apply 端点**: "套用"要与当前配置模板派生出的控件、当前表单已填的值一起决定, 是纯前端
+ * 动作 (见 `domain/run-form` 与 `domain/strategy-configuration`). 服务端只负责存与取.
  */
 
 import { request } from './client';

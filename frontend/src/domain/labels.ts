@@ -6,7 +6,13 @@
  */
 
 import type { RunSortColumn } from '../api/runs';
-import type { GrantPermission, StrategyVisibility, UserStatus, UserType } from '../api/types';
+import type {
+  GrantPermission,
+  ParameterValueType,
+  StrategyVisibility,
+  UserStatus,
+  UserType,
+} from '../api/types';
 import type { StatusPresentation } from './run-status';
 
 const USER_TYPE_LABELS: Record<UserType, string> = {
@@ -60,4 +66,20 @@ export function describeStrategyVisibility(
 
 export function describeGrantPermission(permission: GrantPermission): string {
   return GRANT_PERMISSION_LABELS[permission];
+}
+
+/**
+ * 参数取值类型 → 它会渲染成什么控件.
+ *
+ * 说"控件"而不是"类型"是给用户看的: 版本预览里那一列回答的是"下一轮回测这个键长什么样", 而
+ * `boolean` / `number` 这种字面量对他没有信息量.
+ */
+const PARAMETER_CONTROL_LABELS: Record<ParameterValueType, string> = {
+  boolean: '复选框',
+  number: '数字框',
+  string: '文本框',
+};
+
+export function describeParameterControl(valueType: ParameterValueType): string {
+  return PARAMETER_CONTROL_LABELS[valueType];
 }

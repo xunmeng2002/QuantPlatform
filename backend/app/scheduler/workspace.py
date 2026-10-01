@@ -96,8 +96,8 @@ def _write_job_files(
         settings.session_file_path.read_bytes()
     )
 
-    # 入口文件**原样**复制到 job 目录根部: 它同时是裸文件名、`argv[0]` 与 manifest 声明的东西,
-    # 改一个字都会让引擎日志器拼不出日志路径并在启动期终止 (见 §3.1).
+    # 入口文件**原样**复制到 job 目录根部: 它同时是裸文件名、`argv[0]` 与策略自己硬编码的那个
+    # 名字, 改一个字都会让引擎日志器拼不出日志路径并在启动期终止 (见 §3.1).
     shutil.copyfile(
         job_files.entry_source_path, staging_directory / job_files.entry_filename
     )

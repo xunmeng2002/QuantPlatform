@@ -1,7 +1,8 @@
 """策略的上传、查询、删除与授权共享.
 
-上传形态: `.py` 必需, manifest 以 multipart 的一个**文本字段**传入. 前端可以填表单、也可以
-读入一份 `manifest.json` 再填进同一个字段——两条路落到同一字段, 故服务端只有一条路径.
+上传形态是**两个文件字段**: `source` (`.py`) 与 `configuration` (`.json`, 策略启动时真正去读的
+那一份). 两份都必须是文件而不是文本字段, 因为**文件名本身是载荷**: 策略在作业目录里按自己硬编
+码的名字 `open()` 那份配置, 平台得知道该把它落成什么名字, 而一个纯文本字段没有名字可给.
 
 写操作一律经 visibility 的归属收口 (`load_owned_strategy`): 传新版本、删除与改授权都只对
 归属人开放, 非归属人一律 404, 不区分"无权"与"不存在".
@@ -47,9 +48,18 @@ from ..clock import utc_now
 from ..dependencies import SessionDependency, SettingsDependency
 from ..errors import ConflictError, InvalidRequestError
 from ..ids import generate_identifier
-from ..manifest import StrategyManifest, parse_strategy_manifest
 from ..services.run_prefill import read_last_submitted_parameters
-from ..services.strategy_store import store_strategy_version
+from ..services.strategy_store import (
+    UploadedStrategyVersion,
+    store_strategy_version,
+)
+from ..strategy_configuration import (
+    CONFIGURATION_FILENAME_SUFFIX,
+    ENTRY_FILENAME_SUFFIX,
+    MAXIMUM_CONFIGURATION_BYTES,
+    parse_configuration_template,
+    validate_bare_filename,
+)
 
 
 router = APIRouter()
@@ -63,6 +73,14 @@ STRATEGY_DELETED_MESSAGE = "策略已删除"
 BLANK_STRATEGY_NAME_MESSAGE = "策略名不能为空白"
 EMPTY_SOURCE_MESSAGE = "策略源码不能为空"
 SOURCE_TOO_LARGE_MESSAGE = f"策略源码不得超过 {MAXIMUM_SOURCE_BYTES} 字节"
+EMPTY_CONFIGURATION_MESSAGE = "策略配置不能为空"
+CONFIGURATION_TOO_LARGE_MESSAGE = (
+    f"策略配置不得超过 {MAXIMUM_CONFIGURATION_BYTES} 字节"
+)
+MISSING_UPLOAD_FILENAME_MESSAGE = "上传的文件没有文件名"
+CONFIGURATION_NOT_UTF8_MESSAGE = "策略配置须是 UTF-8 编码的文本"
+ENTRY_FILENAME_LABEL = "入口文件名"
+CONFIGURATION_FILENAME_LABEL = "配置文件名"
 TOO_MANY_GRANTS_MESSAGE = f"单次授权的用户数不得超过 {MAXIMUM_GRANTS_PER_STRATEGY}"
 REPEATED_GRANTEE_MESSAGE = "同一被授权人不得重复出现"
 UNKNOWN_GRANTEE_MESSAGE = "被授权人不存在"
@@ -70,27 +88,59 @@ GRANT_TO_OWNER_MESSAGE = "不能授权给策略归属人"
 GRANTS_CONFLICTED_MESSAGE = "授权正被其他请求修改, 请重试"
 
 
-async def _read_uploaded_source(source_file: UploadFile) -> bytes:
-    """按上限分块读上传的源码, 超限即拒.
+async def _read_uploaded_file(
+    upload: UploadFile,
+    maximum_bytes: int,
+    empty_message: str,
+    too_large_message: str,
+) -> bytes:
+    """按上限分块读一个上传部件, 超限即拒.
 
     分块而非一次读完: 一次读完等于把"客户端说多大就占多少内存"交给调用方.
+
+    两份上传共用这一个函数而不是各写一遍: 两处各写一遍时, 缺的分块或漏的上限只会出现在其中
+    一处, 而症状是"某一个入口能把自己撑爆"。
     """
 
     chunks: list[bytes] = []
     total_bytes = 0
 
-    while chunk := await source_file.read(UPLOAD_READ_CHUNK_BYTES):
+    while chunk := await upload.read(UPLOAD_READ_CHUNK_BYTES):
         total_bytes += len(chunk)
 
-        if total_bytes > MAXIMUM_SOURCE_BYTES:
-            raise InvalidRequestError(SOURCE_TOO_LARGE_MESSAGE)
+        if total_bytes > maximum_bytes:
+            raise InvalidRequestError(too_large_message)
 
         chunks.append(chunk)
 
     if not chunks:
-        raise InvalidRequestError(EMPTY_SOURCE_MESSAGE)
+        raise InvalidRequestError(empty_message)
 
     return b"".join(chunks)
+
+
+def _validate_uploaded_filename(
+    upload: UploadFile, required_suffix: str, field_label: str
+) -> str:
+    """取上传部件自带的文件名并校验它是个能当裸文件名的取值; 不合法即译成 400.
+
+    缺失不是罕见情形: 客户端拿字符串当文件传时 `filename` 就是 `None`, 而名字是**载荷**的一部分
+    (见模块 docstring), 没有它这次上传就不完整.
+
+    译 `ValueError` 的这一层不能省: `validate_bare_filename` 是纯函数, 按契约抛 `ValueError`, 而
+    裸 ValueError 从处理函数里抛出去会绕过 `InvalidRequestError` 那条处理器, 落到兜底的 500 ——
+    用户拿到"服务器内部错误", 而问题出在他自己传的文件名上.
+    """
+
+    if not upload.filename:
+        raise InvalidRequestError(MISSING_UPLOAD_FILENAME_MESSAGE)
+
+    try:
+        return validate_bare_filename(
+            upload.filename, required_suffix, field_label
+        )
+    except ValueError as error:
+        raise InvalidRequestError(str(error)) from error
 
 
 def _validate_source_is_parsable(source_bytes: bytes, entry_filename: str) -> None:
@@ -108,21 +158,67 @@ def _validate_source_is_parsable(source_bytes: bytes, entry_filename: str) -> No
         ) from error
 
 
-async def _read_validated_upload(
-    source_file: UploadFile, manifest_text: str
-) -> tuple[bytes, StrategyManifest]:
-    """读上传的源码, 连 manifest 一起验完再返回.
+def _decode_configuration(configuration_bytes: bytes) -> str:
+    """配置须是 UTF-8 文本.
+
+    非 UTF-8 的配置**两份读者都读不动**: 平台这边解不出文本, 而渲染后的那份配置虽然被
+    `serialize_configuration` 转成了纯 ASCII, 上传的这份原文在作者本机是拿什么写的却无从得知
+    ——早一点说清楚, 好过留一句"策略报告说读不到配置"。
+    """
+
+    try:
+        return configuration_bytes.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise InvalidRequestError(CONFIGURATION_NOT_UTF8_MESSAGE) from error
+
+
+async def _read_validated_version_upload(
+    source_file: UploadFile, configuration_file: UploadFile
+) -> UploadedStrategyVersion:
+    """把两个上传部件读完并验完; 任一项不合法即整批拒.
 
     建策略与传新版本共用这一条路径: 两处各抄一遍, 迟早有一处漏掉其中一步——漏掉源码可解析性
     检查, 代价是收下一个只会以"宿主退出码 1"现身的策略.
+
+    文件名一律经 `validate_bare_filename`: 它们会变成作业目录里的裸文件名与 `argv[0]`.
     """
 
-    parsed_manifest = parse_strategy_manifest(manifest_text)
-    source_bytes = await _read_uploaded_source(source_file)
+    entry_filename = _validate_uploaded_filename(
+        source_file,
+        ENTRY_FILENAME_SUFFIX,
+        ENTRY_FILENAME_LABEL,
+    )
+    configuration_filename = _validate_uploaded_filename(
+        configuration_file,
+        CONFIGURATION_FILENAME_SUFFIX,
+        CONFIGURATION_FILENAME_LABEL,
+    )
 
-    _validate_source_is_parsable(source_bytes, parsed_manifest.entry_filename)
+    source_bytes = await _read_uploaded_file(
+        source_file, MAXIMUM_SOURCE_BYTES, EMPTY_SOURCE_MESSAGE, SOURCE_TOO_LARGE_MESSAGE
+    )
+    configuration_bytes = await _read_uploaded_file(
+        configuration_file,
+        MAXIMUM_CONFIGURATION_BYTES,
+        EMPTY_CONFIGURATION_MESSAGE,
+        CONFIGURATION_TOO_LARGE_MESSAGE,
+    )
 
-    return source_bytes, parsed_manifest
+    _validate_source_is_parsable(source_bytes, entry_filename)
+
+    configuration_text = _decode_configuration(configuration_bytes)
+
+    try:
+        parse_configuration_template(configuration_text)
+    except ValueError as error:
+        raise InvalidRequestError(f"策略配置不合法: {error}") from error
+
+    return UploadedStrategyVersion(
+        source_bytes=source_bytes,
+        entry_filename=entry_filename,
+        configuration_text=configuration_text,
+        configuration_filename=configuration_filename,
+    )
 
 
 async def _build_strategy_detail(
@@ -264,7 +360,7 @@ async def create_strategy_handler(
     settings: SettingsDependency,
     current_user: CurrentUserDependency,
     source_file: Annotated[UploadFile, File(alias="source")],
-    manifest: Annotated[str, Form()],
+    configuration_file: Annotated[UploadFile, File(alias="configuration")],
     name: Annotated[
         str, Form(min_length=1, max_length=MAXIMUM_STRATEGY_NAME_LENGTH)
     ],
@@ -283,7 +379,9 @@ async def create_strategy_handler(
     if not strategy_name:
         raise InvalidRequestError(BLANK_STRATEGY_NAME_MESSAGE)
 
-    source_bytes, parsed_manifest = await _read_validated_upload(source_file, manifest)
+    uploaded_version = await _read_validated_version_upload(
+        source_file, configuration_file
+    )
 
     strategy = StrategyModel(
         id=generate_identifier(),
@@ -300,7 +398,7 @@ async def create_strategy_handler(
         raise ConflictError(STRATEGY_NAME_TAKEN_MESSAGE) from error
 
     await store_strategy_version(
-        session, settings, strategy, current_user, source_bytes, parsed_manifest
+        session, settings, strategy, current_user, uploaded_version
     )
 
     return await _build_strategy_detail(session, strategy, current_user)
@@ -317,7 +415,7 @@ async def upload_strategy_version_handler(
     settings: SettingsDependency,
     current_user: CurrentUserDependency,
     source_file: Annotated[UploadFile, File(alias="source")],
-    manifest: Annotated[str, Form()],
+    configuration_file: Annotated[UploadFile, File(alias="configuration")],
 ) -> StrategyVersionModel:
     """给既有策略上传一个新版本.
 
@@ -327,10 +425,12 @@ async def upload_strategy_version_handler(
 
     strategy = await load_owned_strategy(session, current_user, strategy_id)
 
-    source_bytes, parsed_manifest = await _read_validated_upload(source_file, manifest)
+    uploaded_version = await _read_validated_version_upload(
+        source_file, configuration_file
+    )
 
     return await store_strategy_version(
-        session, settings, strategy, current_user, source_bytes, parsed_manifest
+        session, settings, strategy, current_user, uploaded_version
     )
 
 

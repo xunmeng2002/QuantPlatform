@@ -129,11 +129,16 @@ class StrategyVersionModel(Base):
 
     同一策略下 (StrategyId, VersionNo) 唯一——版本号不得重复, 这是完整性.
 
-    版本判重不在此处加约束: 判同的键是 (SourceHash, ManifestJson) 两列, 而 ManifestJson 是
-    Text, 拿它做唯一索引不划算. 更要紧的是单看 SourceHash 会**判错**: 同一份源码配不同
-    manifest (改了入口文件名、或增删了参数) 是一份新版本, 只钉 SourceHash 的唯一约束会把
-    这种上传挡成完整性冲突, 使"改参数必须连源码一起改"——荒谬. 故判重放在
-    services/strategy_store 内做, 那里判错也只是多个目录, 不伤及完整性.
+    版本判重不在此处加约束: 判同的键是 (SourceHash, ConfigurationJson) 两列, 而 ConfigurationJson
+    是 Text, 拿它做唯一索引不划算. 更要紧的是单看 SourceHash 会**判错**: 同一份源码配不同配置
+    模板 (改了参数、或换了入口文件名) 是一份新版本, 只钉 SourceHash 的唯一约束会把这种上传挡成
+    完整性冲突, 使"改配置必须连源码一起改"——荒谬. 故判重放在 services/strategy_store 内做,
+    那里判错也只是多个目录, 不伤及完整性.
+
+    `ManifestJson` 是**历史列**: 上传形态从"源码 + 手写 manifest"改成"源码 + 配置 JSON"之后,
+    这份列不再承载任何含义, 只为兼容 SQLite 的既有表结构而保留 (`catalog/migrations.py` 只加列、
+    不删列). 新写的一律是空串, 而"这个版本是旧形态"这件事由 `ConfigurationJson` 为 NULL 表达
+    ——那是**结构性**的判据, 不是靠去猜旧 manifest 里的键长什么样.
     """
 
     __tablename__ = "StrategyVersions"
@@ -154,7 +159,13 @@ class StrategyVersionModel(Base):
 
     config_filename: Mapped[str] = mapped_column("ConfigFilename", String(128))
 
-    manifest_json: Mapped[str] = mapped_column("ManifestJson", Text)
+    configuration_json: Mapped[str | None] = mapped_column(
+        "ConfigurationJson", Text, default=None
+    )
+
+    #: 历史列, 见类 docstring. Python 侧默认值是**必须**的: 这一列是 NOT NULL, 而新代码不再写它,
+    #: 少了默认值 SQLAlchemy 会把它整个从 INSERT 里略去, 于是每一条新版本都撞 NOT NULL 冲突.
+    manifest_json: Mapped[str] = mapped_column("ManifestJson", Text, default="")
 
     source_hash: Mapped[str] = mapped_column("SourceHash", String(64), index=True)
 
@@ -360,9 +371,10 @@ class RunTemplateModel(Base):
     落在"同一策略下不重名". 重名以这条约束为准 (捕 `IntegrityError`), 不另做"先查后插".
 
     列的可空性与提交契约对齐: 提交时必填的列 (Name / MatchMode / BarPeriod / 两个交易日 /
-    InitialCapital) 一律非空不可省, 只有 `exchange_id` / `instrument_id` 可空——它们本就只在
-    manifest 映射了的时候才收. `ParamsJson` 与 `Runs.ParamsJson` **同形同义** (`{key: 引擎取值}`,
-    已过 `validate_parameter_value`), 故套用时可直接喂给参数控件, 不需要再译一遍.
+    InitialCapital) 一律非空不可省, 只有 `exchange_id` / `instrument_id` 可空——不指名合约是
+    正常的一轮, 它们此时存空串. `ParamsJson` 与 `Runs.ParamsJson` **同形同义** (都是策略配置的
+    那个形状的 `{键: 取值}`, 只是这里不含平台那三个运行级键——它们在表上各有具名列), 故套用时
+    可直接喂给参数控件, 不需要再译一遍.
     """
 
     __tablename__ = "RunTemplates"

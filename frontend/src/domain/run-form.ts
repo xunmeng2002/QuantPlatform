@@ -3,11 +3,11 @@
  *
  * 与 `app/services/run_submission.py` **同一套语义**, 报错文案也照抄. 界面放行而后端回 400 是
  * 本项目最忌讳的「点了有反应但没用」, 故这里逐条对齐:
- *   - `bar_period` 恒必填 (引擎一定要它, 与 manifest 有没有映射无关), 且须在 `SUPPORTED_BAR_PERIODS`
- *     之内 —— 那一格比后端更严: `run_submission` 只判非空, 取值能否落地由调度侧的准备步骤兜底,
- *     而填错的表现是静默零成交, 不该等到跑完才发现;
- *   - `exchange_id` / `instrument_id` **只在 manifest 声明了映射时**才收: 引擎不认识它们,
- *     没映射而提交, 后端回的是「该策略未映射 {field}」;
+ *   - `bar_period` 是**策略的订阅周期**, 且须在 `SUBSCRIPTION_BAR_PERIODS` 之内 —— 那一格比后端更严:
+ *     `run_submission` 只判非空, 而取值能否聚合由引擎在装载期判, 填一个聚合不出来的周期会让整轮白
+ *     跑 (`ErrorMarketDataNotExist`), 不该等到跑完才发现;
+ *   - `exchange_id` / `instrument_id` 恒必填: 平台按固定键名把它们覆写进策略配置, 没有"这个策略
+ *     不需要合约"这回事;
  *   - 交易日是 8 位数字串, 且开始不得晚于结束 (等长数字串的字符串比较即为数值比较);
  *   - 初始资金须为大于 0 的有限数值.
  *
@@ -20,9 +20,8 @@ import type {
   RunSubmitPayload,
   RunTemplateCreatePayload,
 } from '../api/types';
-import { SUPPORTED_BAR_PERIODS } from './market-data';
-import type { BarPeriod } from './market-data';
-import type { RunFieldRequirements } from './manifest';
+import { SUBSCRIPTION_BAR_PERIODS } from './market-data';
+import type { SubscriptionBarPeriod } from './market-data';
 
 /** 与 `run_submission.MAXIMUM_RUN_FIELD_VALUE_LENGTH` 一致. */
 export const MAXIMUM_RUN_FIELD_VALUE_LENGTH = 64;
@@ -78,9 +77,6 @@ export interface RunFormInput extends RunFieldInputs {
   strategyId: string;
   strategyVersionId: string;
   matchMode: MarketDataType;
-  /** 选中的版本是否支持该行情模式 (`manifest.supported_match_modes`). */
-  isMatchModeSupported: boolean;
-  runFieldRequirements: RunFieldRequirements;
   /** 已由 `deriveParameterValues` 收好类型的策略参数, 这里不再复验. */
   parameterValues: Record<string, unknown>;
 }
@@ -92,19 +88,15 @@ export type RunFormValidation =
 /**
  * 用一份取值 (上次提交的记忆, 或保存过的模板) 填运行级字段: 逐字段"能用就用, 不能用就原样留着".
  *
- * 判据复用 `validateRunForm` 的那三个读取器 (一次性 `errors` 对象用完即丢), 故界面上的运行级
+ * 判据复用 `validateRunForm` 的那几个读取器 (一次性 `errors` 对象用完即丢), 故界面上的运行级
  * 规则**只有一处**: 那份取值里的字段若在本表单上会被判错, 那它就不该被填进来.
  *
  * 回落到 `current` 而不是空串, 是为了不静默抹掉用户已经敲进去的东西——预填是锦上添花, 每次重新
  * 载入就把用户填好的一半表单清掉, 比不预填更糟. `prefill` 为 `null` (没跑过这个策略) 时结果
  * 恒等于 `current`, 与没有这个功能时一模一样.
- *
- * `exchange_id` / `instrument_id` 未声明映射时不预填: 那两个输入框在界面上根本不渲染, 填了只是
- * 死数据 (`validateRunForm` 也会把它丢掉).
  */
 export function buildPrefilledRunFields(
   prefill: RunFormPrefill | null,
-  requirements: RunFieldRequirements,
   current: RunFieldInputs,
 ): RunFieldInputs {
   return {
@@ -112,13 +104,11 @@ export function buildPrefilledRunFields(
     exchangeId: rememberedRunField(
       prefill?.exchange_id,
       'exchange_id',
-      requirements.exchangeId,
       current.exchangeId,
     ),
     instrumentId: rememberedRunField(
       prefill?.instrument_id,
       'instrument_id',
-      requirements.instrumentId,
       current.instrumentId,
     ),
     startTradingDay: rememberedTradingDay(
@@ -141,16 +131,10 @@ export function buildPrefilledRunFields(
 function rememberedRunField(
   rememberedValue: string | null | undefined,
   fieldName: string,
-  isRequired: boolean,
   fallbackValue: string,
 ): string {
   const errors: Record<string, string> = {};
-  const acceptedValue = readRunFieldValue(
-    rememberedValue ?? '',
-    fieldName,
-    errors,
-    isRequired,
-  );
+  const acceptedValue = readRunFieldValue(rememberedValue ?? '', fieldName, errors);
 
   return acceptedValue ?? fallbackValue;
 }
@@ -202,23 +186,11 @@ export function validateRunForm(input: RunFormInput): RunFormValidation {
 
   if (!input.strategyId) {
     errors.strategy_id = '请选择策略';
-  } else if (!input.isMatchModeSupported) {
-    errors.strategy_id = `该策略不支持 ${input.matchMode} 行情模式`;
   }
 
   const barPeriod = readBarPeriod(input.barPeriod, errors);
-  const exchangeId = readRunFieldValue(
-    input.exchangeId,
-    'exchange_id',
-    errors,
-    input.runFieldRequirements.exchangeId,
-  );
-  const instrumentId = readRunFieldValue(
-    input.instrumentId,
-    'instrument_id',
-    errors,
-    input.runFieldRequirements.instrumentId,
-  );
+  const exchangeId = readRunFieldValue(input.exchangeId, 'exchange_id', errors);
+  const instrumentId = readRunFieldValue(input.instrumentId, 'instrument_id', errors);
 
   const startTradingDay = readTradingDay(input.startTradingDay, 'start_trading_day', errors);
   const endTradingDay = readTradingDay(input.endTradingDay, 'end_trading_day', errors);
@@ -244,7 +216,6 @@ export function validateRunForm(input: RunFormInput): RunFormValidation {
       strategy_version_id: input.strategyVersionId || null,
       match_mode: input.matchMode,
       bar_period: barPeriod ?? '',
-      // 未映射时给 null 而不是空串: 两种都不带值, 但 null 明确表达"这个字段不存在于本策略".
       exchange_id: exchangeId,
       instrument_id: instrumentId,
       start_trading_day: startTradingDay ?? '',
@@ -256,8 +227,11 @@ export function validateRunForm(input: RunFormInput): RunFormValidation {
 }
 
 /**
- * 行情预检查询的参数; 五个字段里任何一个还没成型就让整条回 `null` —— 那时问不出有意义的结果, 问了
+ * 行情预检查询的参数; 四个字段里任何一个还没成型就让整条回 `null` —— 那时问不出有意义的结果, 问了
  * 也只是把"填了一半"变成一句要人去猜的提示.
+ *
+ * **不带 `bar_period`**: 覆盖判据问的是"本地有没有那段日期的数据", 而落盘只有 5m 一档, 用户的订阅
+ * 周期不影响"数据在不在" (后端那条查询参数因此也去掉了). 把周期带上只会让预检看起来依赖它.
  *
  * 判据**复用 `validateRunForm` 的那几个读取器**, 故"预检说本地缺数据"与"提交被拒"用的是同一批
  * 规则, 不会各说各话. 开始晚于结束也一并排除: 那个区间算不出任何期望交易日, 预检只会回一句
@@ -267,24 +241,12 @@ export function buildCoverageQuery(
   input: RunFormInput,
 ): MarketDataCoverageQuery | null {
   const errors: Record<string, string> = {};
-  const barPeriod = readBarPeriod(input.barPeriod, errors);
-  const exchangeId = readRunFieldValue(
-    input.exchangeId,
-    'exchange_id',
-    errors,
-    input.runFieldRequirements.exchangeId,
-  );
-  const instrumentId = readRunFieldValue(
-    input.instrumentId,
-    'instrument_id',
-    errors,
-    input.runFieldRequirements.instrumentId,
-  );
+  const exchangeId = readRunFieldValue(input.exchangeId, 'exchange_id', errors);
+  const instrumentId = readRunFieldValue(input.instrumentId, 'instrument_id', errors);
   const startTradingDay = readTradingDay(input.startTradingDay, 'start_trading_day', errors);
   const endTradingDay = readTradingDay(input.endTradingDay, 'end_trading_day', errors);
 
   if (
-    barPeriod === null ||
     exchangeId === null ||
     instrumentId === null ||
     startTradingDay === null ||
@@ -297,7 +259,6 @@ export function buildCoverageQuery(
   return {
     exchange_id: exchangeId,
     instrument_id: instrumentId,
-    bar_period: barPeriod,
     start_trading_day: startTradingDay,
     end_trading_day: endTradingDay,
   };
@@ -374,11 +335,11 @@ function readTemplateNameErrors(templateName: string): Record<string, string> {
 }
 
 /**
- * 读 K 线周期: 必填, 且须在 `SUPPORTED_BAR_PERIODS` 之内.
+ * 读订阅周期: 必填, 且须在 `SUBSCRIPTION_BAR_PERIODS` 之内.
  *
  * 「没填」与「填了清单外的值」分开报, 是因为下一步动作不同 (一个是去选一个, 一个是改掉它).
- * 清单本身是行情组件能力的镜像 (见 `domain/market-data.ts`), 界面上的下拉框给的就是这几个值; 这条
- * 判据同时护着预填与模板 —— 旧的一份记忆里可能存着 `1d`.
+ * 清单本身是"5m 的整数倍且引擎聚合得出来"的那几个 (见 `domain/market-data.ts`), 界面上的下拉框给
+ * 的就是这几个值; 这条判据同时护着预填与模板 —— 旧的一份记忆里可能存着 `1d`.
  */
 function readBarPeriod(
   rawValue: string,
@@ -392,8 +353,8 @@ function readBarPeriod(
     return null;
   }
 
-  if (!isSupportedBarPeriod(normalizedValue)) {
-    errors.bar_period = `只能是 ${SUPPORTED_BAR_PERIODS.join(' / ')}`;
+  if (!isSubscriptionBarPeriod(normalizedValue)) {
+    errors.bar_period = `只能是 ${SUBSCRIPTION_BAR_PERIODS.join(' / ')}`;
 
     return null;
   }
@@ -401,33 +362,26 @@ function readBarPeriod(
   return normalizedValue;
 }
 
-function isSupportedBarPeriod(value: string): value is BarPeriod {
-  return (SUPPORTED_BAR_PERIODS as readonly string[]).includes(value);
+function isSubscriptionBarPeriod(value: string): value is SubscriptionBarPeriod {
+  return (SUBSCRIPTION_BAR_PERIODS as readonly string[]).includes(value);
 }
 
 /**
- * 读一个可选的运行级字段.
+ * 读一个运行级字段.
  *
- * 空串即「未提供」(后端 `_normalize_run_field_value` 同一条约定). 未映射的字段即便填了也不发送,
- * 否则后端回 400; 有映射而没填则当场报错, 而不是等后端说「{field} 不能为空」.
+ * 空串即「未提供」(后端 `_normalize_run_field_value` 同一条约定), 而这两个字段恒必填, 故当场报错,
+ * 而不是等后端说「{field} 不能为空」.
  */
 function readRunFieldValue(
   rawValue: string,
   fieldName: string,
   errors: Record<string, string>,
-  isRequired: boolean,
 ): string | null {
   const normalizedValue = rawValue.trim();
 
   if (!normalizedValue) {
-    if (isRequired) {
-      errors[fieldName] = '不能为空';
-    }
+    errors[fieldName] = '不能为空';
 
-    return null;
-  }
-
-  if (!isRequired) {
     return null;
   }
 

@@ -15,7 +15,7 @@
 runs/<RunId>/
 ├── BackTest.json             # 引擎配置（引擎硬编码从此读）
 ├── Sessions.json             # 会话表（SessionFile 指向）
-├── TestStrategyGrid.json     # 策略配置，名由 manifest 决定
+├── TestStrategyGrid.json     # 策略配置，文件名与内容取自上传的那一份
 ├── grid_strategy.py          # 策略入口，原样复制自策略库
 ├── stdout.txt / stderr.txt   # runner 捕获的宿主输出
 ├── result.json               # 契约产物（引擎写）
@@ -68,14 +68,20 @@ P3 实测（2026-09-25，目录里只有那四个输入文件）引擎会自己�
 `BackTest_<RunId>.db`（已实测）。平台若先拼一份 RunId 进去，会得到
 `BackTest_<RunId>_<RunId>.db`——不报错，只是与 `result.json.DbPath` 不符。
 
-**策略配置文件里的运行级字段**（P3 新增）：策略配置（`TestStrategyGrid.json` 一类）
-除 `params` 之外还要拿到 `exchange_id` / `instrument_id` / `bar_period` 三个字段，
-键名由 manifest 的 `run_field_keys` 声明（见 `platform-plan.md` §7.2；策略作者那一份说明见
-[`strategy-manifest.md`](strategy-manifest.md)）。
-其中 `bar_period` **两处都要写**：`BackTest.json` 的 `BarPreces` 是引擎实际聚合周期，
-策略配置里那个是 `declare_bar_period` 的期望周期，**两者不一致时策略收不到 bar、
-静默 0 成交**（P0 记的那类失效）。有映射时由平台写同一个值，一致性因此是结构性的；
-策略未声明映射时平台只写 `BackTest.json`，这份差异由策略作者承担。
+**策略配置文件里的运行级字段**：策略配置（`TestStrategyGrid.json` 一类）除策略自己的
+参数之外还要拿到 `exchange_id` / `instrument_id` / `bar_period` 三个字段，键名**固定**为
+`ExchangeId` / `InstrumentId` / `BarPreces`（`app/strategy_configuration.py` 的三个常量），
+由平台覆写——模板里没有就新增，有就覆写。策略作者那一份说明见
+[`strategy-configuration.md`](strategy-configuration.md)。
+
+`bar_period` **两处都有，而两处不是同一件事**：`BackTest.json` 的 `BarPreces` 是**落盘
+精度**，恒为平台常量 `5m`，只决定读哪一族 parquet；策略配置那份是策略的**订阅周期**
+（`declare_bar_period` 的期望周期），是用户在提交页选的。详见 `platform-plan.md` §7.3。
+
+**两者不一致时不是"静默 0 成交"**（这是本节原稿的说法，2026-10-01 订正）：引擎按
+`BackTest.json.BarPreces` 过滤，磁盘上没有那一族时一行都读不到，它在**装载期**就判
+`ErrorMarketDataNotExist` 拒掉整轮——报错收场，那一轮白跑。而平台上这条走不到：订阅周期
+只给清单内的值（5m 的整数倍），聚合不出来的目标在提交页就挡住了。
 
 ---
 

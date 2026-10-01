@@ -2,14 +2,14 @@
 /**
  * 新建回测.
  *
- * 页面结构跟着 manifest 走: 选策略 → 选版本 (缺省最新) → 用该版本的 manifest 生成参数控件, 并
- * 决定 `exchange_id` / `instrument_id` / `bar_period` 显示不显示. 平台**按 manifest 渲染策略配置,
- * 不读策略自带的配置文件**, 所以这里不能有任何写死的参数控件.
+ * 页面结构跟着**选中版本的配置模板**走: 选策略 → 选版本 (缺省最新) → 用那份 JSON 的键生成参数控件.
+ * 平台不读策略自带的配置文件, 而是把它整份复制出来、覆写三个平台键 —— 所以这里不能有任何写死的
+ * 参数控件.
  *
  * 选中策略时按"你上次提交的那一份"预填 (参数与运行级字段都填): 每次回到这个页面都要重敲一遍
  * 标的、日期、资金与一整组参数, 是纯粹的重复劳动. 取值由后端从该用户在该策略下最新那一轮运行里
- * 解出来 (`GET /api/strategies/{id}/last-submitted-parameters`), 前端只按当前 manifest 判一判
- * 能不能用 (见 `domain/manifest.createInitialParameterInputs`)——那份记忆可能来自旧版本.
+ * 解出来 (`GET /api/strategies/{id}/last-submitted-parameters`), 前端只按当前模板判一判能不能用
+ * (见 `domain/strategy-configuration.createInitialParameterInputs`)——那份记忆可能来自旧版本.
  *
  * 「配置模板」是同一件事的**第二份取值来源**: 命名的取值集合存在库里, 随时套用. 两条路在下面
  * `applyFormForCurrentSelection` 里合流 (模板的字段与记忆逐字对齐, 见 `domain/run-form.RunFormPrefill`),
@@ -19,10 +19,11 @@
  * 表单里**没有行情模式选择**: 提交侧当前只收 Bar (`run_submission.MATCH_MODE_NOT_SUBMITTABLE_MESSAGE`),
  * 给了 Tick 也只是让用户点一个必然被拒的选项.
  *
- * **合约与 K 线周期是下拉, 不是自由文本**: 取值要拿去和行情组件对账 (合约清单来自它的库, 够不够
- * 由它已落地的数据判定), 而填错的表现是跑得出结果、只是**静默零成交**. 选完合约后表单就地做一次
- * 覆盖预检, 提前说清"提交后还要先下载"—— 预检只告知, 不挡提交: 真下载发生在调度器里, 这一页不碰
- * 文件系统. 组件不在位时下拉禁用并给出原因, **不退回自由文本**.
+ * **三种周期不是一件事**: 合约下拉里的取值要拿去和行情组件对账 (合约清单来自它的库, 够不够由它
+ * 已落地的数据判定), 而 `K 线周期` 是**策略的订阅周期**, 落盘精度恒为 5m —— 选 15m 时引擎在运行时
+ * 把 5m 聚合成 15m. 选一个聚合不出来的周期不会静默零成交, 但会让整轮白跑, 故这里只给清单内的值.
+ * 选完合约后表单就地做一次覆盖预检, 提前说清"提交后还要先下载"—— 预检只告知, 不挡提交: 真下载发生
+ * 在调度器里, 这一页不碰文件系统. 组件不在位时下拉禁用并给出原因, **不退回自由文本**.
  *
  * 反馈分流: 提交失败是**表单自己的失败** (a 类) —— 参数不合法、标的没填, 那句话的读者正在这张表单上,
  * 所以它就地留在 `submitErrorMessage` 里, 不弹 toast. 成功才弹: 回包之后立刻跳运行详情页, 提示条会
@@ -47,9 +48,15 @@ import PageHeader from '../components/PageHeader.vue';
 import ParameterForm from '../components/ParameterForm.vue';
 import SurfaceCard from '../components/SurfaceCard.vue';
 import { describeApiFailure, showSuccessToast } from '../composables/use-feedback';
-import { parseStrategyManifest, createInitialParameterInputs, deriveParameterDescriptors, deriveParameterValues, deriveRunFieldRequirements } from '../domain/manifest';
-import type { ParameterInput, RunFieldRequirements } from '../domain/manifest';
-import { buildContractCode, formatContractLabel, SUPPORTED_BAR_PERIODS } from '../domain/market-data';
+import { buildContractCode, formatContractLabel, SUBSCRIPTION_BAR_PERIODS } from '../domain/market-data';
+import {
+  createInitialParameterInputs,
+  deriveParameterDescriptors,
+  deriveParameterValues,
+  findUnrenderableParameterKeys,
+  parseStrategyConfigurationTemplate,
+} from '../domain/strategy-configuration';
+import type { ParameterInput } from '../domain/strategy-configuration';
 import { EMPTY_RUN_FIELDS, buildCoverageQuery, buildPrefilledRunFields, buildTemplateDraft, validateRunForm } from '../domain/run-form';
 import type { RunFieldInputs, RunFormInput, RunFormPrefill } from '../domain/run-form';
 import { formatDateTime } from '../domain/format';
@@ -58,11 +65,8 @@ import { useStrategyCatalogStore } from '../stores/strategy-catalog';
 /** 提交侧唯一可用的行情模式, 取自 `api/types` 的契约镜像而不是写死字面量. */
 const MATCH_MODE: MarketDataType = SUBMITTABLE_MATCH_MODE;
 
-const EMPTY_RUN_FIELD_REQUIREMENTS: RunFieldRequirements = {
-  barPeriod: true,
-  exchangeId: false,
-  instrumentId: false,
-};
+/** 与 `run_submission.CONFIGURATION_UNREADABLE_MESSAGE` 同一件事, 这里只负责说在提交页上. */
+const PRE_CHANGE_VERSION_MESSAGE = '该版本落在改形态之前, 没有配置模板';
 
 const router = useRouter();
 const strategyCatalog = useStrategyCatalogStore();
@@ -151,41 +155,36 @@ const versionPlaceholder = computed(() =>
   strategyDetail.value === null ? '请先选择策略' : '没有可用版本',
 );
 
-/** 版本里的 `manifest_json` 可能读不动 (存量坏行), 那时整张表单都生成不出来. */
-const manifestResult = computed(() => {
+/**
+ * 选中版本的配置模板; 读不动时整张表单都生成不出来.
+ *
+ * 两种读不动分开说: `configuration_json` 为 `null` 是**改形态之前落的版本** (那时存的是 manifest),
+ * 它没有模板可解, 后端也会拒 —— 那不是"文件坏了", 而是"这份版本要重传"; 而字符串解不开才是坏行.
+ * 两句的下一步动作不同, 故不合成一句.
+ */
+const configurationResult = computed(() => {
   const version = selectedVersion.value;
 
-  return version === null ? null : parseStrategyManifest(version.manifest_json);
+  if (version === null) {
+    return null;
+  }
+
+  return version.configuration_json === null
+    ? { ok: false as const, message: PRE_CHANGE_VERSION_MESSAGE }
+    : parseStrategyConfigurationTemplate(version.configuration_json);
 });
 
 const descriptors = computed(() =>
-  manifestResult.value?.ok === true
-    ? deriveParameterDescriptors(manifestResult.value.manifest)
+  configurationResult.value?.ok === true
+    ? deriveParameterDescriptors(configurationResult.value.template)
     : [],
 );
 
-const runFieldRequirements = computed<RunFieldRequirements>(() =>
-  manifestResult.value?.ok === true
-    ? deriveRunFieldRequirements(manifestResult.value.manifest)
-    : EMPTY_RUN_FIELD_REQUIREMENTS,
-);
-
-const isMatchModeSupported = computed(
-  () =>
-    manifestResult.value?.ok === true &&
-    manifestResult.value.manifest.supported_match_modes.includes(MATCH_MODE),
-);
-
-/**
- * 合约下拉框只在 manifest **两个键都声明了**映射时才出现.
- *
- * 只声明一个时拼不出组件主键 (`<交易所前缀>.<合约>`), 也判不了本地行情够不够, 故那一格保持原样
- * 的自由文本 —— 这是有意的边界: 与其给一个永远选不出正确取值的下拉, 不如留一个诚实的输入框.
- */
-const usesContractPicker = computed(
-  () =>
-    runFieldRequirements.value.exchangeId &&
-    runFieldRequirements.value.instrumentId,
+/** 模板里那些渲染不出控件的键 (数组 / 对象 / `null`): 界面改不了, 但要说出来. */
+const unrenderableParameterKeys = computed(() =>
+  configurationResult.value?.ok === true
+    ? findUnrenderableParameterKeys(configurationResult.value.template)
+    : [],
 );
 
 const contracts = computed(() => marketDataContracts.value?.contracts ?? []);
@@ -247,8 +246,6 @@ const formInput = computed<RunFormInput>(() => ({
   strategyId: selectedStrategyId.value,
   strategyVersionId: selectedVersionId.value,
   matchMode: MATCH_MODE,
-  isMatchModeSupported: isMatchModeSupported.value,
-  runFieldRequirements: runFieldRequirements.value,
   parameterValues: parameterDerivation.value.ok ? parameterDerivation.value.values : {},
 }));
 
@@ -306,16 +303,12 @@ function applyFormForCurrentSelection(): void {
     descriptors.value,
     prefill?.params ?? {},
   );
-  runFields.value = buildPrefilledRunFields(
-    prefill,
-    runFieldRequirements.value,
-    runFields.value,
-  );
-  // 套用来的取值可能整好凑齐了预检需要的五格, 那时提示条该立刻跟上, 而不是等用户再去碰一下某个框.
+  runFields.value = buildPrefilledRunFields(prefill, runFields.value);
+  // 套用来的取值可能整好凑齐了预检需要的四格, 那时提示条该立刻跟上, 而不是等用户再去碰一下某个框.
   void refreshCoverageNotice();
 }
 
-/** 「重置为默认值」: 丢掉本轮套用的那份取值, 把整张表单恢复成 manifest 默认值. */
+/** 「重置为默认值」: 丢掉本轮套用的那份取值, 把整张表单恢复成模板里的取值. */
 function resetToDefaults(): void {
   appliedPrefill.value = null;
   runFields.value = { ...EMPTY_RUN_FIELDS };
@@ -769,14 +762,16 @@ onMounted(() => {
         <!-- closable 显式关掉: 这条提示说的是"这个版本不可用", 关掉它不会让那个版本变得可用 ——
              与上面那条预填提示同一理由 (关闭只翻内部标志, 状态没有变). -->
         <ElAlert
-          v-else-if="manifestResult && !manifestResult.ok"
+          v-else-if="configurationResult && !configurationResult.ok"
           type="warning"
           :closable="false"
-          :title="`${manifestResult.message} — 该版本无法生成提交表单, 请重新上传该版本.`"
+          :title="`${configurationResult.message} — 该版本无法提交, 请重新上传该版本.`"
         />
 
+        <!-- 三个运行级取值由平台**覆写**进策略配置, 故在这里明说它们会落成什么键 —— 用户拿这份
+             配置去对策略源码时, 得知道那三个键不是他填的参数, 而是平台写的. -->
         <dl
-          v-else-if="manifestResult?.ok"
+          v-else-if="configurationResult?.ok"
           class="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2"
         >
           <div class="flex gap-2">
@@ -784,7 +779,7 @@ onMounted(() => {
               入口文件
             </dt>
             <dd class="text-slate-700">
-              {{ manifestResult.manifest.entry_filename }}
+              {{ selectedVersion?.entry_filename }}
             </dd>
           </div>
           <div class="flex gap-2">
@@ -792,15 +787,15 @@ onMounted(() => {
               配置文件
             </dt>
             <dd class="text-slate-700">
-              {{ manifestResult.manifest.config_filename }}
+              {{ selectedVersion?.config_filename }}
             </dd>
           </div>
           <div class="flex gap-2">
             <dt class="text-slate-500">
-              支持行情模式
+              平台覆写的键
             </dt>
             <dd class="text-slate-700">
-              {{ manifestResult.manifest.supported_match_modes.join(', ') }}
+              ExchangeId / InstrumentId / BarPreces
             </dd>
           </div>
           <div class="flex gap-2">
@@ -826,8 +821,8 @@ onMounted(() => {
 
         <p class="text-xs text-slate-500">
           模板存的是一份<strong class="font-semibold">取值</strong> (运行级字段与策略参数),
-          <strong class="font-semibold">不存版本</strong> —— 换版本后仍可套用, 而当前 manifest
-          里没有的那个参数会被忽略.
+          <strong class="font-semibold">不存版本</strong> —— 换版本后仍可套用, 而当前配置模板里
+          没有的那个参数会被忽略.
         </p>
 
         <ErrorBanner
@@ -939,16 +934,17 @@ onMounted(() => {
           </label>
 
           <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
-            K 线周期 (bar_period)
-            <!-- 下拉而不是自由文本: 这个取值同时是引擎 `BarPreces` 与行情文件的周期后缀, 填一个
-                 清单外的值不会报错, 只会让回测跑出零成交. 清单见 `domain/market-data.ts`. -->
+            K 线周期 (策略的订阅周期)
+            <!-- 下拉而不是自由文本: 落盘只有 5m, 用户选的这个值写进策略配置并由策略声明成订阅目标,
+                 引擎在运行时聚合. 填一个聚合不出来的周期不会静默零成交, 但会让整轮在装载期被拒 ——
+                 那一轮已经白跑了, 故只给清单内的值. 清单见 `domain/market-data.ts`. -->
             <ElSelect
               v-model="runFields.barPeriod"
               placeholder="请选择"
               @change="refreshCoverageNotice"
             >
               <ElOption
-                v-for="barPeriod in SUPPORTED_BAR_PERIODS"
+                v-for="barPeriod in SUBSCRIPTION_BAR_PERIODS"
                 :key="barPeriod"
                 :label="barPeriod"
                 :value="barPeriod"
@@ -961,13 +957,10 @@ onMounted(() => {
             <span
               v-else
               class="text-xs text-slate-400"
-            >行情按周期分文件落地, 该值必须与所选合约已落地的周期一致</span>
+            >落盘行情恒为 5m, 更长的周期由引擎在运行时聚合 (须是 5m 的整数倍)</span>
           </label>
 
-          <label
-            v-if="usesContractPicker"
-            class="flex flex-col gap-1 text-sm font-medium text-slate-700"
-          >
+          <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
             回测合约
             <ElSelect
               v-model="selectedContractCode"
@@ -997,48 +990,8 @@ onMounted(() => {
             <span
               v-else
               class="text-xs text-slate-400"
-            >合约清单来自行情组件, 同时决定 exchange_id 与 instrument_id</span>
+            >合约清单来自行情组件, 同时决定 ExchangeId 与 InstrumentId</span>
           </label>
-
-          <template v-else>
-            <label
-              v-if="runFieldRequirements.exchangeId"
-              class="flex flex-col gap-1 text-sm font-medium text-slate-700"
-            >
-              交易所 (exchange_id)
-              <ElInput
-                v-model="runFields.exchangeId"
-                type="text"
-              />
-              <span
-                v-if="visibleFieldErrors.exchange_id"
-                class="text-xs text-rose-600"
-              >{{ visibleFieldErrors.exchange_id }}</span>
-              <span
-                v-else
-                class="text-xs text-slate-400"
-              >该策略只声明了两个键中的一个, 拼不出合约主键, 故这一格仍是自由文本</span>
-            </label>
-
-            <label
-              v-if="runFieldRequirements.instrumentId"
-              class="flex flex-col gap-1 text-sm font-medium text-slate-700"
-            >
-              合约 (instrument_id)
-              <ElInput
-                v-model="runFields.instrumentId"
-                type="text"
-              />
-              <span
-                v-if="visibleFieldErrors.instrument_id"
-                class="text-xs text-rose-600"
-              >{{ visibleFieldErrors.instrument_id }}</span>
-              <span
-                v-else
-                class="text-xs text-slate-400"
-              >该策略只声明了两个键中的一个, 拼不出合约主键, 故这一格仍是自由文本</span>
-            </label>
-          </template>
         </div>
 
         <p
@@ -1057,6 +1010,17 @@ onMounted(() => {
         <legend class="px-1 text-sm font-semibold text-slate-700">
           策略参数
         </legend>
+
+        <!-- 说在前面: 参数区只是那份配置的一部分键. 用户改不了 ExchangeId 一类的平台键与数组/
+             对象键, 若不讲明, 他会以为提交上去的就是界面上这些. -->
+        <p class="text-xs text-slate-500">
+          这些键来自该版本上传的配置 JSON, <strong class="font-semibold">键集不可增删</strong>,
+          这里只能改值.
+          <template v-if="unrenderableParameterKeys.length > 0">
+            另有 {{ unrenderableParameterKeys.join(' / ') }} 不在这里显示, 提交时原样保留.
+          </template>
+        </p>
+
         <ParameterForm
           v-model="parameterInputs"
           :descriptors="descriptors"
@@ -1065,10 +1029,11 @@ onMounted(() => {
       </SurfaceCard>
 
       <p
-        v-else-if="manifestResult?.ok"
+        v-else-if="unrenderableParameterKeys.length > 0"
         class="text-sm text-slate-500"
       >
-        该策略的 manifest 没有声明任何参数.
+        该版本的配置里没有可在界面上改的键; {{ unrenderableParameterKeys.join(' / ') }}
+        提交时原样保留.
       </p>
 
       <div class="flex items-center gap-3">

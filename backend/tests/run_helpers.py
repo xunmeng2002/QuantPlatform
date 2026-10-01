@@ -36,8 +36,15 @@ from app.catalog.schemas import RunDetailResponse
 from app.config import PlatformSettings
 from app.ids import generate_identifier
 from app.main import create_application
-from app.manifest import StrategyManifest
-from app.services.strategy_store import store_strategy_version
+from app.services.strategy_store import (
+    UploadedStrategyVersion,
+    store_strategy_version,
+)
+from app.strategy_configuration import (
+    BAR_PERIOD_KEY_NAME,
+    EXCHANGE_ID_KEY_NAME,
+    INSTRUMENT_ID_KEY_NAME,
+)
 
 from .helpers import bearer_headers
 
@@ -69,9 +76,12 @@ EXIT_DELAY_SECONDS_PARAMETER_KEY = "ExitDelaySeconds"
 FLOOD_BYTES_PARAMETER_KEY = "FloodBytes"
 STDERR_FLOOD_BYTES_PARAMETER_KEY = "StderrFloodBytes"
 
-BAR_PERIOD_CONFIGURATION_KEY = "BarPreces"
-EXCHANGE_ID_CONFIGURATION_KEY = "ExchangeId"
-INSTRUMENT_ID_CONFIGURATION_KEY = "InstrumentId"
+# 平台按固定键名把这三个写进策略配置. 别名自 `app.strategy_configuration`, 不在这里另抄一遍
+# 字面量: 抄一遍的话, 平台改拼写而这里没跟上时, 用例会拿旧键名去盘上找——找不到就断言"平台没写",
+# 而平台其实写了, 只是换了名字.
+BAR_PERIOD_CONFIGURATION_KEY = BAR_PERIOD_KEY_NAME
+EXCHANGE_ID_CONFIGURATION_KEY = EXCHANGE_ID_KEY_NAME
+INSTRUMENT_ID_CONFIGURATION_KEY = INSTRUMENT_ID_KEY_NAME
 
 DEFAULT_BEHAVIOR = "success"
 DEFAULT_SLEEP_SECONDS = 0
@@ -96,7 +106,7 @@ class RunnableStrategy:
 
     strategy: StrategyModel
     version: StrategyVersionModel
-    manifest: StrategyManifest
+    configuration_template: dict[str, object]
 
 
 def build_stub_source(config_filename: str = STUB_CONFIG_FILENAME) -> bytes:
@@ -116,110 +126,36 @@ def build_stub_source(config_filename: str = STUB_CONFIG_FILENAME) -> bytes:
     ).encode("utf-8")
 
 
-def build_stub_manifest(
-    entry_filename: str = STUB_ENTRY_FILENAME,
-    config_filename: str = STUB_CONFIG_FILENAME,
-    supported_match_modes: Sequence[MarketDataType] = (MarketDataType.BAR,),
-    run_field_keys: dict[str, str] | None = None,
-    required_parameter_keys: frozenset[str] = frozenset(),
-) -> StrategyManifest:
-    """桩策略的 manifest.
+def build_stub_configuration_template() -> dict[str, object]:
+    """桩策略那份配置 JSON 的内容, 也就是它的参数模板.
 
-    三个运行级字段全映射: 平台因此会把 `BarPreces` / `ExchangeId` / `InstrumentId` 写进策略
-    配置, 而**同一份 `BackTest.json` 里也有一份 `BarPreces`**——用例 19/20 就是拿这两处去对.
+    五个旋钮都在这里, 取值就是桩在"用户什么都不改"时该用的默认值——平台原样把它当底稿, 故这些
+    默认值同时是"提交页预填什么"与"没提交的键取什么"的答案.
 
-    `required_parameter_keys` 里的参数**不带 `default`**, 于是提交方必须给出: §1.1 用"缺省即
-    必填"替代 `required` 标志, 这一条路径因此只能这样表达.
+    键名与运行级那三个 (`ExchangeId` / `InstrumentId` / `BarPreces`) **刻意不重合**: 重合的话,
+    "参数 == 策略配置减去平台那三个"这条差集就在默认用例里被掩盖着, 只有专门造一个同名参数的
+    用例才暴露得出来.
     """
 
-    if run_field_keys is None:
-        run_field_keys = {
-            "exchange_id": EXCHANGE_ID_CONFIGURATION_KEY,
-            "instrument_id": INSTRUMENT_ID_CONFIGURATION_KEY,
-            "bar_period": BAR_PERIOD_CONFIGURATION_KEY,
-        }
+    return {
+        BEHAVIOR_PARAMETER_KEY: DEFAULT_BEHAVIOR,
+        SLEEP_SECONDS_PARAMETER_KEY: DEFAULT_SLEEP_SECONDS,
+        EXIT_DELAY_SECONDS_PARAMETER_KEY: DEFAULT_EXIT_DELAY_SECONDS,
+        FLOOD_BYTES_PARAMETER_KEY: DEFAULT_FLOOD_BYTES,
+        STDERR_FLOOD_BYTES_PARAMETER_KEY: DEFAULT_STDERR_FLOOD_BYTES,
+    }
 
-    parameter_entries = [
-        {
-            "key": BEHAVIOR_PARAMETER_KEY,
-            "label": "桩行为",
-            "type": "string",
-            "default": DEFAULT_BEHAVIOR,
-            "options": [{"value": behavior} for behavior in _stub_behaviors()],
-        },
-        {
-            "key": SLEEP_SECONDS_PARAMETER_KEY,
-            "label": "启动后先睡多少秒",
-            "type": "number",
-            "default": DEFAULT_SLEEP_SECONDS,
-            "minimum": 0,
-        },
-        {
-            "key": EXIT_DELAY_SECONDS_PARAMETER_KEY,
-            "label": "写完结果再等多少秒才退",
-            "type": "number",
-            "default": DEFAULT_EXIT_DELAY_SECONDS,
-            "minimum": 0,
-        },
-        {
-            "key": FLOOD_BYTES_PARAMETER_KEY,
-            "label": "往标准输出灌多少字节",
-            "type": "integer",
-            "default": DEFAULT_FLOOD_BYTES,
-            "minimum": 0,
-        },
-        {
-            "key": STDERR_FLOOD_BYTES_PARAMETER_KEY,
-            "label": "往标准错误灌多少字节",
-            "type": "integer",
-            "default": DEFAULT_STDERR_FLOOD_BYTES,
-            "minimum": 0,
-        },
-    ]
 
-    for parameter_entry in parameter_entries:
-        if parameter_entry["key"] in required_parameter_keys:
-            parameter_entry.pop("default")
+def build_stub_configuration_text(
+    configuration_template: dict[str, object] | None = None,
+) -> str:
+    """桩策略那份配置 JSON 的**落盘正文**, 即上传时那份文件的字节内容."""
 
-    return StrategyManifest.model_validate(
-        {
-            "entry_filename": entry_filename,
-            "config_filename": config_filename,
-            "supported_match_modes": [
-                match_mode.value for match_mode in supported_match_modes
-            ],
-            "run_field_keys": run_field_keys,
-            # 五个旋钮默认全给默认值, 于是每条用例只提交它真正关心的那一个; 需要"必填"那条路径的
-            # 用例经 `required_parameter_keys` 单独摘掉一个.
-            "params": parameter_entries,
-        }
+    return json.dumps(
+        configuration_template or build_stub_configuration_template(),
+        ensure_ascii=False,
+        indent=2,
     )
-
-
-def _stub_behaviors() -> tuple[str, ...]:
-    """桩认识的全部行为名, 从桩源码的常量定义里读出来.
-
-    在这里另抄一份的话, 桩新增一个行为而这里没跟上, 用例提交的取值会先被 manifest 的 `options`
-    拒掉——报错指向参数校验, 与真正的原因隔了两层.
-    """
-
-    behaviors = []
-
-    for line in STUB_SOURCE_PATH.read_text(encoding="utf-8").splitlines():
-        if not line.startswith("BEHAVIOR_") or " = " not in line:
-            continue
-
-        declared_value = line.split(" = ", 1)[1].strip()
-
-        if not (declared_value.startswith('"') and declared_value.endswith('"')):
-            raise LookupError(f"桩行为常量不再是字符串字面量: {line}")
-
-        behaviors.append(declared_value.strip('"'))
-
-    if not behaviors:
-        raise LookupError(f"桩源码里一个行为常量都没读到: {STUB_SOURCE_PATH}")
-
-    return tuple(sorted(behaviors))
 
 
 async def create_runnable_strategy(
@@ -230,7 +166,7 @@ async def create_runnable_strategy(
     entry_filename: str = STUB_ENTRY_FILENAME,
     config_filename: str = STUB_CONFIG_FILENAME,
     visibility_type: StrategyVisibility = StrategyVisibility.PRIVATE,
-    manifest: StrategyManifest | None = None,
+    configuration_template: dict[str, object] | None = None,
 ) -> RunnableStrategy:
     """建一个策略并把它的一份版本**真的写到盘上**.
 
@@ -238,7 +174,11 @@ async def create_runnable_strategy(
     文件, 只落库的版本会让每一个作业在"复制入口文件"那一步失败, 而那种失败看起来像调度器的缺陷.
     """
 
-    resolved_manifest = manifest or build_stub_manifest(entry_filename, config_filename)
+    resolved_template = (
+        configuration_template
+        if configuration_template is not None
+        else build_stub_configuration_template()
+    )
 
     strategy = StrategyModel(
         id=generate_identifier(),
@@ -257,11 +197,17 @@ async def create_runnable_strategy(
             settings,
             strategy,
             owner,
-            build_stub_source(config_filename),
-            resolved_manifest,
+            UploadedStrategyVersion(
+                source_bytes=build_stub_source(config_filename),
+                entry_filename=entry_filename,
+                configuration_text=build_stub_configuration_text(resolved_template),
+                configuration_filename=config_filename,
+            ),
         )
 
-    return RunnableStrategy(strategy=strategy, version=version, manifest=resolved_manifest)
+    return RunnableStrategy(
+        strategy=strategy, version=version, configuration_template=resolved_template
+    )
 
 
 def build_run_request(

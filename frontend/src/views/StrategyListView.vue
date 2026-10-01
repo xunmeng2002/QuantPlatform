@@ -119,7 +119,7 @@ onMounted(() => {
     <EmptyNotice
       v-else-if="strategies.length === 0"
       message="还没有任何策略"
-      hint="点右上角「上传策略」提交第一份策略源码与 manifest"
+      hint="点右上角「上传策略」提交第一份策略源码与配置"
     />
 
     <template v-else>
