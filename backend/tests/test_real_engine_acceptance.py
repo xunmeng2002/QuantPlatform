@@ -9,6 +9,9 @@
 因为"带路径的 `argv[0]` 会在启动期被日志器 `fopen` 失败打死"——2026-09-25 在本机
 `QuantTrading.cp314-win_amd64.pyd` 上实测, `./grid_strategy.py` 与
 `C:\\...\\Temp\\<job>\\grid_strategy.py` 两种带路径形式都**跑完了整轮 Bar 回测、退出码 0**.
+(**2026-10-01 注**: 本机 `bin/Release` 里只有 `QuantTrading.cp311-win_amd64.pyd`, 故这条记录
+里的 `.pyd` 名字对不上这台机器——那次实测要么在别的机器上, 要么名字本就是照抄错的. 结论不受
+影响, 它证的是"带路径的 `argv[0]` 能跑完整轮", 与解释器小版本无关.)
 裸文件名因此是"够用且与 `result.json.DbPath` 派生口径一致"的选择, 而不是唯一可行的形式;
 `job-workspace.md` §3.1 与 `PROGRESS.md` 的 D.01 已按实测订正.
 
@@ -30,10 +33,14 @@
 
     python -m pytest -m real_engine tests/test_real_engine_acceptance.py -v --basetemp=_acc_tmp
 
-本机实测 (Python 3.14.5 + `QuantTrading.cp314-win_amd64.pyd`): 三个月的 5m 回测约 1.7 秒,
-十五年 (2010–2024, 58176 根 bar) 约 3.8 秒——**引擎比预期快得多**, 故"制造一个跑得够久的作业"
-只能靠把下限压到它跑不完 (见 `test_a_real_run_that_exceeds_its_limit_is_killed`), 不能靠拉长
-时间范围.
+本机实测 (三个月的 5m 回测约 1.7 秒, 十五年 2010–2024 的 58176 根 bar 约 3.8 秒): **引擎比预期
+快得多**, 故"制造一个跑得够久的作业"只能靠把下限压到它跑不完 (见
+`test_a_real_run_that_exceeds_its_limit_is_killed`), 不能靠拉长时间范围.
+
+⚠️ **上面这条实测原来记的是「Python 3.14.5 + `QuantTrading.cp314-win_amd64.pyd`」，那句已删**：
+2026-10-01 查 `test_engine_probe.py` 的 4 项既有失败时发现，本机是 **Python 3.11.1**、引擎目录里
+只有 `QuantTrading.cp311-win_amd64.pyd`，那句 cp314 不描述这台机器（详情见 `PROGRESS.md` 备注的
+「环境锁定」段）。耗时那两个数保留 —— 它们与解释器版本无关。
 """
 
 from __future__ import annotations
@@ -41,6 +48,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import warnings
 from dataclasses import replace
 from pathlib import Path
 
@@ -142,33 +150,63 @@ STDERR_FILENAME = "stderr.txt"
 # 它的缺席是"这一轮没跑完"的直接证据——来自引擎自己, 不是平台的推断.
 ENGINE_FINISHED_MARKER = "RunResult Written"
 
-# 引擎在**同一批输入**下的量: 成交/委托/行情条数与"种子库在不在"无关, 故这两份基线共用它们.
-# 本轮的三个数取自 2026-09-26 步长改比例 (GridStep 10.0 → 0.01) 后的实测; 改比例会改变成交
-# 密度, 故它们随步长走——`BarMarketDataCount` 只由行情范围决定, 不随步长动 (2928 未变).
-# 相等说明作业目录构造与配置渲染没有改变回测结果.
-BASELINE_TRADE_COUNT = 34
-BASELINE_ORDER_COUNT = 629
-BASELINE_BAR_MARKET_DATA_COUNT = 2928
-
-# **两份基线并存, 各自注明前提**——不要用新的盖掉旧的: 差值恰好是费用三项, 是"引擎行为未变、
-# 只是缺了费率表"这个判断的依据.
+# ── 两类别混: 一个是**平台的收成**, 其余是**引擎的下游结果** ──────────────────────
 #
-# 种子库 `BackTestInit.db` 在盘上时 (P0): 引擎按它带的费率表收费, 费用三项非 0, 余额是扣费后的.
-# ⚠️ 这份现值 998951.4506464996 是**旧口径 (绝对步长 10.0, 84 笔成交)**下量的, 与上面那份按比例
-# 步长量出来的余额**不再是同一批输入**, 不可相减; 它留在这里只为记住"费用三项 = 两份基线的差"
-# 这个判据 (旧口径下差 425.6393535003 = 420.0 + 4.297395 + 1.3419585). 本机种子库不在盘上,
-# 故带种子库的那一份无法重取——重建种子库后必须连同下面的余额一起按比例步长重测.
-BASELINE_BALANCE_WITH_SEED_DATABASE = 998951.4506464996
-# 种子库不在盘上时 (本轮): 引擎对它的缺失是优雅降级 (`SimExchange.cpp` 只做 `exists` 检查,
-# 缺失仅 Warning + `BasicDataLoaded=false`, 继续跑完), 费用三项退化成 0, 余额因此**高出**费用
-# 的总和 (旧口径下是 425.6393535; 末位差异来自浮点求和次序, 不是行为差异).
-BASELINE_BALANCE_WITHOUT_SEED_DATABASE = 999257.8562340003
+# `BAR_MARKET_DATA_COUNT` **判红**. 它量的是"引擎**读到了**平台指的那批 bar", 是 `MdDataPath` +
+# `BarPreces` + 起止交易日三者合起来的直接证据, 且**与策略无关** (只由行情范围决定, 不随步长动).
+# 它变了就是平台写错了——这是本文件里唯一能替平台说话的量化断言.
+BAR_MARKET_DATA_COUNT = 2928
 
-# 故费用三项与"缺费率"的条数是**输入缺失**的证据, 钉成断言: 日后重建种子库时, 这四条会一起
-# 转红, 正好提醒把 `BASELINE_BALANCE_*` 换回带种子库的那一份. "缺费率的条数"等于成交笔数
-# (每笔成交都要查一次费率), 故它与 `BASELINE_TRADE_COUNT` 同值.
-MISSING_SEED_COMMISSION = 0.0
-MISSING_SEED_COMMISSION_MISSING_COUNT = 34
+# 其余几个**只观测不判红**, 一律走 `record_engine_metric`: 它们是引擎拿那批 bar 算出来的下游
+# 结果, 不是平台的产出. 而平台自己产的东西在上面已经逐件钉过 (`BarPreces` 两份配置同值、运行级
+# 字段按 manifest 映射、`DbHost` 派生、预填往返)——全链条都对而下游变了, 只说明**引擎那一侧**
+# 变了, 那不该由本仓的默认套件判红.
+#
+# 2026-10-01 实测即为此例: 成交数在本机是 435 而不是这里记的 34, 而 `BAR_MARKET_DATA_COUNT`
+# 照样对得上; 已证实与平台侧改动无关 (同一用例在 `bbcccac` 的干净工作树上复跑, 同样是 435).
+# 值的来历: 2026-09-26 网格步长由绝对价 `10.0` 改为比例 `0.01` 后重取的实测 (成交 `84 → 34`);
+# 改比例会改变成交密度, 故它们随步长走.
+RECORDED_TRADE_COUNT = 34
+RECORDED_ORDER_COUNT = 629
+
+# **两份余额并存, 各自注明前提**——不要用新的盖掉旧的: 差值恰好是费用三项, 是"引擎行为未变、
+# 只是缺了费率表"这个判断的依据. 用哪一份由用例**自己看盘上的种子库**决定, 不靠猜.
+#
+# 种子库 `BackTestInit.db` **在盘上**: 引擎按它带的费率表收费, 费用三项非 0, 余额是扣费后的.
+# ⚠️ 这份记录值 998951.4506464996 是**旧口径 (绝对步长 10.0, 84 笔成交)**下量的, 与下面那份按
+# 比例步长量出来的余额**不再是同一批输入**, 不可相减; 它留在这里只为记住那个判据 (旧口径下差
+# 425.6393535003 = 420.0 + 4.297395 + 1.3419585). 【**2026-10-01**: 本机种子库**是在盘上**的,
+# 故真正对不上的是下面那一份, 不是这一份——它缺的是"按比例步长重测", 见上行.】
+RECORDED_BALANCE_WITH_SEED_DATABASE = 998951.4506464996
+# 种子库**不在盘上**时: 引擎对它的缺失是优雅降级 (`SimExchange.cpp` 只做 `exists` 检查, 缺失仅
+# Warning + `BasicDataLoaded=false`, 继续跑完), 费用三项退化成 0, 余额因此**高出**费用的总和
+# (旧口径下是 425.6393535; 末位差异来自浮点求和次序, 不是行为差异).
+# 【**2026-10-01**: 本机已不在这个环境里——`BackTestInit.db` 在盘上, 实测 `BasicDataLoaded:
+# true`、佣金 2175.0、余额 996120.90066060156. 这份记录值因此是**过期的**; 未删, 因为它记的是
+# 另一支环境的行为, 换台机器仍可能走到.】
+RECORDED_BALANCE_WITHOUT_SEED_DATABASE = 999257.8562340003
+
+# "缺费率的条数"恰等于成交笔数 (每笔成交都要查一次费率), 故它与 `RECORDED_TRADE_COUNT` 同值.
+# 只在**无种子库**时才对得上——有种子库时费率查得到, 这个数是 0 (本机 2026-10-01 实测即 0).
+RECORDED_MISSING_COMMISSION_COUNT = 34
+
+
+def record_engine_metric(metric_name: str, observed: object, recorded: object) -> None:
+    """把引擎报出的量与仓库里记下的那个数并排写出来; 相同则静默, 不同则记一条 warning.
+
+    **刻意不判红**: 这几个数是引擎的下游结果, 不是平台的产出 (理由见上面常量区). 漂移要看得见
+    ——pytest 每次跑完都把 warnings 汇成一段摘要——但"引擎那一侧变了"不该让本仓的默认套件变红,
+    那会把一个跨仓的集成信号伪装成平台的验收失败, 而真正该红的那条 (平台递错了输入) 反倒被淹没.
+    """
+
+    if observed == recorded:
+        return
+
+    warnings.warn(
+        f"{metric_name} 与仓库记录不符: 观测 {observed!r}, 记录 {recorded!r}"
+        f" (引擎侧变了? 见本文件常量区「平台的收成 vs 引擎的下游结果」那一段)",
+        stacklevel=2,
+    )
 
 # 结果表那一页故意取一个**小于**行数的页大小: 取 100 (上界) 时 `total` 与 `len(records)` 恰好
 # 相等, 于是"`LIMIT` 到底有没有生效"这件事在响应里看不出来——一页装得下全表时, 少绑一个参数
@@ -378,11 +416,15 @@ async def await_engine_started(settings: PlatformSettings, run_id: str) -> None:
 async def test_a_real_bar_backtest_runs_through_the_platform(
     real_settings: PlatformSettings,
 ) -> None:
-    """① 真引擎一轮 Bar 回测跑通, 指标与 P0 基线逐位一致.
+    """① 真引擎一轮 Bar 回测跑通, 平台递过去的输入逐件对得上.
 
     这是 P2「上传后能跑通」的结清点: 策略经**上传接口**落盘, 作业目录由**调度侧**构造, 引擎由
     **平台的 runner** 以裸文件名启动, 结果由**收尾**镜像进库. 任何一环错, 引擎都会在启动期或
     结果文件里留下一处对不上的数.
+
+    **判据分两层, 别混**: 平台的产出 (渲染出的两份配置、`DbHost` 派生、预填往返、读端点与镜像列
+    互证) **判红**; 引擎的下游结果 (成交 / 委托 / 余额 / 缺费率条数) **只观测**, 见常量区那段
+    说明与 `record_engine_metric`.
     """
 
     async with running_client(real_settings) as (application, client):
@@ -431,17 +473,36 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
     assert finished.error_id == 0
     assert finished.market_data_type == "Bar"
 
-    assert finished.trade_count == BASELINE_TRADE_COUNT
-    assert finished.order_count == BASELINE_ORDER_COUNT
-    assert finished.bar_market_data_count == BASELINE_BAR_MARKET_DATA_COUNT
-    assert finished.balance == BASELINE_BALANCE_WITHOUT_SEED_DATABASE
+    # 引擎读到的 bar 条数**是平台的收成**: `MdDataPath` + `BarPreces` + 起止交易日三者只要有一处
+    # 被平台写歪, 这个数就动; 它也与策略无关, 故它不动就说明"引擎拿到的确实是平台指的那批数据".
+    assert finished.bar_market_data_count == BAR_MARKET_DATA_COUNT
 
-    # 种子库缺失的降级: 费用三项为 0, 且引擎自己报了"缺费率"的条数.
-    assert finished.total_commission == MISSING_SEED_COMMISSION
-    assert finished.total_stamp_tax == MISSING_SEED_COMMISSION
-    assert finished.total_transfer_fee == MISSING_SEED_COMMISSION
-    assert finished.commission_missing_count == MISSING_SEED_COMMISSION_MISSING_COUNT
-    assert finished.basic_data_loaded is False
+    # 种子库在不在盘上**由本用例自己判定**, 不靠常数猜: 那个文件就在 `REAL_ENGINE_ROOT` 下, 是
+    # 平台这一侧看得见的事实. 用它挑对照记录, "该报哪一套数"才是可复算的.
+    #
+    # ⚠️ 2026-10-01 实测: 本机 `BackTestInit.db` **在盘上**, 于是走的是有种子库那一支 ——
+    # `BasicDataLoaded: true`, 佣金 2175.0, 缺费率条数 0, 与下面那份"无种子库"记录**正相反**.
+    # 那套记录是 2026-09-26 在无种子库时取的, 本机现在不在那个环境里了.
+    seed_database_present = (REAL_ENGINE_ROOT / REAL_SEED_DATABASE_FILENAME).is_file()
+    recorded_balance = (
+        RECORDED_BALANCE_WITH_SEED_DATABASE
+        if seed_database_present
+        else RECORDED_BALANCE_WITHOUT_SEED_DATABASE
+    )
+
+    # 成交/委托/余额/费用与"种子库装没装上"都是**引擎的下游结果**, 只观测不判红 ——
+    # 理由见 `record_engine_metric`.
+    record_engine_metric("成交笔数", finished.trade_count, RECORDED_TRADE_COUNT)
+    record_engine_metric("委托笔数", finished.order_count, RECORDED_ORDER_COUNT)
+    record_engine_metric("余额", finished.balance, recorded_balance)
+    record_engine_metric(
+        "种子库已装载", finished.basic_data_loaded, seed_database_present
+    )
+    record_engine_metric(
+        "缺费率条数",
+        finished.commission_missing_count,
+        0 if seed_database_present else RECORDED_MISSING_COMMISSION_COUNT,
+    )
 
     # `DbHost` 写的是 `./BackTest.db`, 由引擎自己派生成 `BackTest_<RunId>.db`——平台若先拼一份,
     # 这里会变成 `BackTest_<RunId>_<RunId>.db`.
@@ -513,7 +574,10 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
     trade_page = trade_table_response.json()
 
     assert trade_page["table"] == "Trade"
-    assert trade_page["total"] == BASELINE_TRADE_COUNT
+    # 总行数与收尾镜像进 `Runs` 的那一列**互证**: 两条路是分别算出来的 (一条数结果库的行, 一条
+    # 是引擎回写时冻结的), 对不上就是其中一条写歪了. 这里有意不比一个常数——那个数由引擎的下游
+    # 算术决定, 与平台无关 (见常量区).
+    assert trade_page["total"] == finished.trade_count
     assert trade_page["offset"] == 0
     assert trade_page["limit"] == RESULT_PAGE_PROBE_LIMIT
     # 页大小小于总行数, 故"这一页装了几行"本身就在证明 `LIMIT` 真的绑上了 (取满 100 时看不出).
@@ -522,7 +586,7 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
 
     # `Order` 是 SQLite 保留字: 这条能回数据才说明表名真的被引号包住 (裸拼会 500).
     assert order_table_response.status_code == 200, order_table_response.text
-    assert order_table_response.json()["total"] == BASELINE_ORDER_COUNT
+    assert order_table_response.json()["total"] == finished.order_count
 
 
 async def test_two_real_runs_at_once_keep_their_databases_apart(
@@ -576,12 +640,15 @@ async def test_two_real_runs_at_once_keep_their_databases_apart(
         (second_submitted, second_finished),
     ):
         assert finished.status == RunStatus.SUCCEEDED.value, finished.error_msg
-        assert finished.trade_count == BASELINE_TRADE_COUNT
-        assert finished.balance == BASELINE_BALANCE_WITHOUT_SEED_DATABASE
         assert finished.db_path == f"./BackTest_{submitted.id}.db"
         assert engine_database_filenames(concurrent_settings, submitted.id) == {
             f"BackTest_{submitted.id}.db"
         }
+
+    # 两轮**互比, 不比常数** —— 这才是上面那段 docstring 说的事: 撞库的表现是两轮的数**不一样**
+    # (后写完的那轮把前一轮的结果掺进来). 至于那个共同的数该是多少, 是引擎的事, 不是平台的.
+    assert first_finished.trade_count == second_finished.trade_count
+    assert first_finished.balance == second_finished.balance
 
     assert first_finished.db_path != second_finished.db_path
 

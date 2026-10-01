@@ -518,9 +518,17 @@ def read_job_json(
 
 
 def read_job_text(settings: PlatformSettings, run_id: str, filename: str) -> str:
-    """读作业目录里的一个文本文件."""
+    """读作业目录里的一个文本文件.
 
-    return (job_directory(settings, run_id) / filename).read_text(encoding="utf-8")
+    `errors="replace"` 是**必需的**, 不是省事: 引擎宿主是 C++, 它的 stdout 不保证是 UTF-8
+    (本机实测混有本地码页的字节), 而且进程被 terminate/kill 时最后一个多字节字符可能**只写了一半**
+    ——实测复现 (6 次里 1 次): 严格解码会在非法续字节上抛 `UnicodeDecodeError`. 断言看的是
+    ASCII 哨兵行, 替换字符只会落在坏字节处, 不影响这些判据.
+    """
+
+    return (job_directory(settings, run_id) / filename).read_text(
+        encoding="utf-8", errors="replace"
+    )
 
 
 def read_reported_argv0(settings: PlatformSettings, run_id: str) -> str:

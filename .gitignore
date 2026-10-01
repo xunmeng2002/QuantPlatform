@@ -15,7 +15,9 @@ backend/data/
 /market-data/
 
 # 真引擎验收的 pytest 临时根（`--basetemp=_acc_tmp` 的产物，四例约 22 MB）
+# `_acc_tmp_old` 是改名前后遗留的旧临时根，同属可重跑的运行数据，一并忽略。
 backend/_acc_tmp/
+backend/_acc_tmp_old/
 
 # 前端依赖
 node_modules/
