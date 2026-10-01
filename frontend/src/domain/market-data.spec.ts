@@ -8,7 +8,12 @@
 import { describe, expect, it } from 'vitest';
 
 import type { MarketDataContract } from '../api/types';
-import { buildContractCode, formatContractLabel, SUBSCRIPTION_BAR_PERIODS } from './market-data';
+import {
+  buildContractCode,
+  buildContractOptions,
+  formatContractLabel,
+  SUBSCRIPTION_BAR_PERIODS,
+} from './market-data';
 
 const CONTRACT: MarketDataContract = {
   code: 'sh.600519',
@@ -36,6 +41,35 @@ describe('buildContractCode', () => {
 describe('formatContractLabel', () => {
   it('交易所 + 代码 + 名称都给, 下拉框的搜索因此三种都能命中', () => {
     expect(formatContractLabel(CONTRACT)).toBe('SSE 600519 贵州茅台');
+  });
+});
+
+describe('buildContractOptions', () => {
+  it('取值是组件主键, 显示串与 formatContractLabel 逐字一致', () => {
+    expect(buildContractOptions([CONTRACT])).toEqual([
+      { value: 'sh.600519', label: formatContractLabel(CONTRACT) },
+    ]);
+  });
+
+  it('逐条映射, 一条不丢也不多 —— 筛选是全量的本地筛选, 少一条就是搜不到', () => {
+    const contracts: MarketDataContract[] = [
+      CONTRACT,
+      {
+        code: 'sz.000001',
+        exchange_id: 'SZSE',
+        instrument_id: '000001',
+        display_name: '平安银行',
+      },
+    ];
+
+    expect(buildContractOptions(contracts).map((option) => option.value)).toEqual([
+      'sh.600519',
+      'sz.000001',
+    ]);
+  });
+
+  it('空清单回空数组, 不捏一个占位选项出来', () => {
+    expect(buildContractOptions([])).toEqual([]);
   });
 });
 

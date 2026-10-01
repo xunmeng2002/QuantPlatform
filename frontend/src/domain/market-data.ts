@@ -63,3 +63,29 @@ export function buildContractCode(
 export function formatContractLabel(contract: MarketDataContract): string {
   return `${contract.exchange_id} ${contract.instrument_id} ${contract.display_name}`;
 }
+
+/**
+ * `el-select-v2` 吃的那份选项. 字段名照它的默认映射 (`label` / `value`), 不另传 `props`.
+ *
+ * 取值仍是**组件主键** (`sh.600519`), 与 `ElOption` 那版的 `:value` 逐字相同 —— 选中后由
+ * `selectedContractCode` 的 setter 交给后端已经拆好的那一份, 前端不解析主键.
+ *
+ * 用 `el-select-v2` 而不是 `el-select` + `v-for` 的原因是**渲染量**: 合约有五千多条, 而
+ * `el-select` 的 `persistent` 默认为真 (见 `element-plus/es/components/select/src/select.mjs`),
+ * 它的下拉内容在挂载期就渲染 —— 实测 (jsdom 一次性探针) 五千余项要十几秒, 且下拉框一次都没被
+ * 打开过. 虚拟滚动只渲染可视区那几行, 这一项开销随之消失; 本地筛选 (`filterable` 按 `label`
+ * 做子串匹配) 由 `el-select-v2` 自己保证, 故 `formatContractLabel` 的三段式一个字不用改.
+ */
+export interface ContractOption {
+  value: string;
+  label: string;
+}
+
+export function buildContractOptions(
+  contracts: readonly MarketDataContract[],
+): ContractOption[] {
+  return contracts.map((contract) => ({
+    value: contract.code,
+    label: formatContractLabel(contract),
+  }));
+}

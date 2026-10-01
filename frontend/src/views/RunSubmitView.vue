@@ -33,7 +33,7 @@
  */
 
 import { computed, onMounted, ref } from 'vue';
-import { ElAlert, ElButton, ElDialog, ElInput, ElOption, ElSelect } from 'element-plus';
+import { ElAlert, ElButton, ElDialog, ElInput, ElOption, ElSelect, ElSelectV2 } from 'element-plus';
 import { RouterLink, useRouter } from 'vue-router';
 
 import { fetchMarketDataContracts, fetchMarketDataCoverage } from '../api/market-data';
@@ -48,7 +48,7 @@ import PageHeader from '../components/PageHeader.vue';
 import ParameterForm from '../components/ParameterForm.vue';
 import SurfaceCard from '../components/SurfaceCard.vue';
 import { describeApiFailure, showSuccessToast } from '../composables/use-feedback';
-import { buildContractCode, formatContractLabel, SUBSCRIPTION_BAR_PERIODS } from '../domain/market-data';
+import { buildContractCode, buildContractOptions, SUBSCRIPTION_BAR_PERIODS } from '../domain/market-data';
 import {
   createInitialParameterInputs,
   deriveParameterDescriptors,
@@ -188,6 +188,14 @@ const unrenderableParameterKeys = computed(() =>
 );
 
 const contracts = computed(() => marketDataContracts.value?.contracts ?? []);
+
+/**
+ * 合约下拉的选项.
+ *
+ * 五千多条**全都在这儿**, 但 `el-select-v2` 按可视区虚拟渲染, 落进 DOM 的始终只有那十几行 ——
+ * 这正是它换掉 `el-select` + `v-for` 的全部理由 (见 `domain/market-data.buildContractOptions`).
+ */
+const contractOptions = computed(() => buildContractOptions(contracts.value));
 
 const isContractListAvailable = computed(
   () => marketDataContracts.value?.available === true,
@@ -962,21 +970,18 @@ onMounted(() => {
 
           <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
             回测合约
-            <ElSelect
+            <!-- `ElSelectV2` 而不是 `ElSelect` + `v-for`: 合约五千多条, 而 `el-select` 的下拉内容
+                 在挂载期就渲染, 五千多个 `<li>` 会把主线程冻住若干秒 —— 冻的还是进页面后第一次
+                 点击那一下. 虚拟滚动只渲染可视区那几行, 也不吃 `ElOption` 子节点, 选项走 `options`. -->
+            <ElSelectV2
               v-model="selectedContractCode"
+              :options="contractOptions"
               :disabled="!isContractListAvailable"
               :loading="isLoadingContracts"
               filterable
               placeholder="按代码或名称搜索"
               @change="refreshCoverageNotice"
-            >
-              <ElOption
-                v-for="contract in contracts"
-                :key="contract.code"
-                :label="formatContractLabel(contract)"
-                :value="contract.code"
-              />
-            </ElSelect>
+            />
             <span
               v-if="visibleFieldErrors.exchange_id"
               class="text-xs text-rose-600"
