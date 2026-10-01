@@ -59,8 +59,13 @@ multipart 两个文件字段：`source`（`.py`）与 `configuration`（`.json`�
 `QuantTrading/bin/Release/grid_strategy.py` 使用。这一对正是真引擎验收
 （`backend/tests/test_real_engine_acceptance.py`）跑过的那一对。
 
-它**刻意不写**三个平台键：那三行由平台覆写，写在模板里只会被盖掉。想先走通一条完整链路，
-拿这两份文件即可。
+它**刻意不写**三个平台键：那三行由平台覆写，写在模板里只会被盖掉。
+
+> **注意**：想拿这两份文件走通一条完整链路，那份 `.json` **必须改名成 `TestStrategyGrid.json`
+> 再上传**。上传的文件名就是作业目录里的文件名，而 `grid_strategy.py` 的 `main()` 写死
+> `open("TestStrategyGrid.json")`；名字不对，策略在启动期以 `FileNotFoundError` 收场，看起来像
+> 策略写坏了。示例文件自己叫 `strategy-configuration.example.json`，是因为它首先是本文档的一份
+> 演示件（只读，不针对某一个策略）。
 
 ## 参数区里看不到的键
 
