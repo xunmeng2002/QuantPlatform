@@ -30,6 +30,14 @@ from ..catalog.models import RunModel, StrategyVersionModel
 from ..clock import utc_now
 from ..config import PlatformSettings
 from ..services.engine_probe import is_python_binding_available
+from ..services.market_data_preparation import (
+    MarketDataPrepared,
+    MarketDataRequest,
+    MarketDataUnavailableError,
+    ensure_market_data_available,
+)
+from ..services.run_configuration import decode_run_fields, read_run_field_key_names
+from .engine_config import parse_configuration_object
 from .output import OUTPUT_READ_CHUNK_BYTES, JobOutputCapture
 from .registry import JobHandle, RunningJobRegistry
 from .result import (
@@ -162,6 +170,10 @@ class LaunchContext:
     两个配置文本取自运行行 (`BacktestConfigJson` / `ParamsJson`): 提交侧渲染时就把它们连同
     运行行一起提交了, 于是调度侧不必回头去解 manifest、也不必重算一遍——"库里记的"与"盘上写的"
     永远是同一份.
+
+    末尾五个行情字段是从那两份文本里**解**出来的, 不是另读一列: 运行行不存它们, 存的就是那两份
+    文本 (见 `run_prefill` 的同一条理由). 空串表示这一轮没映射该字段——`exchange_id` /
+    `instrument_id` 为空是正常的, manifest 没声明就不收.
     """
 
     run_id: str
@@ -171,6 +183,11 @@ class LaunchContext:
     configuration_filename: str
     entry_source_path: Path
     started_at: datetime | None
+    exchange_id: str
+    instrument_id: str
+    bar_period: str
+    start_trading_day: str
+    end_trading_day: str
 
 
 @dataclass
@@ -227,27 +244,16 @@ class JobRunner:
     async def _execute_job(self, handle: JobHandle) -> None:
         """作业的执行与收尾.
 
-        三个出口各有各的收尾: 超时要先把进程收掉 (它还活着, 且管道还开着), 取消要先收进程再
-        写终态 (`CancelledError` 必须原样上抛, 否则任务取消语义被吞掉), 其余异常按内部故障
-        记一条 failed. 三者都会走到 `_finalize`, 因为"这一轮到底算什么"只该在那一处决定.
+        三个出口各有各的收尾: 取消要先收进程再写终态 (`CancelledError` 必须原样上抛, 否则任务
+        取消语义被吞掉), 其余异常按内部故障记一条 failed, 超时则由作业体那一层的
+        `asyncio.timeout` 就地收掉 (见 `_run_job`). 三者都会走到 `_finalize`, 因为"这一轮到底
+        算什么"只该在那一处决定.
         """
 
         execution = JobExecution()
 
         try:
-            async with asyncio.timeout(
-                self._settings.run_timeout_seconds
-            ) as job_timeout:
-                await self._run_job(handle, execution)
-        except TimeoutError:
-            # 只有**本层**的截止时刻真的到了才算超时. 内层的每一处有界等待都自己消化掉了
-            # TimeoutError (超时阶梯、管道排水), 故这里若不加这一问, 日后某处漏消化一个, 就会
-            # 把"起不来"写成"跑超时"——而两者的处置完全不同.
-            if not job_timeout.expired():
-                raise
-
-            handle.timed_out = True
-            await self._abandon(execution)
+            await self._run_job(handle, execution)
         except asyncio.CancelledError:
             await self._abandon(execution)
             await self._finalize(handle, execution)
@@ -260,7 +266,12 @@ class JobRunner:
         await self._finalize(handle, execution)
 
     async def _run_job(self, handle: JobHandle, execution: JobExecution) -> None:
-        """作业体: 读上下文 → 建目录 → 起进程 → 等它退出."""
+        """作业体: 读上下文 → 建目录 → 备行情 → 起进程 → 等它退出.
+
+        **作业级超时只包住最后那一段** (`_launch_and_await_exit`), 这是刻意的: 它原先包着整个
+        作业体, 而行情下载一旦落进预算里, 一次长下载就会被记成 `timeout` + "运行超出时限", 把
+        "行情下得慢"说成"策略跑太久". 两者对用户的指向完全不同, 不能混成一个.
+        """
 
         try:
             launch_context = await self._load_launch_context(handle.run_id)
@@ -285,13 +296,62 @@ class JobRunner:
 
         execution.job_directory = job_directory
 
+        # 放在目录登记之后: 准备阶段的失败与 `JOB_DIRECTORY_FAILURE_MESSAGE` 走同一条路
+        # (已登记句柄、进程未起、`platform_error_message` 定终态), 形状因此是同一个.
+        if not await self._prepare_market_data(handle, execution, launch_context):
+            return
+
         if handle.cancel_signal.is_set():
             # 取消落在"已认领但进程未起"这一格: 根本不起进程, 终态由仲裁表按取消算出. 这里省下
             # 的不只是一次进程——真起来的话它会在 job 目录里写出日志与库文件, 而用户已经取消了.
             logger.info("运行在起进程之前已收到取消请求, 不再启动宿主")
             return
 
-        await self._launch_and_await_exit(handle, execution, launch_context, job_directory)
+        try:
+            async with asyncio.timeout(self._settings.run_timeout_seconds) as job_timeout:
+                await self._launch_and_await_exit(
+                    handle, execution, launch_context, job_directory
+                )
+        except TimeoutError:
+            # 只有**本层**的截止时刻真的到了才算超时. 内层的每一处有界等待都自己消化掉了
+            # TimeoutError (超时阶梯、管道排水), 故这里若不加这一问, 日后某处漏消化一个, 就会
+            # 把"起不来"写成"跑超时"——而两者的处置完全不同.
+            if not job_timeout.expired():
+                raise
+
+            handle.timed_out = True
+            await self._abandon(execution)
+
+    async def _prepare_market_data(
+        self, handle: JobHandle, execution: JobExecution, launch_context: LaunchContext
+    ) -> bool:
+        """确保这一轮要用的行情已在本地落地; 回 False 表示这一轮不该起引擎.
+
+        失败**不抛异常**: 与 `UnrunnableJob` 走同一条路——记一句能直接进 `ErrorMsg` 的固定中文
+        文案, 终态由仲裁表算成 `failed`, `ErrorId` 保持 NULL (这不是引擎报的错).
+
+        被取消时**不设**文案, 于是仲裁表按取消把它算成 `interrupted`: 用户点了取消, 就不该收到
+        一句"行情下载失败".
+        """
+
+        request = MarketDataRequest(
+            exchange_id=launch_context.exchange_id,
+            instrument_id=launch_context.instrument_id,
+            bar_period=launch_context.bar_period,
+            start_trading_day=launch_context.start_trading_day,
+            end_trading_day=launch_context.end_trading_day,
+        )
+
+        try:
+            prepared = await ensure_market_data_available(
+                self._settings, request, handle.cancel_signal
+            )
+        except MarketDataUnavailableError as error:
+            logger.warning("运行 %s 的行情准备未通过: %s", handle.run_id, error.message)
+            execution.platform_error_message = error.message
+            return False
+
+        return prepared is MarketDataPrepared.READY
 
     async def _launch_and_await_exit(
         self,
@@ -491,6 +551,8 @@ class JobRunner:
             if version is None:
                 raise UnrunnableJob(MISSING_VERSION_MESSAGE)
 
+            decoded_fields = self._decode_launch_fields(run, version)
+
             return LaunchContext(
                 run_id=run.id,
                 engine_configuration_text=run.backtest_config_json,
@@ -503,7 +565,29 @@ class JobRunner:
                     / version.entry_filename
                 ),
                 started_at=run.started_at,
+                exchange_id=decoded_fields.exchange_id,
+                instrument_id=decoded_fields.instrument_id,
+                bar_period=decoded_fields.bar_period,
+                # 两个交易日也来自配置文本, **不能**取行上那两列: 它们在提交时并不写, 要等引擎
+                # 结果回写才有值——起进程那一刻它们还是 NULL.
+                start_trading_day=decoded_fields.start_trading_day,
+                end_trading_day=decoded_fields.end_trading_day,
             )
+
+    def _decode_launch_fields(
+        self, run: RunModel, version: StrategyVersionModel
+    ) -> DecodedRunFields:
+        """从运行行那两份配置文本里解出行情准备要用的那三个取值.
+
+        读不动**不抛**: 配置文本坏掉时引擎侧自会以它的方式失败, 而这里若提前抛, 就会把一个
+        "文本坏了"说成"行情备不齐". 解不出来只表现为空串, 随后由行情准备给出确切文案.
+        """
+
+        return decode_run_fields(
+            parse_configuration_object(run.id, run.backtest_config_json) or {},
+            parse_configuration_object(run.id, run.params_json) or {},
+            read_run_field_key_names(version.manifest_json),
+        )
 
     def _build_job_file_set(self, launch_context: LaunchContext) -> JobFileSet:
         """作业目录的输入清单."""

@@ -10,18 +10,37 @@
 
 from __future__ import annotations
 
+import logging
 import math
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 from ..catalog.enums import MarketDataType
 from ..catalog.schemas import RunConfigurationRequest
 from ..errors import InvalidRequestError
 from ..manifest import (
     BAR_PERIOD_FIELD_NAME,
+    EXCHANGE_ID_FIELD_NAME,
+    INSTRUMENT_ID_FIELD_NAME,
     RUN_LEVEL_FIELD_NAMES,
     StrategyManifest,
     validate_parameter_value,
 )
-from ..scheduler.engine_config import SUBMITTABLE_MATCH_MODES
+from ..scheduler.engine_config import (
+    SUBMITTABLE_MATCH_MODES,
+    resolve_market_data_type,
+)
+
+
+logger = logging.getLogger(__name__)
+
+# 引擎 `BackTest.json` 的键名. `BarPreces` 是引擎侧既有拼写, 非笔误, 不可擅改——它读的就是
+# 这个名字, 平台改一个字母就静默读不到周期.
+MATCH_MODE_KEY = "MatchMode"
+BAR_PERIOD_KEY = "BarPreces"
+START_TRADING_DAY_KEY = "StartTradingDay"
+END_TRADING_DAY_KEY = "EndTradingDay"
+INITIAL_CAPITAL_KEY = "InitialCapital"
 
 
 TRADING_DAY_LENGTH = 8
@@ -265,3 +284,102 @@ def _abbreviate_keys(parameter_keys: list[str]) -> str:
     )
 
     return ", ".join(reported_keys) + suffix
+
+
+@dataclass(frozen=True)
+class DecodedRunFields:
+    """一轮运行那两份配置文本里还原出来的取值.
+
+    单个取值读不动时**逐项**回默认 (空串 / `None`), 不整体作废: 一个字段是坏数据, 没有理由让
+    其余十来个字段跟着一起失效.
+    """
+
+    match_mode: MarketDataType | None
+    bar_period: str
+    exchange_id: str
+    instrument_id: str
+    start_trading_day: str
+    end_trading_day: str
+    initial_capital: float | None
+    parameter_values: dict[str, object]
+
+
+def read_run_field_key_names(manifest_json: str | None) -> dict[str, str]:
+    """该版本 manifest 里"运行级字段名 → 配置键名"的映射.
+
+    用**那一轮自己那个版本**的 manifest, 而不是最新版本: 键名是渲染当时定的, 事后改版不影响
+    历史那份配置里的键叫什么.
+
+    manifest 读不动时回空映射: 于是策略配置里的每个键都会被当成参数, 而调用方按各自那份
+    manifest 的控件逐项判断, 多出来的键被忽略——故不必把整轮解码作废.
+    """
+
+    if not manifest_json:
+        return {}
+
+    try:
+        manifest = StrategyManifest.model_validate_json(manifest_json)
+    except ValueError as error:
+        logger.warning("策略版本的 manifest 无法解析, 按无映射处理: %s", error)
+        return {}
+
+    return manifest.named_run_field_keys()
+
+
+def decode_run_fields(
+    engine_configuration: Mapping[str, object],
+    strategy_configuration: Mapping[str, object],
+    run_field_key_names: Mapping[str, str],
+) -> DecodedRunFields:
+    """把渲染好的两份配置文本读回取值. 它是 `build_strategy_configuration` 的逆.
+
+    两个来源**不能互换**: 运行级字段里 `bar_period` 只在有映射时才写进策略配置, 而引擎那份
+    一定有它; `exchange_id` / `instrument_id` 则相反——引擎根本不认识它们. 故前三个从引擎
+    配置取, 后两个从策略配置取.
+
+    manifest 保证参数键不会与运行级键撞名 (见 `manifest._check_declared_keys_do_not_collide`),
+    故按键名做差集是精确的: 差集之外的都是参数, 连同类型原样带回去.
+    """
+
+    declared_key_names = set(run_field_key_names.values())
+    run_field_values = {
+        field_name: _read_text(strategy_configuration, key_name)
+        for field_name, key_name in run_field_key_names.items()
+    }
+
+    return DecodedRunFields(
+        match_mode=resolve_market_data_type(engine_configuration.get(MATCH_MODE_KEY)),
+        bar_period=_read_text(engine_configuration, BAR_PERIOD_KEY),
+        exchange_id=run_field_values.get(EXCHANGE_ID_FIELD_NAME, ""),
+        instrument_id=run_field_values.get(INSTRUMENT_ID_FIELD_NAME, ""),
+        start_trading_day=_read_text(engine_configuration, START_TRADING_DAY_KEY),
+        end_trading_day=_read_text(engine_configuration, END_TRADING_DAY_KEY),
+        initial_capital=_read_finite_number(engine_configuration, INITIAL_CAPITAL_KEY),
+        parameter_values={
+            key_name: value
+            for key_name, value in strategy_configuration.items()
+            if key_name not in declared_key_names
+        },
+    )
+
+
+def _read_text(configuration: Mapping[str, object], key_name: str) -> str:
+    value = configuration.get(key_name)
+
+    return value if isinstance(value, str) else ""
+
+
+def _read_finite_number(
+    configuration: Mapping[str, object], key_name: str
+) -> float | None:
+    """取一个有限数值; 类型不符或非有限 (JSON 允许 `Infinity` 字面量) 时回 `None`."""
+
+    value = configuration.get(key_name)
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+
+    if not math.isfinite(value):
+        return None
+
+    return float(value)

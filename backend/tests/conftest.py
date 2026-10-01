@@ -19,6 +19,7 @@ from app.config import PlatformSettings
 from app.main import create_application
 
 from .helpers import SignedInAccount, create_signed_in_account
+from .quote_hub_stub import build_covered_component
 
 
 TEST_BASE_URL = "http://testserver"
@@ -61,8 +62,22 @@ def engine_inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 
 @pytest.fixture
+def quote_hub_root(tmp_path: Path) -> Path:
+    """一个**替身**行情组件, 且"要跑的合约早已落地".
+
+    必须钉死: `quote_hub_root` 的默认值是仓外的 `D:/Gitee/QuoteHub`, 而调度器用例提交的正是
+    该组件库里真有的那一只合约与区间 —— 不钉的话, 每次跑测试都会去读那个 40 MB 的真库, 等于
+    让测试依赖另一个仓的当前内容.
+    """
+
+    return build_covered_component(tmp_path / "quote-hub")
+
+
+@pytest.fixture
 def platform_settings(
-    tmp_path: Path, engine_inputs: tuple[Path, Path, Path]
+    tmp_path: Path,
+    engine_inputs: tuple[Path, Path, Path],
+    quote_hub_root: Path,
 ) -> PlatformSettings:
     """指向临时目录的配置."""
 
@@ -84,6 +99,7 @@ def platform_settings(
         market_data_root=market_data_root,
         session_file_path=session_file_path,
         seed_database_path=seed_database_path,
+        quote_hub_root=quote_hub_root,
     )
 
 

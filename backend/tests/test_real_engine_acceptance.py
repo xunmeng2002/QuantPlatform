@@ -17,11 +17,11 @@
 
 **默认不跑** (标 `real_engine`, 见 pytest.ini): 一轮真回测会往作业目录写约 3.0 MB 产物 (876 KB 的
 `.db`、549 KB 的 stdout、`Dump/<RunId>/` 下 17 个 CSV, 与 P0 记的 3.0 MB 相符), 且依赖两个仓之外
-的东西——`QuantTrading/bin/Release` 下的扩展模块与 `D:/MdBaoStock` 的行情. 两者都由环境变量给出,
-不在此处写死:
+的东西——`QuantTrading/bin/Release` 下的扩展模块与仓内的 `market-data/` 行情. 两者都由环境变量
+给出, 不在此处写死:
 
     set QUANT_REAL_ENGINE_ROOT=D:\\Gitee\\QuantTrading\\bin\\Release
-    set QUANT_REAL_MARKET_DATA_ROOT=D:\\MdBaoStock
+    set QUANT_REAL_MARKET_DATA_ROOT=D:\\Gitee\\QuantPlatform\\market-data
     python -m pytest -m real_engine tests/test_real_engine_acceptance.py -v
 
 `--basetemp` 落在仓内的 `_acc_tmp/` (已被 `.gitignore` 覆盖): 四个用例各留下一个作业目录,
@@ -53,6 +53,7 @@ from app.config import PlatformSettings
 from app.manifest import StrategyManifest
 
 from .helpers import SignedInAccount, bearer_headers, create_signed_in_account
+from .quote_hub_stub import build_covered_component
 from .run_helpers import (
     RESULT_FILENAME,
     RUNS_PATH,
@@ -71,8 +72,20 @@ REAL_ENGINE_ROOT = Path(
     os.environ.get("QUANT_REAL_ENGINE_ROOT", "D:/Gitee/QuantTrading/bin/Release")
 )
 REAL_MARKET_DATA_ROOT = Path(
-    os.environ.get("QUANT_REAL_MARKET_DATA_ROOT", "D:/MdBaoStock")
+    os.environ.get("QUANT_REAL_MARKET_DATA_ROOT", "D:/Gitee/QuantPlatform/market-data")
 )
+
+#: 验收用的行情组件桩, 落在临时目录里.
+#:
+#: **必须是个桩**, 不能沿用默认值 `../QuoteHub`: 那几个用例提交的都映射了合约, 于是准备步骤要查
+#: 组件库判"本地够不够" —— 真组件在位而本地没下过这个区间时, 一轮验收会**真的联网下载**(BaoStock,
+#: 以小时计). 验收要证的是"平台把引擎包对了", 不是"组件会下载".
+#:
+#: 覆盖区间取到 1990–2099 而不是桩的默认区间: 宽区间那条用例从 2010 起跑, 若只覆盖到 2019, 准备
+#: 步骤照样会去起那个桩脚本下载一次.
+ACCEPTANCE_QUOTE_HUB_ROOT_NAME = "acceptance-quote-hub"
+ACCEPTANCE_COVERED_START_DAY = "1990-01-01"
+ACCEPTANCE_COVERED_END_DAY = "2099-12-31"
 
 STRATEGIES_PATH = "/api/strategies"
 
@@ -190,17 +203,23 @@ pytestmark = [
 
 
 @pytest.fixture
-def real_settings(platform_settings: PlatformSettings) -> PlatformSettings:
-    """把默认配置的三个引擎输入换成真货; 运行根与用户库仍在临时目录里.
+def real_settings(platform_settings: PlatformSettings, tmp_path: Path) -> PlatformSettings:
+    """把默认配置的三个引擎输入换成真货; 运行根、用户库与行情组件仍在临时目录里.
 
     运行根留在临时目录是刻意的: 一轮真回测写 3 MB 产物, 而"平台有没有把写路径关进作业目录"这条
-    约束在临时目录里照样成立.
+    约束在临时目录里照样成立. 行情组件同理 (见 `ACCEPTANCE_QUOTE_HUB_ROOT_NAME` 的说明) —— 真组件
+    在位时, 这一轮验收会先去联网把行情下下来.
     """
 
     return replace(
         platform_settings,
         engine_root=REAL_ENGINE_ROOT,
         market_data_root=REAL_MARKET_DATA_ROOT,
+        quote_hub_root=build_covered_component(
+            tmp_path / ACCEPTANCE_QUOTE_HUB_ROOT_NAME,
+            start_day=ACCEPTANCE_COVERED_START_DAY,
+            end_day=ACCEPTANCE_COVERED_END_DAY,
+        ),
         session_file_path=REAL_ENGINE_ROOT / REAL_SESSION_FILENAME,
         seed_database_path=REAL_ENGINE_ROOT / REAL_SEED_DATABASE_FILENAME,
         run_timeout_seconds=RUN_TIMEOUT_SECONDS,

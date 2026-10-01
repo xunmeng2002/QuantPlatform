@@ -9,6 +9,11 @@ users/
 # 平台 catalog、JWT 密钥与运行态，属运行数据而非平台代码
 backend/data/
 
+# 行情落地根：由 QuoteHub 组件按需下载写入，体积以 GB 计且可重下，属运行数据而非平台代码。
+# 前导斜杠是有意的：上面那几条无锚点模式会连**同名的嵌套目录**一起吞掉（如某个测试夹具里
+# 恰好叫 runs 的目录），行情根只此一个，就钉死在仓根这一层。
+/market-data/
+
 # 真引擎验收的 pytest 临时根（`--basetemp=_acc_tmp` 的产物，四例约 22 MB）
 backend/_acc_tmp/
 

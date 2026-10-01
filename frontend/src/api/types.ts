@@ -463,3 +463,65 @@ export interface ResultTableResponse {
   limit: number;
   records: ResultTableRecord[];
 }
+
+/* ── 行情组件 (../QuoteHub) ─────────────────────────────────── */
+
+/**
+ * 下拉框里的一项.
+ *
+ * `code` 是组件侧的原生主键 (`sh.600519`), 也是下拉框的取值; `exchange_id` / `instrument_id` 是
+ * 后端**已经拆好**的平台侧两个字段. 拆写因此不靠前端解析 `code` —— 前缀到交易所的映射是组件与
+ * 引擎之间的约定, 本仓只镜像一份 (`domain/market-data.ts`), 再散一处就是会漂移的第二处.
+ */
+export interface MarketDataContract {
+  code: string;
+  exchange_id: string;
+  instrument_id: string;
+  display_name: string;
+}
+
+/**
+ * 合约清单与 K 线周期.
+ *
+ * `available` 为 `false` 是**一种状态, 不是错误**: 行情组件是另一个仓的组件, 没装就没有它. 那时
+ * `contracts` 为空、`reason` 是一句可以直接显示的中文; 界面据此禁用下拉框并给出原因, **不退回
+ * 自由文本**——自由文本会让用户填出一个看着正常、跑起来零成交的取值.
+ *
+ * 后端对此因此回 200 而不是 503: 用户该看到"现在不能选合约"这件确定的事, 而不是一个要他去猜的
+ * 加载失败.
+ */
+export interface MarketDataContractList {
+  available: boolean;
+  reason: string;
+  contracts: MarketDataContract[];
+}
+
+/**
+ * 一轮提交的行情预检结果. 它只**告知**, 放行与否不归它管 (真下载发生在调度器里).
+ *
+ * `available` 为 `false` 时 `sufficient` 没有意义: 那是"没法判", 不是"不够" —— 界面必须按前者
+ * 显示, 否则会把"组件不在位"说成"本地缺行情".
+ */
+export interface MarketDataCoverage {
+  available: boolean;
+  reason: string;
+  sufficient: boolean;
+  expected_day_count: number;
+  missing_day_count: number;
+}
+
+/**
+ * 预检查询的参数, 与 `routers/market_data.read_coverage_handler` 的查询参数逐字对应.
+ *
+ * 四个字段都取自表单本身 (`domain/run-form.buildCoverageQuery`), 故"预检说缺数据"与"提交被拒"
+ * 用的是同一批判据, 不会各说各话.
+ */
+export interface MarketDataCoverageQuery {
+  exchange_id: string;
+  instrument_id: string;
+  bar_period: string;
+  start_trading_day: string;
+  end_trading_day: string;
+  /** 它整份交给 `request` 的 `query`, 那边收的是开放键集; 五个字段拼错名字是这里唯一的防线. */
+  [parameterName: string]: string;
+}

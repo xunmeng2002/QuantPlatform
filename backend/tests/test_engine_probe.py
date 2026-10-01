@@ -12,12 +12,21 @@ from app.services.engine_probe import (
     ENGINE_RUNTIME_FILENAMES,
     ENGINE_VERSION_FILENAME,
     MAXIMUM_ENGINE_VERSION_LENGTH,
+    PYTHON_BINDING_FILENAME_PREFIX,
+    PYTHON_BINDING_FILENAME_SUFFIX,
     VERSION_DIGEST_PREFIX,
+    interpreter_tag,
     read_engine_version,
 )
 
 
-BINDING_FILENAME = "QuantTrading.cp314-win_amd64.pyd"
+# 扩展模块名里的 ABI 标签**必须跟着跑测试的那个解释器走**: 探针正是按 `interpreter_tag()` 去比
+# 文件名的, 写死成某个 `cp3xx` 就是把这个用例绑死在作者的机器上 —— 换个 Python 版本跑, 探针找不到
+# 那个文件, 于是四条摘要用例一起红, 而红的理由是测试自己造了一份当前解释器永不认识的假引擎.
+BINDING_FILENAME = (
+    f"{PYTHON_BINDING_FILENAME_PREFIX}{interpreter_tag()}-win_amd64"
+    f"{PYTHON_BINDING_FILENAME_SUFFIX}"
+)
 DIGEST_HEX_LENGTH = 12
 OVERLONG_VERSION_LENGTH = 200
 

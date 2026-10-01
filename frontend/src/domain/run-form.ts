@@ -3,7 +3,9 @@
  *
  * 与 `app/services/run_submission.py` **同一套语义**, 报错文案也照抄. 界面放行而后端回 400 是
  * 本项目最忌讳的「点了有反应但没用」, 故这里逐条对齐:
- *   - `bar_period` 恒必填 (引擎一定要它, 与 manifest 有没有映射无关);
+ *   - `bar_period` 恒必填 (引擎一定要它, 与 manifest 有没有映射无关), 且须在 `SUPPORTED_BAR_PERIODS`
+ *     之内 —— 那一格比后端更严: `run_submission` 只判非空, 取值能否落地由调度侧的准备步骤兜底,
+ *     而填错的表现是静默零成交, 不该等到跑完才发现;
  *   - `exchange_id` / `instrument_id` **只在 manifest 声明了映射时**才收: 引擎不认识它们,
  *     没映射而提交, 后端回的是「该策略未映射 {field}」;
  *   - 交易日是 8 位数字串, 且开始不得晚于结束 (等长数字串的字符串比较即为数值比较);
@@ -13,10 +15,13 @@
  */
 
 import type {
+  MarketDataCoverageQuery,
   MarketDataType,
   RunSubmitPayload,
   RunTemplateCreatePayload,
 } from '../api/types';
+import { SUPPORTED_BAR_PERIODS } from './market-data';
+import type { BarPeriod } from './market-data';
 import type { RunFieldRequirements } from './manifest';
 
 /** 与 `run_submission.MAXIMUM_RUN_FIELD_VALUE_LENGTH` 一致. */
@@ -103,12 +108,7 @@ export function buildPrefilledRunFields(
   current: RunFieldInputs,
 ): RunFieldInputs {
   return {
-    barPeriod: rememberedRunField(
-      prefill?.bar_period,
-      'bar_period',
-      true,
-      current.barPeriod,
-    ),
+    barPeriod: rememberedBarPeriod(prefill?.bar_period, current.barPeriod),
     exchangeId: rememberedRunField(
       prefill?.exchange_id,
       'exchange_id',
@@ -155,6 +155,22 @@ function rememberedRunField(
   return acceptedValue ?? fallbackValue;
 }
 
+/**
+ * 记忆里的 K 线周期, 与 `rememberedRunField` 同一套「能用就用」, 只是判据换成清单内的那条.
+ *
+ * 分开写而不是给 `readRunFieldValue` 加参数: 周期的判据与"通用字段"的判据长得不一样 (它有白名单,
+ * 没有长度与字符那两条), 挤进一个函数只会让那个函数同时说两件事 —— 而 `1d` 这类旧取值如今会被
+ * 判错, 正是它不该被预填进来的那份理由.
+ */
+function rememberedBarPeriod(
+  rememberedValue: string | null | undefined,
+  fallbackValue: string,
+): string {
+  const errors: Record<string, string> = {};
+
+  return readBarPeriod(rememberedValue ?? '', errors) ?? fallbackValue;
+}
+
 function rememberedTradingDay(
   rememberedValue: string | null | undefined,
   fieldName: string,
@@ -190,12 +206,7 @@ export function validateRunForm(input: RunFormInput): RunFormValidation {
     errors.strategy_id = `该策略不支持 ${input.matchMode} 行情模式`;
   }
 
-  const barPeriod = readRunFieldValue(
-    input.barPeriod,
-    'bar_period',
-    errors,
-    true,
-  );
+  const barPeriod = readBarPeriod(input.barPeriod, errors);
   const exchangeId = readRunFieldValue(
     input.exchangeId,
     'exchange_id',
@@ -241,6 +252,54 @@ export function validateRunForm(input: RunFormInput): RunFormValidation {
       initial_capital: initialCapital ?? 0,
       params: input.parameterValues,
     },
+  };
+}
+
+/**
+ * 行情预检查询的参数; 五个字段里任何一个还没成型就让整条回 `null` —— 那时问不出有意义的结果, 问了
+ * 也只是把"填了一半"变成一句要人去猜的提示.
+ *
+ * 判据**复用 `validateRunForm` 的那几个读取器**, 故"预检说本地缺数据"与"提交被拒"用的是同一批
+ * 规则, 不会各说各话. 开始晚于结束也一并排除: 那个区间算不出任何期望交易日, 预检只会回一句
+ * "缺 0 个交易日"这种自相矛盾的话.
+ */
+export function buildCoverageQuery(
+  input: RunFormInput,
+): MarketDataCoverageQuery | null {
+  const errors: Record<string, string> = {};
+  const barPeriod = readBarPeriod(input.barPeriod, errors);
+  const exchangeId = readRunFieldValue(
+    input.exchangeId,
+    'exchange_id',
+    errors,
+    input.runFieldRequirements.exchangeId,
+  );
+  const instrumentId = readRunFieldValue(
+    input.instrumentId,
+    'instrument_id',
+    errors,
+    input.runFieldRequirements.instrumentId,
+  );
+  const startTradingDay = readTradingDay(input.startTradingDay, 'start_trading_day', errors);
+  const endTradingDay = readTradingDay(input.endTradingDay, 'end_trading_day', errors);
+
+  if (
+    barPeriod === null ||
+    exchangeId === null ||
+    instrumentId === null ||
+    startTradingDay === null ||
+    endTradingDay === null ||
+    startTradingDay > endTradingDay
+  ) {
+    return null;
+  }
+
+  return {
+    exchange_id: exchangeId,
+    instrument_id: instrumentId,
+    bar_period: barPeriod,
+    start_trading_day: startTradingDay,
+    end_trading_day: endTradingDay,
   };
 }
 
@@ -312,6 +371,38 @@ function readTemplateNameErrors(templateName: string): Record<string, string> {
   }
 
   return {};
+}
+
+/**
+ * 读 K 线周期: 必填, 且须在 `SUPPORTED_BAR_PERIODS` 之内.
+ *
+ * 「没填」与「填了清单外的值」分开报, 是因为下一步动作不同 (一个是去选一个, 一个是改掉它).
+ * 清单本身是行情组件能力的镜像 (见 `domain/market-data.ts`), 界面上的下拉框给的就是这几个值; 这条
+ * 判据同时护着预填与模板 —— 旧的一份记忆里可能存着 `1d`.
+ */
+function readBarPeriod(
+  rawValue: string,
+  errors: Record<string, string>,
+): string | null {
+  const normalizedValue = rawValue.trim();
+
+  if (!normalizedValue) {
+    errors.bar_period = '不能为空';
+
+    return null;
+  }
+
+  if (!isSupportedBarPeriod(normalizedValue)) {
+    errors.bar_period = `只能是 ${SUPPORTED_BAR_PERIODS.join(' / ')}`;
+
+    return null;
+  }
+
+  return normalizedValue;
+}
+
+function isSupportedBarPeriod(value: string): value is BarPeriod {
+  return (SUPPORTED_BAR_PERIODS as readonly string[]).includes(value);
 }
 
 /**

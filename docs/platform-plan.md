@@ -69,8 +69,9 @@
   `sell_open` / `buy_close` / `sell_close` / `cancel_order` /
   `get_long_position` / `get_short_position` / `get_last_price`），
   模块级 `create_backtest_api` / `init_logger` / `shutdown_logger`。
-- 行情数据根 `D:/MdBaoStock/Bar/` 存在，按 `Identity=<板块>/Year=<年>/`
+- 行情数据根 `<仓根>/market-data/Bar/` 存在，按 `Identity=<板块>/Year=<年>/`
   存放 `<年>_<周期>.parquet`。**只有 `Bar/`，没有 tick 数据目录。**
+  （2026-10-01 由 `D:/MdBaoStock` 迁入仓内，逐文件 SHA-256 校验过；原目录保留未删。）
 - 引擎单轮耗时（2026-09-25 P3 实测，`bin/Release` 下、5m 周期、单标的）：
   三个月 **约 1.7 秒**，2010–2024（58176 根 bar，678 笔成交）**约 3.8 秒**——
   比原估快得多，故"作业级超时"在真引擎上要靠**压时限**触发（见 §11 的 P3 行）。
@@ -583,8 +584,8 @@ npm run dev     # http://localhost:5173/
 
 ### 8.2 手工验收闭环（P4 的验收项，走界面）
 
-前置：两个终端都在跑（见 §8.1），且引擎与行情数据在位
-（`../QuantTrading/bin/Release`、`D:/MdBaoStock/Bar`）。
+前置：两个终端都在跑（见 §8.1），且引擎、行情数据与行情组件都在位
+（`../QuantTrading/bin/Release`、`market-data/Bar`、`../QuoteHub`）。
 
 1. 以管理员登录 → 「用户管理」建**两个**账号，**显示名都填**（建号页已强制）。
 2. 甲登录 → 「策略管理」上传策略（`.py` + manifest 表单）→ 详情页确认版本与
@@ -1142,7 +1143,7 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
 13. **Tick 模式不可提交**：manifest 仍可声明支持 `Tick`（那是策略作者的事），
     但提交侧一律 400。引擎的 tick 撮合有**三档**（`OrderBook:0` / `LastPrice:1` /
     `OppositePrice:2`），平台的 `MarketDataType` 只有两值，推不出那三档；
-    且 `D:/MdBaoStock` 下根本没有 tick 数据，从未验证过。判据是具名常量
+    且行情根 `market-data/` 下根本没有 tick 数据，从未验证过。判据是具名常量
     `SUBMITTABLE_MATCH_MODES = frozenset({MarketDataType.BAR})`，开 Tick 时改它。
     **P4 的「新建回测」表单因此不显示 Tick 选项**（2026-09-25 拍板）——
     表单按 Bar 单模式生成，不做模式联动，也就不必先编出三档的界面语义。

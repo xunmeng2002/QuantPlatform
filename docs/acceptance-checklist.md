@@ -27,7 +27,9 @@ cd frontend && npm run dev                # http://localhost:5173/
   那个地址连不上，容易被误判成「服务没起来」。`/api` 由 Vite 的 `server.proxy` 转到后端。
 - 需要两个账号：甲（普通用户）、乙（管理员）。账号只能在 `/users` 里由管理员建（登录页没有注册入口），
   首次启动的空库必须给出初始管理员口令，否则后端启动即抛错。
-- 引擎与行情数据要在位（`../QuantTrading/bin/Release`、`D:/MdBaoStock/Bar`），否则第 4 节提交会失败。
+- 引擎与行情数据要在位（`../QuantTrading/bin/Release`、仓内的 `market-data/Bar`），
+  外加上游的行情组件 `../QuoteHub`（平台查它的库判"本地行情够不够"，不够就调它的 CLI 下载）。
+  三样缺任何一样，第 4 节提交都会失败——判"够不够"这件事本身就要查组件库。
 - 不想碰 `backend/data/` 与 `runs/`：把 `QUANT_DATABASE_URL`、`QUANT_RUNS_ROOT`、
   `QUANT_USER_LIBRARY_ROOT` 指到临时目录，就能用一次性库走完整套。
 - **判「未登录态」要清 `localStorage` 的 `quantplatform.access-token`**，或直接用无痕窗口。
@@ -77,9 +79,14 @@ cd frontend && npm run dev                # http://localhost:5173/
 - [ ] 换肤仍然生效：EP 的按钮与标签是品牌蓝 `#1d4ed8`，不是出厂亮蓝 `#409eff`。
 - [ ] `/strategies`、`/users` 各看一遍：徽章、空态、错误条、分页条与既有风格一致，功能没变。
 
-## 6. 详情页与结果（D.12 / D.15）
+## 6. 详情页与结果（D.12 / D.15 / D.19）
 
 - [ ] `/runs/{id}` 首屏是灰条骨架屏；**翻页与 2 秒轮询刷新时不许再出现骨架屏**。
+- [ ] 「概要」区多出**「引擎版本」**一行，且与 `../QuantTrading/bin/Release` 的实际构建对得上
+      （D.19，此项 2026-10-01 由 `PROGRESS.md` 的 D.19 短版并入）：该目录有
+      `engine-version.txt` 时显示它的首个非空行，没有时显示 `sha256:` 开头的 12 位摘要。
+      **两者不可比** —— 摘要是"读不出人写版本号"时的降级，只覆盖 `.pyd` 与三个运行时 DLL，
+      包里别的文件变了它不会变。
 - [ ] 结果表下面「每页」那个 label 也是加粗深灰。
 - [ ] 五个明细分页表（资金 / 成交 / 委托 / 持仓 / 持仓明细）翻页、切换表名都正常。
 - [ ] `/strategies/{id}` 与 `/users` 同样看一遍骨架屏与表格。

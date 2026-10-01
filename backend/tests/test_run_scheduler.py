@@ -19,6 +19,11 @@ from app.catalog.database import PlatformDatabase
 from app.catalog.enums import RunStatus
 from app.catalog.models import RunModel
 from app.config import PlatformSettings
+from app.services import quote_hub
+from app.services.market_data_preparation import (
+    MARKET_DATA_COMPONENT_MISSING_MESSAGE,
+    MARKET_DATA_LOGIN_FAILED_MESSAGE,
+)
 from app.scheduler.engine_config import (
     RELATIVE_DATABASE_HOST,
     RELATIVE_DUMP_PATH,
@@ -36,6 +41,12 @@ from app.scheduler.runner import (
 from app.scheduler.workspace import STAGING_DIRECTORY_PREFIX
 
 from .helpers import SignedInAccount, create_signed_in_account, soft_delete_strategy_record
+from .quote_hub_stub import (
+    DEFAULT_CONTRACT_CODE,
+    enumerate_days,
+    set_exit_code,
+    write_catalog_database,
+)
 from .run_helpers import (
     ARGV0_FILENAME,
     DEFAULT_END_TRADING_DAY,
@@ -108,6 +119,12 @@ CONFIGURATION_KEYS_WRITTEN_BY_PLATFORM = frozenset(
 RUN_FIELD_CONFIGURATION_KEYS = frozenset({"ExchangeId", "InstrumentId", "BarPreces"})
 
 MIRROR_COLUMN_BY_RESULT_KEY = dict(RESULT_MIRROR_COLUMN_NAMES)
+
+#: 组件登录不上时打印的原文. 平台只能从这段文字认出"登录失败", 退出码与它的其它致命错误同码.
+LOGIN_FAILURE_STDERR = "BaoStock 登录失败"
+
+QUOTE_HUB_CLI_FILENAME = quote_hub.QUOTE_HUB_CLI_FILENAME
+QUOTE_HUB_DATABASE_FILENAME = quote_hub.QUOTE_HUB_DATABASE_FILENAME
 
 
 async def _submit_and_wait(
@@ -940,4 +957,80 @@ async def test_a_result_reporting_a_foreign_run_id_still_lands_on_this_row(
     assert (
         read_job_json(platform_settings, run.id, RESULT_FILENAME)["RunId"]
         == FOREIGN_RUN_ID
+    )
+
+
+async def test_a_failed_market_data_preparation_fails_the_run_without_starting_the_engine(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    quote_hub_root: Path,
+    run_owner: SignedInAccount,
+) -> None:
+    """行情备不齐时**根本不起引擎**: 干跑一轮只会花掉时间并留下一份看不出来由的空结果.
+
+    退出码保持 NULL 与"引擎真的没起"是同一件事: 起了进程就一定有退出码或超时.
+    """
+
+    _rebuild_component_without_coverage(quote_hub_root)
+    set_exit_code(quote_hub_root, 1, LOGIN_FAILURE_STDERR)
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    run = await _submit_and_wait(
+        client, database, run_owner.token, runnable.strategy.id
+    )
+
+    assert run.status == RunStatus.FAILED.value
+    assert run.error_msg == MARKET_DATA_LOGIN_FAILED_MESSAGE
+    assert run.exit_code is None
+    assert not (job_directory(platform_settings, run.id) / ARGV0_FILENAME).exists()
+
+
+async def test_a_missing_market_data_component_fails_only_the_runs_that_name_a_contract(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    quote_hub_root: Path,
+    run_owner: SignedInAccount,
+) -> None:
+    """组件不在位时文案要指向"组件不在位", 而不是让它后来以某句引擎侧的话收场."""
+
+    (quote_hub_root / QUOTE_HUB_CLI_FILENAME).unlink()
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    run = await _submit_and_wait(
+        client, database, run_owner.token, runnable.strategy.id
+    )
+
+    assert run.status == RunStatus.FAILED.value
+    assert run.error_msg == MARKET_DATA_COMPONENT_MISSING_MESSAGE
+    assert run.exit_code is None
+
+
+def _rebuild_component_without_coverage(quote_hub_root: Path) -> None:
+    """把共享夹具那个"早已覆盖"的组件换成"日历在、但请求的那只合约没有 bar".
+
+    换的是库的内容而不是配置: 于是这一轮走的仍是完整的准备路径, 只是判据会回"不够", 从而真的
+    去起一次下载 —— 那正是这一步要被验到的分支.
+    """
+
+    (quote_hub_root / QUOTE_HUB_DATABASE_FILENAME).unlink()
+    write_catalog_database(
+        quote_hub_root,
+        covered_contracts={},
+        calendar_days=tuple(
+            enumerate_days(
+                quote_hub.format_component_day(DEFAULT_START_TRADING_DAY),
+                quote_hub.format_component_day(DEFAULT_END_TRADING_DAY),
+            )
+        ),
+        contracts=(
+            (DEFAULT_CONTRACT_CODE, "贵州茅台", "1", "sh"),
+        ),
     )

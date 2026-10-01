@@ -19,6 +19,7 @@ import {
   EMPTY_RUN_FIELDS,
   MAXIMUM_RUN_FIELD_VALUE_LENGTH,
   MAXIMUM_RUN_TEMPLATE_NAME_LENGTH,
+  buildCoverageQuery,
   buildPrefilledRunFields,
   buildTemplateDraft,
   validateRunForm,
@@ -64,7 +65,7 @@ function buildFormInput(overrides: Partial<RunFormInput> = {}): RunFormInput {
     matchMode: 'Bar',
     isMatchModeSupported: true,
     runFieldRequirements: UNMAPPED_RUN_FIELDS,
-    barPeriod: '1d',
+    barPeriod: '5m',
     exchangeId: '',
     instrumentId: '',
     startTradingDay: '20240102',
@@ -94,7 +95,7 @@ describe('validateRunForm 的正向路径', () => {
       strategy_id: 'strategy-1',
       strategy_version_id: 'version-1',
       match_mode: 'Bar',
-      bar_period: '1d',
+      bar_period: '5m',
       exchange_id: null,
       instrument_id: null,
       start_trading_day: '20240102',
@@ -136,6 +137,15 @@ describe('validateRunForm 的必填与格式', () => {
     expect(readErrors(buildFormInput({ barPeriod: '   ' })).bar_period).toBe('不能为空');
   });
 
+  it('bar_period 只收清单内的周期, 清单外的取值当场挡下', () => {
+    // `1d` 与 `1m` 是行情组件根本没有的周期: 提交出去不会报错, 只会按一个空文件过滤出零根 bar.
+    for (const unsupported of ['1d', '1m', '5', '5M', 'daily']) {
+      expect(readErrors(buildFormInput({ barPeriod: unsupported })).bar_period).toBe(
+        '只能是 5m / 15m / 30m / 60m',
+      );
+    }
+  });
+
   it('映射了却没填 / 没映射但填了', () => {
     expect(
       readErrors(buildFormInput({ runFieldRequirements: MAPPED_RUN_FIELDS })).exchange_id,
@@ -153,12 +163,25 @@ describe('validateRunForm 的必填与格式', () => {
   it('运行级字段的超长与控制字符都在本地挡住', () => {
     const tooLong = 'a'.repeat(MAXIMUM_RUN_FIELD_VALUE_LENGTH + 1);
 
-    expect(readErrors(buildFormInput({ barPeriod: tooLong })).bar_period).toBe(
-      `不得超过 ${MAXIMUM_RUN_FIELD_VALUE_LENGTH} 个字符`,
-    );
-    expect(readErrors(buildFormInput({ barPeriod: '1d\n5m' })).bar_period).toBe(
-      '不得含控制字符',
-    );
+    // 这两条只落在自由文本的那两格上: 周期已经收成下拉, 长度与字符那两条对它不再适用.
+    expect(
+      readErrors(
+        buildFormInput({
+          runFieldRequirements: MAPPED_RUN_FIELDS,
+          exchangeId: tooLong,
+          instrumentId: '600519',
+        }),
+      ).exchange_id,
+    ).toBe(`不得超过 ${MAXIMUM_RUN_FIELD_VALUE_LENGTH} 个字符`);
+    expect(
+      readErrors(
+        buildFormInput({
+          runFieldRequirements: MAPPED_RUN_FIELDS,
+          exchangeId: 'SSE\u0007',
+          instrumentId: '600519',
+        }),
+      ).exchange_id,
+    ).toBe('不得含控制字符');
   });
 
   it('交易日是 8 位数字, 且开始不得晚于结束', () => {
@@ -224,7 +247,7 @@ describe('buildTemplateDraft', () => {
       draft: {
         name: '网格默认',
         match_mode: 'Bar',
-        bar_period: '1d',
+        bar_period: '5m',
         exchange_id: 'SHFE',
         instrument_id: 'rb2405',
         start_trading_day: '20240102',
@@ -376,7 +399,7 @@ describe('buildPrefilledRunFields', () => {
 
   it('没有记忆时结果恒等于当前输入', () => {
     const current: RunFieldInputs = {
-      barPeriod: '1d',
+      barPeriod: '5m',
       exchangeId: 'SSE',
       instrumentId: '600519',
       startTradingDay: '20240102',
@@ -419,10 +442,11 @@ describe('buildPrefilledRunFields', () => {
     });
   });
 
-  it('超长与含控制字符的取值按运行级字段那套判据挡下', () => {
+  it('读不动的取值按运行级字段那套判据挡下', () => {
+    // 旧的一份记忆里可能存着组件根本没有的周期 (界面以前是自由文本), 它不该被填进下拉框.
     expect(
       buildPrefilledRunFields(
-        buildPrefill({ bar_period: 'x'.repeat(MAXIMUM_RUN_FIELD_VALUE_LENGTH + 1) }),
+        buildPrefill({ bar_period: '1d' }),
         MAPPED_RUN_FIELDS,
         EMPTY_RUN_FIELDS,
       ).barPeriod,
@@ -435,5 +459,59 @@ describe('buildPrefilledRunFields', () => {
         EMPTY_RUN_FIELDS,
       ).exchangeId,
     ).toBe('');
+  });
+});
+
+describe('buildCoverageQuery', () => {
+  it('五格都成型时才给出预检查询, 取值去空白', () => {
+    expect(
+      buildCoverageQuery(
+        buildFormInput({
+          runFieldRequirements: MAPPED_RUN_FIELDS,
+          barPeriod: ' 15m ',
+          exchangeId: 'SSE',
+          instrumentId: '600519',
+        }),
+      ),
+    ).toEqual({
+      exchange_id: 'SSE',
+      instrument_id: '600519',
+      bar_period: '15m',
+      start_trading_day: '20240102',
+      end_trading_day: '20241231',
+    });
+  });
+
+  it('缺任何一格都问不出结果, 于是回 null', () => {
+    const incomplete: Partial<RunFormInput>[] = [
+      { barPeriod: '' },
+      { runFieldRequirements: MAPPED_RUN_FIELDS, exchangeId: '' },
+      { runFieldRequirements: MAPPED_RUN_FIELDS, instrumentId: '' },
+      { startTradingDay: '' },
+      { endTradingDay: '2024-12-31' },
+    ];
+
+    for (const overrides of incomplete) {
+      expect(buildCoverageQuery(buildFormInput(overrides))).toBeNull();
+    }
+  });
+
+  it('开始晚于结束时回 null: 那个区间算不出期望交易日, 问了只会得到"缺 0 个交易日"', () => {
+    expect(
+      buildCoverageQuery(
+        buildFormInput({ startTradingDay: '20241231', endTradingDay: '20240102' }),
+      ),
+    ).toBeNull();
+  });
+
+  it('manifest 只映射了一个键时不问: 拼不出组件主键, 判不了本地够不够', () => {
+    expect(
+      buildCoverageQuery(
+        buildFormInput({
+          runFieldRequirements: { barPeriod: true, exchangeId: true, instrumentId: false },
+          exchangeId: 'SSE',
+        }),
+      ),
+    ).toBeNull();
   });
 });

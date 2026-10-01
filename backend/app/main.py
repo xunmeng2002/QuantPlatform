@@ -29,7 +29,15 @@ from .errors import (
     ResourceNotFoundError,
 )
 from .manifest import MAXIMUM_MANIFEST_BYTES
-from .routers import auth, health, run_templates, runs, strategies, users
+from .routers import (
+    auth,
+    health,
+    market_data,
+    run_templates,
+    runs,
+    strategies,
+    users,
+)
 from .routers.strategies import MAXIMUM_SOURCE_BYTES
 from .scheduler.recovery import recover_interrupted_runs
 from .scheduler.scheduler import RunScheduler
@@ -51,6 +59,8 @@ STRATEGIES_PREFIX = "/api/strategies"
 # 因此写在**前缀**里, 各端点不必各自重复一遍 `/{strategy_id}`.
 RUN_TEMPLATES_PREFIX = "/api/strategies/{strategy_id}/run-templates"
 RUNS_PREFIX = "/api/runs"
+# 行情来自另一个仓的组件, 不属于任何策略域, 故自带一层顶层前缀.
+MARKET_DATA_PREFIX = "/api/market-data"
 
 MULTIPART_FRAMING_ALLOWANCE_BYTES = 64 * 1024
 
@@ -268,6 +278,9 @@ def _register_routers(application: FastAPI) -> None:
         run_templates.router, prefix=RUN_TEMPLATES_PREFIX, tags=["run-templates"]
     )
     application.include_router(runs.router, prefix=RUNS_PREFIX, tags=["runs"])
+    application.include_router(
+        market_data.router, prefix=MARKET_DATA_PREFIX, tags=["market-data"]
+    )
 
 
 def create_application(settings: PlatformSettings | None = None) -> FastAPI:

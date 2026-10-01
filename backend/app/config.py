@@ -42,8 +42,32 @@ SESSION_FILENAME = "Sessions.json"
 SEED_DATABASE_FILENAME = "BackTestInit.db"
 
 # 本机布局的默认值, 与 engine_root 的默认值同一性质: 换机器必须由环境变量覆盖.
-DEFAULT_MARKET_DATA_ROOT = Path("D:/MdBaoStock")
+# 行情根落在**仓内**: 它是平台自己的数据产物 (由 QuoteHub 组件按需下载落地), 与 runs/ users/
+# 同类, 故也由仓根 .gitignore 覆盖.
+DEFAULT_MARKET_DATA_ROOT = PLATFORM_ROOT / "market-data"
 DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES = 8 * 1024
+
+# 行情组件 (QuoteHub). 平台**读它的数据库、跑它的命令行**, 但不 import 它、也不写它的任何
+# 文件——它是个独立仓, 两个界面 (SQLite schema 与 CLI 参数) 就是全部耦合面.
+#
+# 它必须在自己的目录下运行: `connect_database()` 用的是一个**相对**文件名 (`stock_data.db`),
+# 换个 cwd 就会安静地读/建另一个位置的库, 现象是"跑成功但没数据".
+DEFAULT_QUOTE_HUB_ROOT = PLATFORM_ROOT.parent / "QuoteHub"
+QUOTE_HUB_CLI_FILENAME = "BaoStockParquet.py"
+QUOTE_HUB_DATABASE_FILENAME = "stock_data.db"
+
+# 组件的 `--frequency` 就这四个取值 (没有 1m、没有 1d). 平台的 K 线周期因此收成这四个:
+# 引擎按 `Preces` 过滤行情, 周期与落地文件的后缀必须同字面量, 差一个字就是**静默 0 成交**.
+SUPPORTED_MARKET_DATA_FREQUENCIES = ("5", "15", "30", "60")
+
+# 组件只把 `--codes` 里列到的合约写进年度文件, 少列一个就把那个合约**静默挤出**文件. 故平台每
+# 次都传全集. 全集要拼成一条命令行, 受 Windows 约 32767 字符的上限约束 (每码 9~10 字符), 这里
+# 留足余量: 超限时报明确文案, 而不是让它撞成一句 CreateProcess 的英文报错.
+MAXIMUM_MARKET_DATA_CODES = 3000
+
+# 准备行情的独立时限. 它**不**与 run_timeout_seconds 共用: 后者是回测预算, 让下载吃掉它会把
+# "下载太久"记成"策略跑超时", 两者对用户的指向完全不同.
+DEFAULT_MARKET_DATA_PREPARE_TIMEOUT_SECONDS = 3600
 
 # 本地环境文件: 固定的几个 QUANT_* 取值写在里面, 免得每次启动都在命令行上带一串.
 # 该文件名已被仓根 .gitignore 覆盖 (`.env`), 口令类取值因此不入库.
@@ -244,6 +268,8 @@ class PlatformSettings:
     maximum_output_tail_bytes: int = DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES
     run_retention_enabled: bool = DEFAULT_RUN_RETENTION_ENABLED
     retained_runs_per_user: int = DEFAULT_RETAINED_RUNS_PER_USER
+    quote_hub_root: Path = DEFAULT_QUOTE_HUB_ROOT
+    market_data_prepare_timeout_seconds: int = DEFAULT_MARKET_DATA_PREPARE_TIMEOUT_SECONDS
 
     def __post_init__(self) -> None:
         """校验数值项与路径项, 避免并发闸门为 0 时永久阻塞、超时为 0 时秒杀作业."""
@@ -262,16 +288,28 @@ class PlatformSettings:
         if self.run_timeout_seconds < 1:
             raise ValueError("run_timeout_seconds 需 >= 1")
 
+        if self.market_data_prepare_timeout_seconds < 1:
+            raise ValueError("market_data_prepare_timeout_seconds 需 >= 1")
+
         if self.maximum_output_tail_bytes < 1:
             raise ValueError("maximum_output_tail_bytes 需 >= 1")
 
         if not 1 <= self.http_port <= MAXIMUM_PORT:
             raise ValueError(f"http_port 需在 1..{MAXIMUM_PORT} 之间")
 
-        # 三个引擎侧路径必须绝对: 引擎相对 **job 目录** 解析读路径, 而平台的复制动作相对
+        # 这三个引擎侧路径必须绝对: 引擎相对 **job 目录** 解析读路径, 而平台的复制动作相对
         # **后端进程的 CWD** 解析. 同一个相对值在这两处指向不同的地方, 且都不报错——配置里
         # 留一个相对值, 故障只在作业跑起来之后才以"没有行情数据"的面目出现.
-        for field_name in ("market_data_root", "session_file_path", "seed_database_path"):
+        #
+        # `quote_hub_root` 是另一种性质: 它只做行情子进程的 cwd. 但它同样收严, 理由是组件自己
+        # 用**相对**文件名去开数据库, 一个相对的 cwd 会让它安静地读/建另一个位置的库——症状与
+        # 上一条一样, 都是"跑完才发现没数据".
+        for field_name in (
+            "market_data_root",
+            "session_file_path",
+            "seed_database_path",
+            "quote_hub_root",
+        ):
             if not getattr(self, field_name).is_absolute():
                 raise ValueError(f"{field_name} 需为绝对路径")
 
@@ -330,6 +368,13 @@ class PlatformSettings:
             ),
             retained_runs_per_user=read_integer_environment(
                 "QUANT_RETAINED_RUNS_PER_USER", DEFAULT_RETAINED_RUNS_PER_USER
+            ),
+            quote_hub_root=Path(
+                os.getenv("QUANT_QUOTE_HUB_ROOT", DEFAULT_QUOTE_HUB_ROOT)
+            ),
+            market_data_prepare_timeout_seconds=read_integer_environment(
+                "QUANT_MARKET_DATA_PREPARE_TIMEOUT_SECONDS",
+                DEFAULT_MARKET_DATA_PREPARE_TIMEOUT_SECONDS,
             ),
         )
 

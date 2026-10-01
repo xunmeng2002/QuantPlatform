@@ -17,8 +17,6 @@
 from __future__ import annotations
 
 import logging
-import math
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -27,32 +25,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..catalog.enums import MarketDataType
 from ..catalog.models import RunModel, StrategyVersionModel, UserModel
 from ..catalog.visibility import build_owned_run_query
-from ..manifest import (
-    EXCHANGE_ID_FIELD_NAME,
-    INSTRUMENT_ID_FIELD_NAME,
-    StrategyManifest,
-)
-from ..scheduler.engine_config import parse_configuration_object, resolve_market_data_type
+from ..scheduler.engine_config import parse_configuration_object
+from .run_configuration import decode_run_fields, read_run_field_key_names
 
 
 logger = logging.getLogger(__name__)
 
-# 引擎 `BackTest.json` 的键名. `BarPreces` 是引擎侧既有拼写, 非笔误, 不可擅改——它读的就是
-# 这个名字, 平台改一个字母就静默读不到周期.
-MATCH_MODE_KEY = "MatchMode"
-BAR_PERIOD_KEY = "BarPreces"
-START_TRADING_DAY_KEY = "StartTradingDay"
-END_TRADING_DAY_KEY = "EndTradingDay"
-INITIAL_CAPITAL_KEY = "InitialCapital"
-
 
 @dataclass(frozen=True)
 class LastSubmittedParameters:
-    """上一次提交的解码结果.
-
-    单个取值读不动时**逐项**回默认 (空串 / `None`), 不整体作废: 一个字段是坏数据, 没有理由
-    让其余十来个字段的预填一起失效.
-    """
+    """上一次提交的解码结果."""
 
     run_id: str
     submitted_at: datetime
@@ -100,90 +82,21 @@ async def read_last_submitted_parameters(
         return None
 
     version = await session.get(StrategyVersionModel, run.strategy_version_id)
-    run_field_key_names = _read_run_field_key_names(version)
-    run_field_values, parameter_values = _split_configuration(
-        strategy_configuration, run_field_key_names
+    decoded_fields = decode_run_fields(
+        engine_configuration,
+        strategy_configuration,
+        read_run_field_key_names(None if version is None else version.manifest_json),
     )
 
     return LastSubmittedParameters(
         run_id=run.id,
         submitted_at=run.submitted_at,
-        match_mode=resolve_market_data_type(engine_configuration.get(MATCH_MODE_KEY)),
-        bar_period=_read_text(engine_configuration, BAR_PERIOD_KEY),
-        exchange_id=run_field_values.get(EXCHANGE_ID_FIELD_NAME, ""),
-        instrument_id=run_field_values.get(INSTRUMENT_ID_FIELD_NAME, ""),
-        start_trading_day=_read_text(engine_configuration, START_TRADING_DAY_KEY),
-        end_trading_day=_read_text(engine_configuration, END_TRADING_DAY_KEY),
-        initial_capital=_read_finite_number(engine_configuration, INITIAL_CAPITAL_KEY),
-        params=parameter_values,
+        match_mode=decoded_fields.match_mode,
+        bar_period=decoded_fields.bar_period,
+        exchange_id=decoded_fields.exchange_id,
+        instrument_id=decoded_fields.instrument_id,
+        start_trading_day=decoded_fields.start_trading_day,
+        end_trading_day=decoded_fields.end_trading_day,
+        initial_capital=decoded_fields.initial_capital,
+        params=decoded_fields.parameter_values,
     )
-
-
-def _read_run_field_key_names(version: StrategyVersionModel | None) -> dict[str, str]:
-    """该运行自己那个版本的运行级键名映射 (字段名 → 配置键名).
-
-    用**运行自己那个版本**的 manifest, 而不是最新版本: 键名是渲染当时定的, 事后改版不影响
-    历史那份配置里的键叫什么.
-
-    manifest 读不动时回空映射, 于是策略配置里的每个键都会被当成参数带回去一一前端按它自己那份
-    manifest 的控件逐项判断, 多出来的键会被忽略, 故这里不必把整轮预填作废.
-    """
-
-    if version is None:
-        return {}
-
-    try:
-        manifest = StrategyManifest.model_validate_json(version.manifest_json)
-    except ValueError as error:
-        logger.warning("版本 %s 的 manifest 无法解析, 预填按无映射处理: %s", version.id, error)
-        return {}
-
-    return manifest.named_run_field_keys()
-
-
-def _split_configuration(
-    strategy_configuration: Mapping[str, object],
-    run_field_key_names: Mapping[str, str],
-) -> tuple[dict[str, str], dict[str, object]]:
-    """把渲染出来的策略配置拆回"运行级字段"与"策略参数"两部分.
-
-    manifest 保证参数键不会与运行级键撞名 (见 `manifest._check_declared_keys_do_not_collide`),
-    故按键名做差集是精确的: 差集之外的都是参数, 连同类型原样带回去.
-    """
-
-    declared_key_names = set(run_field_key_names.values())
-    run_field_values: dict[str, str] = {}
-    parameter_values: dict[str, object] = {}
-
-    for key_name, value in strategy_configuration.items():
-        if key_name in declared_key_names:
-            continue
-
-        parameter_values[key_name] = value
-
-    for field_name, key_name in run_field_key_names.items():
-        run_field_values[field_name] = _read_text(strategy_configuration, key_name)
-
-    return run_field_values, parameter_values
-
-
-def _read_text(configuration: Mapping[str, object], key_name: str) -> str:
-    value = configuration.get(key_name)
-
-    return value if isinstance(value, str) else ""
-
-
-def _read_finite_number(
-    configuration: Mapping[str, object], key_name: str
-) -> float | None:
-    """取一个有限数值; 类型不符或非有限 (JSON 允许 `Infinity` 字面量) 时回 `None`."""
-
-    value = configuration.get(key_name)
-
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-
-    if not math.isfinite(value):
-        return None
-
-    return float(value)

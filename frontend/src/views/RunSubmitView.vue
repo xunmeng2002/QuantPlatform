@@ -19,6 +19,11 @@
  * 表单里**没有行情模式选择**: 提交侧当前只收 Bar (`run_submission.MATCH_MODE_NOT_SUBMITTABLE_MESSAGE`),
  * 给了 Tick 也只是让用户点一个必然被拒的选项.
  *
+ * **合约与 K 线周期是下拉, 不是自由文本**: 取值要拿去和行情组件对账 (合约清单来自它的库, 够不够
+ * 由它已落地的数据判定), 而填错的表现是跑得出结果、只是**静默零成交**. 选完合约后表单就地做一次
+ * 覆盖预检, 提前说清"提交后还要先下载"—— 预检只告知, 不挡提交: 真下载发生在调度器里, 这一页不碰
+ * 文件系统. 组件不在位时下拉禁用并给出原因, **不退回自由文本**.
+ *
  * 反馈分流: 提交失败是**表单自己的失败** (a 类) —— 参数不合法、标的没填, 那句话的读者正在这张表单上,
  * 所以它就地留在 `submitErrorMessage` 里, 不弹 toast. 成功才弹: 回包之后立刻跳运行详情页, 提示条会
  * 跟着这次跳转一起消失, 而 toast 挂在 body 上, 正好落在"东西真的在跑"的那一页.
@@ -30,11 +35,12 @@ import { computed, onMounted, ref } from 'vue';
 import { ElAlert, ElButton, ElDialog, ElInput, ElOption, ElSelect } from 'element-plus';
 import { RouterLink, useRouter } from 'vue-router';
 
+import { fetchMarketDataContracts, fetchMarketDataCoverage } from '../api/market-data';
 import { submitRun } from '../api/runs';
 import { createRunTemplate, fetchRunTemplates } from '../api/run-templates';
 import { fetchLastSubmittedParameters, fetchStrategyDetail } from '../api/strategies';
 import { SUBMITTABLE_MATCH_MODE } from '../api/types';
-import type { LastSubmittedParameters, MarketDataType, RunSubmitPayload, RunTemplate, StrategyDetail } from '../api/types';
+import type { LastSubmittedParameters, MarketDataContractList, MarketDataCoverage, MarketDataType, RunSubmitPayload, RunTemplate, StrategyDetail } from '../api/types';
 import EmptyNotice from '../components/EmptyNotice.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
 import PageHeader from '../components/PageHeader.vue';
@@ -43,7 +49,8 @@ import SurfaceCard from '../components/SurfaceCard.vue';
 import { describeApiFailure, showSuccessToast } from '../composables/use-feedback';
 import { parseStrategyManifest, createInitialParameterInputs, deriveParameterDescriptors, deriveParameterValues, deriveRunFieldRequirements } from '../domain/manifest';
 import type { ParameterInput, RunFieldRequirements } from '../domain/manifest';
-import { EMPTY_RUN_FIELDS, buildPrefilledRunFields, buildTemplateDraft, validateRunForm } from '../domain/run-form';
+import { buildContractCode, formatContractLabel, SUPPORTED_BAR_PERIODS } from '../domain/market-data';
+import { EMPTY_RUN_FIELDS, buildCoverageQuery, buildPrefilledRunFields, buildTemplateDraft, validateRunForm } from '../domain/run-form';
 import type { RunFieldInputs, RunFormInput, RunFormPrefill } from '../domain/run-form';
 import { formatDateTime } from '../domain/format';
 import { useStrategyCatalogStore } from '../stores/strategy-catalog';
@@ -102,6 +109,24 @@ const templateDialogErrorMessage = ref<string | null>(null);
 const isSavingTemplate = ref(false);
 
 /**
+ * 可选的合约清单. 它是**行情组件**的事实, 与本页选的策略无关, 故与策略详情分两路取: 组件不在位
+ * 只该让合约下拉框换成一句原因, 不该把整张表单挡在"加载中".
+ */
+const marketDataContracts = ref<MarketDataContractList | null>(null);
+const isLoadingContracts = ref(false);
+/** 取清单这一路自己的失败 (网络 / 鉴权). 组件不在位不走这里, 它是 200 里的一种状态. */
+const contractLoadErrorMessage = ref<string | null>(null);
+
+/** 提交前的行情预检结果. 只告知, 不挡提交. */
+const coverageNotice = ref<CoverageNotice | null>(null);
+
+const COVERAGE_NOTICE_CLASSES: Record<CoverageNoticeTone, string> = {
+  covered: 'text-xs text-emerald-600',
+  missing: 'text-xs text-amber-600',
+  unknown: 'text-xs text-slate-400',
+};
+
+/**
  * 选择切换的序号, 用来丢弃"迟到的回包".
  *
  * 快速连着换两次策略时, 第一次的请求可能后到, 于是 A 策略的详情 (与它的记忆) 落进 B 策略的表单.
@@ -150,6 +175,61 @@ const isMatchModeSupported = computed(
     manifestResult.value?.ok === true &&
     manifestResult.value.manifest.supported_match_modes.includes(MATCH_MODE),
 );
+
+/**
+ * 合约下拉框只在 manifest **两个键都声明了**映射时才出现.
+ *
+ * 只声明一个时拼不出组件主键 (`<交易所前缀>.<合约>`), 也判不了本地行情够不够, 故那一格保持原样
+ * 的自由文本 —— 这是有意的边界: 与其给一个永远选不出正确取值的下拉, 不如留一个诚实的输入框.
+ */
+const usesContractPicker = computed(
+  () =>
+    runFieldRequirements.value.exchangeId &&
+    runFieldRequirements.value.instrumentId,
+);
+
+const contracts = computed(() => marketDataContracts.value?.contracts ?? []);
+
+const isContractListAvailable = computed(
+  () => marketDataContracts.value?.available === true,
+);
+
+/**
+ * 下拉框被禁用 / 列表为空时那句原因.
+ *
+ * 两种来处合成一句: 请求本身失败 (网络、鉴权), 与后端回的"组件不在位". 对用户是同一件事 ——
+ * 现在选不了合约, 以及为什么. 空串即"没话要说".
+ */
+const contractUnavailableReason = computed(
+  () =>
+    contractLoadErrorMessage.value ??
+    (isContractListAvailable.value ? '' : marketDataContracts.value?.reason ?? ''),
+);
+
+/**
+ * 下拉框的选中值: 组件主键 (`sh.600519`).
+ *
+ * 它是一份**派生视图而不是独立状态**: 预填与模板直接写 `runFields` 里的 `exchangeId` /
+ * `instrumentId` 两格, 若这里另存一份, 两条路就会各说各话 (提示条说已套用, 下拉框却空着).
+ * 写回时同时落两格, 且拆写用后端**已经拆好**的那一份 —— 前端不解析主键.
+ */
+const selectedContractCode = computed<string>({
+  get: () =>
+    buildContractCode(runFields.value.exchangeId, runFields.value.instrumentId) ?? '',
+  set: (code) => {
+    const chosen = contracts.value.find((contract) => contract.code === code);
+
+    if (chosen === undefined) {
+      return;
+    }
+
+    runFields.value = {
+      ...runFields.value,
+      exchangeId: chosen.exchange_id,
+      instrumentId: chosen.instrument_id,
+    };
+  },
+});
 
 const parameterDerivation = computed(() =>
   deriveParameterValues(descriptors.value, parameterInputs.value),
@@ -231,6 +311,8 @@ function applyFormForCurrentSelection(): void {
     runFieldRequirements.value,
     runFields.value,
   );
+  // 套用来的取值可能整好凑齐了预检需要的五格, 那时提示条该立刻跟上, 而不是等用户再去碰一下某个框.
+  void refreshCoverageNotice();
 }
 
 /** 「重置为默认值」: 丢掉本轮套用的那份取值, 把整张表单恢复成 manifest 默认值. */
@@ -239,6 +321,7 @@ function resetToDefaults(): void {
   runFields.value = { ...EMPTY_RUN_FIELDS };
   parameterInputs.value = createInitialParameterInputs(descriptors.value);
   hasAttemptedSubmit.value = false;
+  void refreshCoverageNotice();
 }
 
 /**
@@ -475,8 +558,96 @@ async function submit(): Promise<void> {
   }
 }
 
+async function loadMarketDataContracts(): Promise<void> {
+  isLoadingContracts.value = true;
+  contractLoadErrorMessage.value = null;
+
+  try {
+    marketDataContracts.value = await fetchMarketDataContracts();
+  } catch (error) {
+    marketDataContracts.value = null;
+    contractLoadErrorMessage.value = describeApiFailure(
+      error,
+      '无法读取行情合约清单',
+    );
+  } finally {
+    isLoadingContracts.value = false;
+  }
+}
+
+/** 预检的色调. `unknown` 是"没法判" —— 组件不在位、预检请求本身失败, 都落这一档. */
+type CoverageNoticeTone = 'covered' | 'missing' | 'unknown';
+
+interface CoverageNotice {
+  tone: CoverageNoticeTone;
+  text: string;
+}
+
+/**
+ * 预检的序号, 用来丢弃"迟到的回包".
+ *
+ * 与 `selectionToken` 同一个理由: 用户连着改两格时, 前一次的回包可能后到, 于是 A 区间的结论落进
+ * B 区间的表单. 每次发起前自增并记下, 回包时若已不是最新就整份丢掉.
+ */
+let coverageToken = 0;
+
+/**
+ * 查一次"本地的行情够不够", 把结论收成表单上那句话.
+ *
+ * 表单还差字段时 `buildCoverageQuery` 回 `null`, 这时**什么也不显示** —— 提示条只在问得出来的
+ * 时候才出现. 这个动作既不挡提交也不改任何字段: 真下载发生在调度器里, 这一句只是让用户提前知道
+ * "提交之后还要等一会儿".
+ *
+ * 显式调用 (四处 `@change` 加套用取值那一处), 不用 watcher: 交易日那种自由输入框每次击键都发一次
+ * 请求, 而"填完才问"才是这里想要的时机.
+ */
+async function refreshCoverageNotice(): Promise<void> {
+  const query = buildCoverageQuery(formInput.value);
+
+  if (query === null) {
+    coverageToken += 1;
+    coverageNotice.value = null;
+
+    return;
+  }
+
+  const requestToken = ++coverageToken;
+
+  try {
+    const coverage = await fetchMarketDataCoverage(query);
+
+    if (requestToken === coverageToken) {
+      coverageNotice.value = describeCoverage(coverage);
+    }
+  } catch (error) {
+    if (requestToken === coverageToken) {
+      coverageNotice.value = {
+        tone: 'unknown',
+        text: describeApiFailure(error, '无法预检本地行情'),
+      };
+    }
+  }
+}
+
+function describeCoverage(coverage: MarketDataCoverage): CoverageNotice {
+  if (!coverage.available) {
+    return { tone: 'unknown', text: `无法预检本地行情: ${coverage.reason}` };
+  }
+
+  if (coverage.sufficient) {
+    return { tone: 'covered', text: '本地行情已覆盖该区间, 提交后不需要下载' };
+  }
+
+  return {
+    tone: 'missing',
+    text: `本地行情缺 ${coverage.missing_day_count} 个交易日, 提交后需先下载`,
+  };
+}
+
 onMounted(() => {
   void strategyCatalog.ensureLoaded();
+  // 合约清单与本页的策略选择无关, 故跟着页面走而不是跟着策略走.
+  void loadMarketDataContracts();
 });
 </script>
 
@@ -719,6 +890,7 @@ onMounted(() => {
               inputmode="numeric"
               maxlength="8"
               placeholder="20240102"
+              @change="refreshCoverageNotice"
             />
             <span
               v-if="visibleFieldErrors.start_trading_day"
@@ -738,6 +910,7 @@ onMounted(() => {
               inputmode="numeric"
               maxlength="8"
               placeholder="20241231"
+              @change="refreshCoverageNotice"
             />
             <span
               v-if="visibleFieldErrors.end_trading_day"
@@ -767,10 +940,20 @@ onMounted(() => {
 
           <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
             K 线周期 (bar_period)
-            <ElInput
+            <!-- 下拉而不是自由文本: 这个取值同时是引擎 `BarPreces` 与行情文件的周期后缀, 填一个
+                 清单外的值不会报错, 只会让回测跑出零成交. 清单见 `domain/market-data.ts`. -->
+            <ElSelect
               v-model="runFields.barPeriod"
-              type="text"
-            />
+              placeholder="请选择"
+              @change="refreshCoverageNotice"
+            >
+              <ElOption
+                v-for="barPeriod in SUPPORTED_BAR_PERIODS"
+                :key="barPeriod"
+                :label="barPeriod"
+                :value="barPeriod"
+              />
+            </ElSelect>
             <span
               v-if="visibleFieldErrors.bar_period"
               class="text-xs text-rose-600"
@@ -778,47 +961,92 @@ onMounted(() => {
             <span
               v-else
               class="text-xs text-slate-400"
-            >引擎必收该字段, 例如 1d / 5m</span>
+            >行情按周期分文件落地, 该值必须与所选合约已落地的周期一致</span>
           </label>
 
           <label
-            v-if="runFieldRequirements.exchangeId"
+            v-if="usesContractPicker"
             class="flex flex-col gap-1 text-sm font-medium text-slate-700"
           >
-            交易所 (exchange_id)
-            <ElInput
-              v-model="runFields.exchangeId"
-              type="text"
-            />
+            回测合约
+            <ElSelect
+              v-model="selectedContractCode"
+              :disabled="!isContractListAvailable"
+              :loading="isLoadingContracts"
+              filterable
+              placeholder="按代码或名称搜索"
+              @change="refreshCoverageNotice"
+            >
+              <ElOption
+                v-for="contract in contracts"
+                :key="contract.code"
+                :label="formatContractLabel(contract)"
+                :value="contract.code"
+              />
+            </ElSelect>
             <span
               v-if="visibleFieldErrors.exchange_id"
               class="text-xs text-rose-600"
             >{{ visibleFieldErrors.exchange_id }}</span>
+            <!-- 组件不在位时**不退回自由文本**: 那会让用户填出一个跑不起来、却看着正常的取值.
+                 禁用下拉 + 给出原因, 用户至少知道这一步现在做不了以及为什么. -->
+            <span
+              v-else-if="contractUnavailableReason"
+              class="text-xs text-rose-600"
+            >{{ contractUnavailableReason }}</span>
             <span
               v-else
               class="text-xs text-slate-400"
-            >该策略的 manifest 声明了这个键, 故必填</span>
+            >合约清单来自行情组件, 同时决定 exchange_id 与 instrument_id</span>
           </label>
 
-          <label
-            v-if="runFieldRequirements.instrumentId"
-            class="flex flex-col gap-1 text-sm font-medium text-slate-700"
-          >
-            合约 (instrument_id)
-            <ElInput
-              v-model="runFields.instrumentId"
-              type="text"
-            />
-            <span
-              v-if="visibleFieldErrors.instrument_id"
-              class="text-xs text-rose-600"
-            >{{ visibleFieldErrors.instrument_id }}</span>
-            <span
-              v-else
-              class="text-xs text-slate-400"
-            >该策略的 manifest 声明了这个键, 故必填</span>
-          </label>
+          <template v-else>
+            <label
+              v-if="runFieldRequirements.exchangeId"
+              class="flex flex-col gap-1 text-sm font-medium text-slate-700"
+            >
+              交易所 (exchange_id)
+              <ElInput
+                v-model="runFields.exchangeId"
+                type="text"
+              />
+              <span
+                v-if="visibleFieldErrors.exchange_id"
+                class="text-xs text-rose-600"
+              >{{ visibleFieldErrors.exchange_id }}</span>
+              <span
+                v-else
+                class="text-xs text-slate-400"
+              >该策略只声明了两个键中的一个, 拼不出合约主键, 故这一格仍是自由文本</span>
+            </label>
+
+            <label
+              v-if="runFieldRequirements.instrumentId"
+              class="flex flex-col gap-1 text-sm font-medium text-slate-700"
+            >
+              合约 (instrument_id)
+              <ElInput
+                v-model="runFields.instrumentId"
+                type="text"
+              />
+              <span
+                v-if="visibleFieldErrors.instrument_id"
+                class="text-xs text-rose-600"
+              >{{ visibleFieldErrors.instrument_id }}</span>
+              <span
+                v-else
+                class="text-xs text-slate-400"
+              >该策略只声明了两个键中的一个, 拼不出合约主键, 故这一格仍是自由文本</span>
+            </label>
+          </template>
         </div>
+
+        <p
+          v-if="coverageNotice"
+          :class="COVERAGE_NOTICE_CLASSES[coverageNotice.tone]"
+        >
+          {{ coverageNotice.text }}
+        </p>
       </SurfaceCard>
 
       <SurfaceCard
