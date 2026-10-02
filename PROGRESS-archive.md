@@ -1577,6 +1577,33 @@
   （`StrategyVersions.ConfigurationJson` 非 NULL），要验得用带旧行的库。
 - **提交状态**：`8e96685`，64 个文件（2761 增 / 3490 删——删的比加的多，去 manifest 是净减法）。
 
+## D.26 · 2026-10-01 （第二十六批） 提交页合约下拉改虚拟滚动：治「进页面点策略没反应」
+
+- **症状与诊断**：用户报「进新建回测后，选择策略那里要好久才有响应」。**不是后端**——本机实测
+  `/api/market-data/contracts` 返回 **5207 条只用 14.2 ms**（载荷 541 KB），catalog 库里就
+  1 个策略 / 1 个版本 / 1 轮运行，QuoteHub 库 39 MB 且 `MinuteBars` 有
+  `(Frequency, TradingDay)` 索引。**是前端主线程被冻住**：提交页的合约下拉用
+  `ElSelect` + `v-for` 铺那 5207 条，而 Element Plus 的 `el-select` 有个 `persistent` 属性
+  **默认为真**（`es/components/select/src/select.mjs`），tooltip 内容的渲染条件因此写成
+  `shouldRender = persistent ? true : open`（`es/components/tooltip/src/content.vue…mjs`）
+  ——**下拉内容在挂载期就渲染，根本不必被打开**。策略那一格只是用户进页面后第一件去点的事，
+  冻的是那一下。
+- **实测证据**（一次性 jsdom 探针，量完即删）：挂载时 DOM 里 0 个 `<li>`（合约还没回来）→
+  合约灌入后 **5207 个 `<li>`**，而下拉框**一次都没被打开过**；耗时 200 项 196 ms /
+  1000 项 811 ms / **5207 项 21–33 s**（jsdom 比真浏览器慢一个量级，真机估几百毫秒到两秒）；
+  此后每次无关的父级重渲染还要再付 50–90 ms。
+- **改动**：合约下拉换 `ElSelectV2`（虚拟滚动，EP 自带，**不引新依赖**、模板全量 CSS 已含它的样式），
+  选项经新增的 `domain/market-data.buildContractOptions` 映射成它要的 `{ value, label }`
+  （取值仍是组件主键 `sh.600519`，显示串仍是 `formatContractLabel` 那三段，故本地按代码 / 名称
+  子串搜索一个字没变）。另外三个下拉（策略 / 版本 / 周期）选项个数都是个位数，不动。
+- **验收证据**：前端 `type-check` 无错；`vitest` **209 项全绿**（204 → 209，新增 5 条）
+  ——`domain/market-data.spec.ts` 3 条钉映射（取值是主键、逐条不丢、空清单回空数组），
+  新增的 `views/RunSubmitView.spec.ts` 2 条**钉住形状**：挂载真页面 + 5207 条合约，
+  打开**合约那一个**下拉框（不是页面上第一个）后，落进 DOM 的选项行数 **16**（判据写成
+  `> 0 且 < 64`，不钉死 EP 的缓冲策略）；该 spec 全程 **1.11 s**，与旧形状的 21–33 s 同量级对比
+  即为本批的证据。后端**零改动**。
+- **提交状态**：见本批的提交（前端两文件 + 两个 spec）。
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型

@@ -47,18 +47,6 @@ class PlatformDatabase:
 
         self._configure_sqlite_connections()
 
-    @property
-    def engine(self) -> AsyncEngine:
-        """底层异步引擎, 供测试与运维检查连接串."""
-
-        return self._engine
-
-    @property
-    def session_factory(self) -> async_sessionmaker[AsyncSession]:
-        """会话工厂, 供不经 FastAPI 依赖的场景 (如启动期播种) 自开会话."""
-
-        return self._session_factory
-
     def _configure_sqlite_connections(self) -> None:
         """逐连接打开外键校验并设置忙等超时.
 

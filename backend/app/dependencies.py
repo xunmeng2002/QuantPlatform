@@ -22,12 +22,6 @@ def get_settings(request: Request) -> PlatformSettings:
     return request.app.state.settings
 
 
-def get_database(request: Request) -> PlatformDatabase:
-    """取装配时挂上的数据库门面."""
-
-    return request.app.state.database
-
-
 def get_scheduler(request: Request) -> RunScheduler:
     """取装配时挂上的调度器."""
 
@@ -48,8 +42,6 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
 
 
 SettingsDependency: TypeAlias = Annotated[PlatformSettings, Depends(get_settings)]
-
-DatabaseDependency: TypeAlias = Annotated[PlatformDatabase, Depends(get_database)]
 
 SessionDependency: TypeAlias = Annotated[AsyncSession, Depends(get_session)]
 

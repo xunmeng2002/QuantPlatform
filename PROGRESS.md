@@ -39,6 +39,20 @@ Python 策略**。
 
 ## ✅ 已完成
 
+### D.29 · 2026-10-02 （第二十九批） 删掉 4 个无调用点的导出符号
+
+- **触发**：用户裁定「无用的代码删了」。这 4 个符号由 2026-09-25 的审查提出、D.06 复核，
+  因 Harness §3「删公开符号须用户确认」一直留着，在 ❓ 段挂了七天。
+- **删前**重新扫了全仓 `.py` / `.md` / `.ts` / `.vue`，不采信旧记载：`get_database` 3 处
+  （自身定义 + `DatabaseDependency` + 本文件）、`DatabaseDependency` 2 处（定义 + 本文件）、
+  `PlatformDatabase.engine` 与 `PlatformDatabase.session_factory` 各 **0 处对外引用**
+  （私有字段 `_engine` / `_session_factory` 仍在用）。同族的 `SettingsDependency`（21 处）/
+  `SessionDependency`（34）/ `SchedulerDependency`（4）都在用，**保留**。
+- **落点**：`app/dependencies.py` 去掉 `get_database` 与 `DatabaseDependency`；
+  `app/catalog/database.py` 去掉 `engine` 与 `session_factory` 两个 property。
+  `get_session` 本就直接读 `request.app.state.database`、不经过 `get_database`，故不受影响。
+- **验收**：后端 `pytest` **621 项全过**（删除后跑的）。前端与行情侧零改动。
+
 ### D.28 · 2026-10-02 （第二十八批） 品牌视觉换成「薪火」火色
 
 - **触发**：用户提出「配色和图案跟 fireseeker 域名不搭」——产品名「薪火量化」与域名都指向火，
@@ -55,8 +69,11 @@ Python 策略**。
   表现是页内碎图 + 标签页图标退回上一张。
 - **语义色必须跟着挪**：原警示 `#b45309` **本身就是橙褐**，挨着新品牌色会分不清主色与警告
   → 警示换 yellow-700 `#a16207`（色相隔开 20° 以上），危险换纯红 `#b91c1c`。成功与信息不动。
-- **一处有意的不动（未决，见 ❓）**：中性体系保持冷灰——`--color-page` / `--color-line` /
-  `--color-info` 与模板里 157 处 `slate-*` 一个没动。半转暖会造出"两套灰 + 两种线深"。
+- **一处有意的不动（2026-10-02 已拍板：不转暖）**：中性体系保持冷灰——`--color-page` /
+  `--color-line` / `--color-info` 与模板里 **157 处 `slate-*`**（散在 28 个文件）一个没动。
+  只转 `page` / `line` 两档会造出"两套灰 + 两种线深"（`style.css` 那段注释点名的失效）；
+  全转暖则要扫 28 个文件并重验 `EmptyNotice.spec.ts` 里两条断言 slate 类名的用例。
+  用户看过观感后裁定：**火色只出现在品牌与语义层就够**。
 - **顺手订正**：`favicon.svg` 注释里「全仓第二处硬编码色值 = backend 的 `/docs` 主题」**已不成立**
   （后端一处也没有）；`acceptance-checklist.md` §2 / §5 / §8 三处色值描述一并改成火色。
 - **验收**：`type-check` 干净；`vitest` 首跑 208 过 + 1 条既有 flake（router 守卫超时，同归档
@@ -114,33 +131,6 @@ Python 策略**。
   [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §14**（本批按 D.27 改写，
   **走查顺序反转为先下载、后对照**，并新增 14.1 的账基线脚本与 14.4 的两条边界）。
 - **提交状态**：两个仓，见本批的提交。
-
-### D.26 · 2026-10-01 （第二十六批） 提交页合约下拉改虚拟滚动：治「进页面点策略没反应」
-
-- **症状与诊断**：用户报「进新建回测后，选择策略那里要好久才有响应」。**不是后端**——本机实测
-  `/api/market-data/contracts` 返回 **5207 条只用 14.2 ms**（载荷 541 KB），catalog 库里就
-  1 个策略 / 1 个版本 / 1 轮运行，QuoteHub 库 39 MB 且 `MinuteBars` 有
-  `(Frequency, TradingDay)` 索引。**是前端主线程被冻住**：提交页的合约下拉用
-  `ElSelect` + `v-for` 铺那 5207 条，而 Element Plus 的 `el-select` 有个 `persistent` 属性
-  **默认为真**（`es/components/select/src/select.mjs`），tooltip 内容的渲染条件因此写成
-  `shouldRender = persistent ? true : open`（`es/components/tooltip/src/content.vue…mjs`）
-  ——**下拉内容在挂载期就渲染，根本不必被打开**。策略那一格只是用户进页面后第一件去点的事，
-  冻的是那一下。
-- **实测证据**（一次性 jsdom 探针，量完即删）：挂载时 DOM 里 0 个 `<li>`（合约还没回来）→
-  合约灌入后 **5207 个 `<li>`**，而下拉框**一次都没被打开过**；耗时 200 项 196 ms /
-  1000 项 811 ms / **5207 项 21–33 s**（jsdom 比真浏览器慢一个量级，真机估几百毫秒到两秒）；
-  此后每次无关的父级重渲染还要再付 50–90 ms。
-- **改动**：合约下拉换 `ElSelectV2`（虚拟滚动，EP 自带，**不引新依赖**、模板全量 CSS 已含它的样式），
-  选项经新增的 `domain/market-data.buildContractOptions` 映射成它要的 `{ value, label }`
-  （取值仍是组件主键 `sh.600519`，显示串仍是 `formatContractLabel` 那三段，故本地按代码 / 名称
-  子串搜索一个字没变）。另外三个下拉（策略 / 版本 / 周期）选项个数都是个位数，不动。
-- **验收证据**：前端 `type-check` 无错；`vitest` **209 项全绿**（204 → 209，新增 5 条）
-  ——`domain/market-data.spec.ts` 3 条钉映射（取值是主键、逐条不丢、空清单回空数组），
-  新增的 `views/RunSubmitView.spec.ts` 2 条**钉住形状**：挂载真页面 + 5207 条合约，
-  打开**合约那一个**下拉框（不是页面上第一个）后，落进 DOM 的选项行数 **16**（判据写成
-  `> 0 且 < 64`，不钉死 EP 的缓冲策略）；该 spec 全程 **1.11 s**，与旧形状的 21–33 s 同量级对比
-  即为本批的证据。后端**零改动**。
-- **提交状态**：见本批的提交（前端两文件 + 两个 spec）。
 
 ### D.25 · 2026-10-01 （第二十五批） 摘掉 manifest：策略配置 JSON 即表单模板，并解绑数据源周期
 
@@ -314,11 +304,6 @@ Python 策略**。
 
 ## ❓ 待讨论 / 待决策
 
-- **中性色要不要跟着转暖**（2026-10-02，D.28 引出）：品牌色换成余烬橙之后，中性体系仍是冷灰
-  ——`--color-page` / `--color-line` 与模板里 **157 处 `slate-*`** 类名（散在 28 个文件）一个没动。
-  只转 `page` / `line` 两档会造出"两套灰 + 两种线深"，正是 `style.css` 那段注释点名的失效；
-  全转暖则要扫 28 个文件，并重验 `EmptyNotice.spec.ts` 里两条断言 slate 类名的用例。
-  **未决**：火色只出现在品牌与语义层就够，还是把中性也扫一遍。**先看现方案的观感再定**。
 - **Tick 模式的三档撮合语义未定**（2026-09-25，D.06 引入，半关闭；
   **表单侧已定部分见归档 `Q.06`**）：引擎侧 tick 撮合有 `OrderBook:0` /
   `LastPrice:1` / `OppositePrice:2` 三档，`SimExchange.cpp` 按"是不是 Bar"
@@ -346,16 +331,14 @@ Python 策略**。
   这句话对磁盘仍不成立。（同一条闸上另有一个**更便宜**的绕过——尾随空白让
   `isdigit()` 为假——已修掉。两者不是一回事：那个是判断错误，这个是协议
   本身不带头。）
-- **4 个无调用点的导出符号，删还是留**（2026-09-25 审查提出，D.06 复核）：
-  `get_database` + `DatabaseDependency`、`PlatformDatabase.engine`、
-  `PlatformDatabase.session_factory`（两处公开属性都只被自己的私有字段顶着用，
-  外部只走 `session_scope()`）。原列的另三处
-  （`build_owned_strategy_query`、`load_owned_strategy`、`InvalidRequestError`）
-  在 P2 已全部用上；`TERMINAL_RUN_STATUSES` 也在 P3 被 `routers/runs.py` 用上。
-  余下这三组更像重构残留。按 Harness §3，删公开符号须用户确认，故**未动**。
-- **登录失败无节流**（2026-09-25 审查提出）：同一用户名可无限次快速尝试。
-  PBKDF2 的 260k 迭代只起减速作用。若要加，需定阈值与锁定时长
-  （单机部署，进程内计数即可，不必上 Redis）。
+- **登录失败无节流**（2026-09-25 审查提出；**2026-10-02 四条已拍板，待实施**）：
+  同一用户名可无限次快速尝试，PBKDF2 的 260k 迭代只起减速作用，不阻止无限次慢速尝试。
+  **已定**：① 计数放**进程内存**——单实例是调度器的硬前提（`platform-plan.md` §11.11），
+  故不存在"多 worker 各记一份、阈值被放大 N 倍"的问题，零新表零清理；② 形态取**连续失败
+  N 次 → 锁定 T 分钟**；③ 阈值 **5 次 → 锁 15 分钟**；④ 按**用户名 + 来源 IP 各自计数**。
+  **上云前必须落地**（用户 2026-10-02 原话：「现在就考虑吧，后面就要上云了」）。
+  实施时要一并处理：上云后有反向代理，取客户端 IP 须认 `X-Forwarded-For`，且**只在代理
+  可信时才不可伪造**——按"从右数第 N 跳"取，不能直接信最左那一项。
 - **上云前要由用户给出 clean 的引擎发布包**（2026-09-27，D.19 引出）：用户原话是
   「B的话，等后面上云前我会给出来的」。平台侧**不做引擎包管理**（理由见
   `platform-plan.md` §12.23），故"哪一版引擎干净、可发布"这个判断留在引擎仓。
