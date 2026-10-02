@@ -1604,6 +1604,63 @@
   即为本批的证据。后端**零改动**。
 - **提交状态**：见本批的提交（前端两文件 + 两个 spec）。
 
+## D.27 · 2026-10-02 （第二十七批） 行情判据改看「已问区间」的账，下载窗口按年对齐
+
+- **触发**：用户纠了两处。① **「按年取也是增量的」**——我一度把「按年对齐」读成「每次重取用户整个
+  区间」，据此算出十几倍放大，用户否掉：库里已有 2024–2026、要 2022–2025 时只该取 2022–2023。
+  ② **旧判据的毛病**——它拿 `MinuteBars` 当覆盖集，而停牌日上游根本不返回数据，那个缺口**永远补
+  不上**，于是每次提交都重下一遍，永不收敛。
+- **五条用户拍板（不再重议）**：① 按年对齐 ≠ 重取整段，只取缺的那几年；② 组件侧要有一张**台账**，
+  记已成功查询的 bar 日区间；③ **记区间不记逐日**（`20230101`–`20261001` 两列即可）——按年对齐后
+  起始年份总从 1 月 1 日起，只有结束年份可能未闭合；④ **只看 span，不做 span ∪ `MinuteBars` 的
+  并集**（原话：「为了这点数据量专门实现逻辑不值得」）——失败方向是多取一次，可自愈；⑤「开工吧」。
+- **落点（两个仓）**。组件 `../QuoteHub`：新增 `sql/upgrades/Update_v2.3.0.sql` 的 `QueriedBarSpans`
+  （主键 `(Code, Frequency, StartDay)`），`BaoStockParquet.py` 加 `upsert_queried_bar_span` /
+  `merge_day_spans` / `_spans_are_contiguous` / `DAY_SPAN_ADJACENCY_DAYS`（=1，首尾相接也并成一
+  段），`ingest_stock` 在 `commit()` 前写账——**两路查询都成功才写**，失败即抛，账上只留上游真正
+  答过的段。平台：`quote_hub.py` 从 `_assert_expected_schema` 拆出 `_read_table_columns` 并新增
+  `OPTIONAL_SCHEMA_COLUMNS`（表可不在，在就必须列齐），`CoverageFacts.covered_days` 换成
+  `asked_days` + `has_bars`，新增 `_read_queried_day_spans` / `_is_day_within_queried_spans`；
+  `market_data_coverage.py` 判据整体重写；`market_data_preparation.py` 的 `_resolve_download_window`
+  改为按年对齐 + 掐日历末日（`None` 表示无处可问）；`routers/market_data.py` 一处漏改的调用点。
+- **顺手修掉一个组件缺陷**（读代码发现，非用户提出）：`BaoStock._collect_rows` 的 `while
+  error_code == "0"` 在分页中途失败时**静默返回部分行**，而 `query_minute_bars` 只在收集**之前**
+  检查一次错误码。只按 span 记覆盖之后，这种截断会被记成"问全了"，那个洞再也补不上。新增
+  `collect_rows_or_raise` 在收集**之后**复查，两个 `query_*` 改走它；`BaoStock.py` 里另外 18 个
+  `_collect_rows` 调用点不动（不在本批范围，且它们不写账）。
+- **一处越出原始设计的收紧（报备）**：`CoverageVerdict.sufficient` 加了 `and has_bars`。不加的话，
+  同一批事实会在**下载前**判"够"、**下载后**判"不够"（`decide_after_refresh` 本就先问 bar），于是
+  退市或整段停牌的合约被放行到引擎，报错退化成装载期的 `ErrorMarketDataNotExist`——那正是
+  `has_bars` 存在的理由。停牌日不受影响：它问的是"区间内有没有**至少一根** bar"。
+- **有意的降级方向**：账表不在（组件还没升级）或未记过账时，判"一段都没问过"→ 每次都取。故
+  **D.27 之后的第一轮会为传进去的每只合约各重取一次**，写过账即收敛。多取只是慢，少取才是错。
+- **审查（`code-reviewer`）逮到一处同类缺陷，已修**：`_resolve_download_window` 回 `None` 的那一
+  支——就是"没有可问的区间了"——**只看组件日历、不看 `has_bars`**，于是"日历够不着但区间内确有
+  bar"会被判成"该合约在所请求区间内没有行情数据"并**当场失败**。这与上面 `sufficient` 那处是同一个
+  毛病：日历没覆盖 ≠ 没有数据。`TradeDates` 由组件自己的交易日同步维护，**不在平台会跑的那几条
+  命令上**，所以"bar 已入库、日历还停在更早的日期"现实可达。
+  修法是让 `None` 也走同一张判定表（`_finish_after_refresh`，从原来的收口尾部抽出来，两处共用）：
+  有 bar 就放行，一根都没有才给那句话。顺带把 `missing_days` 为空的**两种由来**分开——"账已盖住整段
+  而零 bar"（退市/整段停牌）问上游是同一个答案，改判**无可问**，不再白跑一轮整所 `backfill`；那本是
+  每提交一次重演一次的成本。
+- **了结 D.24 的两条欠账**：「含停牌日的区间会重复下载」→ 就是这批的账；「下载窗口取缺失日的
+  最小 ~ 最大」→ 改按年对齐（见下方 D.24 条与 §14）。
+- **验收证据**：后端 **621 项全过**（D.25 记的是 605）。两个主测文件共 **60 条**——覆盖判据
+  `test_market_data_coverage.py` 35 条、下载 `test_market_data_download.py` 25 条；过程中修掉自己
+  写错的三处期望、一处空洞断言（`... or True`，改成真判 `_bar_days(...)`）与两条重复的 `--start` /
+  `--end` 断言（窗口那三条归窗口用例，全集用例只管 `--codes`）。前端 `type-check` 无错 + `vitest`
+  **209 项全绿**（本批未触碰前端，跑一遍确认）。组件侧**无自动化测试**，`merge_day_spans` 用独立脚本
+  穷举 8 例（相邻年份 / 单日空洞 / 重叠 / 未排序 / 被包含 / 重复 / 空 / 单元素）验证通过。
+- **仍未决 —— 待用户手工验收**：真组件 + 联网的端到端，**清单见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §14**（本批按 D.27 改写，
+  **走查顺序反转为先下载、后对照**，并新增 14.1 的账基线脚本与 14.4 的两条边界）。
+- **提交状态**：两个仓，见本批的提交。
+
+---
+
+> 归档于 2026-10-02（第三十批写完后，主文件超 50 KB 上限；**短版留在 `PROGRESS.md`**，
+> 含仍未决的手工验收 §14 与 D.24 那笔 3600 秒超时欠账）。原文一字未改。
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型

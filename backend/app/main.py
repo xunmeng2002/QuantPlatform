@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy.exc import SQLAlchemyError
 import uvicorn
 
+from .auth.login_throttle import LoginAttemptThrottle
 from .bootstrap import ensure_initial_admin
 from .catalog.database import PlatformDatabase
 from .config import PlatformSettings, resolve_platform_settings
@@ -307,6 +308,9 @@ def create_application(settings: PlatformSettings | None = None) -> FastAPI:
         database,
         retention_sweep=_build_retention_sweep(database, resolved_settings),
     )
+    # 节流计数挂在**应用实例**上而不是模块全局: 每个应用一份, 测试之间天然互不串味, 也不必
+    # 在夹具里手工重置. 与调度器同理, 它在装配期就建好, 端点经依赖取它.
+    application.state.login_throttle = LoginAttemptThrottle(resolved_settings)
 
     _register_exception_handlers(application)
     _register_request_size_guard(application)

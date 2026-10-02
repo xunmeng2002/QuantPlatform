@@ -11,6 +11,7 @@ from typing import Annotated, TypeAlias
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .auth.login_throttle import LoginAttemptThrottle
 from .catalog.database import PlatformDatabase
 from .config import PlatformSettings
 from .scheduler.scheduler import RunScheduler
@@ -26,6 +27,12 @@ def get_scheduler(request: Request) -> RunScheduler:
     """取装配时挂上的调度器."""
 
     return request.app.state.scheduler
+
+
+def get_login_throttle(request: Request) -> LoginAttemptThrottle:
+    """取装配时挂上的登录节流器."""
+
+    return request.app.state.login_throttle
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
@@ -46,3 +53,7 @@ SettingsDependency: TypeAlias = Annotated[PlatformSettings, Depends(get_settings
 SessionDependency: TypeAlias = Annotated[AsyncSession, Depends(get_session)]
 
 SchedulerDependency: TypeAlias = Annotated[RunScheduler, Depends(get_scheduler)]
+
+LoginThrottleDependency: TypeAlias = Annotated[
+    LoginAttemptThrottle, Depends(get_login_throttle)
+]

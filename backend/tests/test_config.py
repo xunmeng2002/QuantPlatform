@@ -15,6 +15,8 @@ import pytest
 from app.config import (
     DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES,
     DEFAULT_HTTP_PORT,
+    DEFAULT_LOGIN_THROTTLE_LOCK_MINUTES,
+    DEFAULT_LOGIN_THROTTLE_MAXIMUM_FAILURES,
     DEFAULT_RETAINED_RUNS_PER_USER,
     DEFAULT_RUN_RETENTION_ENABLED,
     MAXIMUM_PORT,
@@ -221,6 +223,10 @@ def test_valid_settings_are_accepted() -> None:
     # 保留策略默认关, 且默认值本身合法: 不显式配置时升级行为与升级前一致.
     assert settings.run_retention_enabled is DEFAULT_RUN_RETENTION_ENABLED
     assert settings.retained_runs_per_user == DEFAULT_RETAINED_RUNS_PER_USER
+    # 节流默认开着 (上云后是安全底线), 白名单默认为空 (谁都不信, 只用对端地址).
+    assert settings.login_throttle_maximum_failures == DEFAULT_LOGIN_THROTTLE_MAXIMUM_FAILURES
+    assert settings.login_throttle_lock_minutes == DEFAULT_LOGIN_THROTTLE_LOCK_MINUTES
+    assert settings.trusted_proxy_addresses == ()
 
 
 @pytest.mark.parametrize(
@@ -237,9 +243,17 @@ def test_valid_settings_are_accepted() -> None:
         # 保留 0 轮 = 一个不留, 而算法读到的正是这个数; 想不留就关掉保留策略.
         {"retained_runs_per_user": 0},
         {"retained_runs_per_user": -3},
+        # 锁定 0 分钟等于没锁, 而现象是"配了节流却没生效"; 想关掉就把失败次数调大.
+        {"login_throttle_maximum_failures": 0},
+        {"login_throttle_maximum_failures": -2},
+        {"login_throttle_lock_minutes": 0},
+        {"login_throttle_lock_minutes": -1},
+        # 白名单里的错别字必须当场报错: 静默跳过会让它形同不存在, 症状是"全站共用一个来源桶".
+        {"trusted_proxy_addresses": ("not-a-network",)},
+        {"trusted_proxy_addresses": ("127.0.0.1", "300.1.1.1")},
     ],
 )
-def test_out_of_range_settings_are_rejected(overrides: dict[str, int]) -> None:
+def test_out_of_range_settings_are_rejected(overrides: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         _build_settings(**overrides)
 
@@ -325,6 +339,9 @@ def test_from_environment_applies_documented_defaults(
         "QUANT_MAXIMUM_OUTPUT_TAIL_BYTES",
         "QUANT_RUN_RETENTION_ENABLED",
         "QUANT_RETAINED_RUNS_PER_USER",
+        "QUANT_LOGIN_THROTTLE_MAXIMUM_FAILURES",
+        "QUANT_LOGIN_THROTTLE_LOCK_MINUTES",
+        "QUANT_TRUSTED_PROXY_ADDRESSES",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -339,6 +356,36 @@ def test_from_environment_applies_documented_defaults(
     assert "\\" not in settings.database_url
     assert settings.run_retention_enabled is False
     assert settings.retained_runs_per_user == DEFAULT_RETAINED_RUNS_PER_USER
+    assert settings.login_throttle_maximum_failures == DEFAULT_LOGIN_THROTTLE_MAXIMUM_FAILURES
+    assert settings.login_throttle_lock_minutes == DEFAULT_LOGIN_THROTTLE_LOCK_MINUTES
+    assert settings.trusted_proxy_addresses == ()
+
+
+def test_from_environment_reads_the_login_throttle_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """三个节流项都要真的从环境里读出来.
+
+    白名单那一项是逗号分隔的地址表, 空串与只有空白/逗号的取值都要收成空表——把空串切成
+    `("",)` 会让 `ip_network("")` 在构造配置时直接抛, 后端起不来.
+    """
+
+    monkeypatch.setenv(JWT_SECRET_ENVIRONMENT_NAME, "from-environment-key")
+    monkeypatch.setenv("QUANT_LOGIN_THROTTLE_MAXIMUM_FAILURES", "3")
+    monkeypatch.setenv("QUANT_LOGIN_THROTTLE_LOCK_MINUTES", "2")
+    monkeypatch.setenv(
+        "QUANT_TRUSTED_PROXY_ADDRESSES", " 127.0.0.1 , 10.0.0.0/8 , "
+    )
+
+    settings = PlatformSettings.from_environment()
+
+    assert settings.login_throttle_maximum_failures == 3
+    assert settings.login_throttle_lock_minutes == 2
+    assert settings.trusted_proxy_addresses == ("127.0.0.1", "10.0.0.0/8")
+
+    monkeypatch.setenv("QUANT_TRUSTED_PROXY_ADDRESSES", "   ")
+
+    assert PlatformSettings.from_environment().trusted_proxy_addresses == ()
 
 
 def test_from_environment_reads_integer_overrides(

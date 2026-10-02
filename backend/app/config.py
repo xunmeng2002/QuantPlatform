@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import re
@@ -80,6 +81,12 @@ MAXIMUM_MARKET_DATA_CODES = 3000
 # 准备行情的独立时限. 它**不**与 run_timeout_seconds 共用: 后者是回测预算, 让下载吃掉它会把
 # "下载太久"记成"策略跑超时", 两者对用户的指向完全不同.
 DEFAULT_MARKET_DATA_PREPARE_TIMEOUT_SECONDS = 3600
+
+# 登录失败节流: 同一用户名或同一来源地址连续失败这个次数, 就锁住下面这么久.
+# 阈值给 5 而不是更小, 是为了不误伤"手滑打错两次"的正常用户; 锁 15 分钟而不是更长, 是因为
+# 这个锁定对**知道用户名的人**是可定向触发的 (连续故意失败即可), 锁越久越容易被拿来当拒绝服务用.
+DEFAULT_LOGIN_THROTTLE_MAXIMUM_FAILURES = 5
+DEFAULT_LOGIN_THROTTLE_LOCK_MINUTES = 15
 
 # 本地环境文件: 固定的几个 QUANT_* 取值写在里面, 免得每次启动都在命令行上带一串.
 # 该文件名已被仓根 .gitignore 覆盖 (`.env`), 口令类取值因此不入库.
@@ -282,6 +289,9 @@ class PlatformSettings:
     retained_runs_per_user: int = DEFAULT_RETAINED_RUNS_PER_USER
     quote_hub_root: Path = DEFAULT_QUOTE_HUB_ROOT
     market_data_prepare_timeout_seconds: int = DEFAULT_MARKET_DATA_PREPARE_TIMEOUT_SECONDS
+    login_throttle_maximum_failures: int = DEFAULT_LOGIN_THROTTLE_MAXIMUM_FAILURES
+    login_throttle_lock_minutes: int = DEFAULT_LOGIN_THROTTLE_LOCK_MINUTES
+    trusted_proxy_addresses: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """校验数值项与路径项, 避免并发闸门为 0 时永久阻塞、超时为 0 时秒杀作业."""
@@ -324,6 +334,24 @@ class PlatformSettings:
         ):
             if not getattr(self, field_name).is_absolute():
                 raise ValueError(f"{field_name} 需为绝对路径")
+
+        if self.login_throttle_maximum_failures < 1:
+            raise ValueError("login_throttle_maximum_failures 需 >= 1")
+
+        # 0 分钟的锁等于没锁, 而现象是"配置了节流却没生效", 最难查——故收严而不是允许关掉.
+        # 想关掉节流就把最大失败次数调得极大, 不另设一个开关项.
+        if self.login_throttle_lock_minutes < 1:
+            raise ValueError("login_throttle_lock_minutes 需 >= 1")
+
+        # 只校验能不能解析 (空表是合法的, 表示不经过任何反向代理). 不在这里做静默跳过: 一个错别字
+        # 会让白名单形同不存在, 症状是"全站用户挤进同一个桶", 而原因藏在一行看起来配好了的变量里.
+        for trusted_address in self.trusted_proxy_addresses:
+            try:
+                ipaddress.ip_network(trusted_address, strict=False)
+            except ValueError:
+                raise ValueError(
+                    f"trusted_proxy_addresses 含无法解析的地址: {trusted_address!r}"
+                ) from None
 
     @classmethod
     def from_environment(cls) -> PlatformSettings:
@@ -387,6 +415,18 @@ class PlatformSettings:
             market_data_prepare_timeout_seconds=read_integer_environment(
                 "QUANT_MARKET_DATA_PREPARE_TIMEOUT_SECONDS",
                 DEFAULT_MARKET_DATA_PREPARE_TIMEOUT_SECONDS,
+            ),
+            login_throttle_maximum_failures=read_integer_environment(
+                "QUANT_LOGIN_THROTTLE_MAXIMUM_FAILURES",
+                DEFAULT_LOGIN_THROTTLE_MAXIMUM_FAILURES,
+            ),
+            login_throttle_lock_minutes=read_integer_environment(
+                "QUANT_LOGIN_THROTTLE_LOCK_MINUTES", DEFAULT_LOGIN_THROTTLE_LOCK_MINUTES
+            ),
+            trusted_proxy_addresses=tuple(
+                entry.strip()
+                for entry in os.getenv("QUANT_TRUSTED_PROXY_ADDRESSES", "").split(",")
+                if entry.strip()
             ),
         )
 
