@@ -29,13 +29,23 @@
   --color-page: #f8fafc;
   --color-surface: #ffffff;
   --color-line: #e2e8f0;
-  --color-brand: #1d4ed8;
-  --color-brand-strong: #1e40af;
+  /* 品牌色是"余烬橙": 产品名「薪火量化」与域名 fireseeker 都指向火, 而这支此前是蓝的 —— 蓝说的是
+     "金融后台", 与火无关. 取 orange-700 而不是更亮的 500/600: `text-brand` 在十几处当链接字色用,
+     白底上要过 AA, 浅橙做不到. */
+  --color-brand: #c2410c;
+  --color-brand-strong: #9a3412;
   /* 语义色取 StatusBadge 一直在用的那几档文字色 (-700). 换用 el-tag 之后, 标签文字与底色
-     这一对的对比度与换库前大致相同 —— EP 出厂那种偏亮的中色配浅底只有 2.0-2.6:1. */
+     这一对的对比度与换库前大致相同 —— EP 出厂那种偏亮的中色配浅底只有 2.0-2.6:1.
+
+     警示与危险**必须**跟着品牌色一起挪: 原警示 #b45309 本身就是橙褐, 挨着新品牌色会让人分不清
+     "这是主色还是警告"; 危险从玫红 (#be123c) 换成纯红, 与暖橙拉开. 警示取更黄的 yellow-700 而不是
+     邻居 amber-700, 正是要把两支的色相隔开到 20° 以上.
+
+     成功与信息原样不动. 信息尤其不能动 —— 中性体系没有跟着转暖 (模板里 157 处 slate-* 类名),
+     它一转就成了两套灰. */
   --color-success: #047857;
-  --color-warning: #b45309;
-  --color-danger: #be123c;
+  --color-warning: #a16207;
+  --color-danger: #b91c1c;
   --color-info: #334155;
 }
 
