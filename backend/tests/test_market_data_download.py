@@ -17,6 +17,12 @@ import pytest
 
 from app.config import MARKET_DATA_PRECISION_FREQUENCY, PlatformSettings
 from app.services import quote_hub
+from app.services.market_data_coverage import (
+    CoverageVerdict,
+    RefreshDecision,
+    decide_after_refresh,
+    judge_coverage,
+)
 from app.services.market_data_preparation import (
     MARKET_DATA_COMPONENT_MISSING_MESSAGE,
     MARKET_DATA_COMPONENT_START_FAILED_MESSAGE,
@@ -28,6 +34,7 @@ from app.services.market_data_preparation import (
     MarketDataPrepared,
     MarketDataRequest,
     MarketDataUnavailableError,
+    _resolve_download_window,
     _run_download,
     ensure_market_data_available,
 )
@@ -57,6 +64,10 @@ WINDOW_END_DAY = "20240105"
 
 OTHER_INGESTED_CONTRACT_CODE = "sz.000001"
 NEW_CONTRACT_CODE = "sz.300750"
+
+#: 一个"账上问过、但一根 bar 都没有"的区间 —— 退市或整段停牌的合约就长这样. 只用在这里的纯函数
+#: 用例上, 不灌进桩库 (桩库描述的是现实中可达的形态, 而这一个要靠组件的账特意造出来).
+ALREADY_ANSWERED_DAYS = ("2024-01-01", "2024-01-02")
 
 TEST_PREPARE_TIMEOUT_SECONDS = 30
 TEST_SHORT_PREPARE_TIMEOUT_SECONDS = 1
@@ -204,8 +215,6 @@ async def test_missing_coverage_downloads_the_whole_universe(
 
     assert recorded_options["--frequency"] == DEFAULT_FREQUENCY
     assert recorded_options["--output-root"] == str(settings.market_data_root)
-    assert recorded_options["--start"] == "2024-01-02"
-    assert recorded_options["--end"] == "2024-01-05"
     # 全集 = 库里下过的 ∪ 本次选中的. 漏掉任何一边, 那个合约都会被从年度文件里**静默挤掉**.
     assert recorded_options["--codes"].split(",") == sorted(
         [DEFAULT_CONTRACT_CODE, OTHER_INGESTED_CONTRACT_CODE]
@@ -238,10 +247,14 @@ async def test_a_contract_never_downloaded_before_joins_the_universe(
     )
 
 
-async def test_the_download_window_starts_at_the_first_missing_day(
+async def test_the_download_window_is_aligned_to_the_years_it_touches(
     tmp_path: Path, download_component: Path
 ) -> None:
-    """区间取**缺失日的最小~最大**而不是用户请求的全区间 —— 这是唯一的成本闸."""
+    """两端向外对齐到年份边界 —— 组件的年度文件按年整份导出, 取半份就留一个补不上的空洞.
+
+    缺失段只落在 2024 年内, 故起点回到该年 1 月 1 日; 末端对齐出的 12-31 被组件日历末日
+    (桩日历到 2024-01-05) 掐回, 免得把**未来**的日子记进账里.
+    """
 
     enable_bar_ingestion(download_component)
     settings = _build_settings(tmp_path, download_component)
@@ -257,8 +270,128 @@ async def test_the_download_window_starts_at_the_first_missing_day(
         zip(recorded_arguments[1::2], recorded_arguments[2::2])
     )
 
-    assert recorded_options["--start"] == "2024-01-02"
+    assert recorded_options["--start"] == "2024-01-01"
     assert recorded_options["--end"] == "2024-01-05"
+
+
+def _window_verdict(missing_days: tuple[str, ...]) -> CoverageVerdict:
+    """一个只够驱动窗口计算的判定. 窗口只看缺失日的两端与日历末日, 其余字段不参与."""
+
+    return CoverageVerdict(
+        expected_days=missing_days,
+        asked_days=(),
+        missing_days=missing_days,
+        has_bars=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("missing_days", "calendar_last_day", "expected_window"),
+    [
+        # 缺失只落在一年内: 两端都对齐, 整年一份.
+        (("2024-06-15",), "2026-09-09", ("2024-01-01", "2024-12-31")),
+        # 跨年: 起点回到第一年年初, 末端推到最后一年的年末 —— 中间整年也被一并取全.
+        (
+            ("2024-11-01", "2025-03-20"),
+            "2026-09-09",
+            ("2024-01-01", "2025-12-31"),
+        ),
+        # 末端对齐出的 12-31 在那个年份尚未走完时是**未来**, 必须掐回组件日历末日.
+        (("2026-03-01",), "2026-09-09", ("2026-01-01", "2026-09-09")),
+        # 日历一天交易日都没有 (`None`) 时无从可比, 不掐.
+        (("2024-06-15",), None, ("2024-01-01", "2024-12-31")),
+    ],
+)
+def test_the_download_window_covers_whole_years(
+    missing_days: tuple[str, ...],
+    calendar_last_day: str | None,
+    expected_window: tuple[str, str],
+) -> None:
+    """窗口规则本身 —— 穷举的代价只有几十毫秒, 而起错一次就是同一批数据反复重下."""
+
+    window = _resolve_download_window(
+        _window_verdict(missing_days), "2024-06-01", "2024-06-30", calendar_last_day
+    )
+
+    assert window == expected_window
+
+
+def test_a_range_entirely_beyond_the_calendar_has_nothing_to_ask_for() -> None:
+    """日历算不出应有交易日 (区间落在日历之外) 且整段都在末日之后: 没有可问的区间.
+
+    这一支**不能**退化成"照请求原样试一次": 组件那边一行也不会有, 白起一个子进程.
+    """
+
+    window = _resolve_download_window(
+        _window_verdict(()), "2027-01-01", "2027-06-30", "2026-09-09"
+    )
+
+    assert window is None
+
+
+def test_a_range_already_answered_with_no_bars_has_nothing_to_ask_for() -> None:
+    """**账已盖住整段、区间内却一根 bar 都没有**: 再问上游是同一个答案, 没有可问的区间.
+
+    组件对传进去的区间整段重取, 而这段正是账上记着"问过、上游没给"的那段 —— 问不出新东西来.
+    退市或整段停牌的合约正是这样. 若这一支照旧去下载, 每提交一次就白跑一轮整所 backfill, 而且
+    因为注定以失败收场, 下一次提交会原样重演.
+    """
+
+    verdict = judge_coverage(
+        list(ALREADY_ANSWERED_DAYS), list(ALREADY_ANSWERED_DAYS), has_bars=False
+    )
+
+    window = _resolve_download_window(
+        verdict, "2024-01-01", "2024-01-02", "2024-12-31"
+    )
+
+    assert window is None
+
+
+def test_a_range_beyond_the_calendar_with_bars_is_not_called_empty() -> None:
+    """日历够不着那段、但区间内**确有 bar**: 那不是"没有行情", 不能判死.
+
+    `TradeDates` 由组件自己的交易日同步维护, 不在平台会跑的那几条命令上, 故"bar 已入库、日历
+    还停在更早的日期"是现实可达的状态. 判死与否只能由 `has_bars` 回答, 不能由日历回答.
+    """
+
+    beyond_calendar = judge_coverage([], [], has_bars=True)
+
+    assert _resolve_download_window(
+        beyond_calendar, "2027-01-01", "2027-06-30", "2026-09-09"
+    ) is None
+    assert decide_after_refresh(beyond_calendar) is RefreshDecision.PROCEED
+
+
+def test_a_range_straddling_the_calendar_end_is_clamped_rather_than_dropped() -> None:
+    """同一支的另一半: 只要还有一天落在日历之内, 就该问那一段, 而不是整个放弃."""
+
+    window = _resolve_download_window(
+        _window_verdict(()), "2026-08-01", "2027-06-30", "2026-09-09"
+    )
+
+    assert window == ("2026-08-01", "2026-09-09")
+
+
+async def test_a_range_beyond_the_calendar_still_reports_no_market_data(
+    tmp_path: Path, download_component: Path
+) -> None:
+    """无处可问时**一个子进程都不起**, 直接给"区间内没有行情" —— 与空跑一轮的收场同一句话."""
+
+    enable_bar_ingestion(download_component)
+    settings = _build_settings(tmp_path, download_component)
+
+    with pytest.raises(MarketDataUnavailableError) as failure:
+        await ensure_market_data_available(
+            settings,
+            _build_request(
+                start_trading_day="20270101", end_trading_day="20270630"
+            ),
+            asyncio.Event(),
+        )
+
+    assert failure.value.message == MARKET_DATA_STILL_INSUFFICIENT_MESSAGE
+    assert count_starts(download_component) == 0
 
 
 async def test_a_login_failure_points_at_credentials(

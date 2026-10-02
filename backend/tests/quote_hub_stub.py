@@ -104,6 +104,11 @@ if ingest_file.is_file():
                 for day in trading_days
             ],
         )
+        connection.execute(
+            "INSERT OR REPLACE INTO QueriedBarSpans (Code, Frequency, StartDay, EndDay)"
+            " VALUES (?, ?, ?, ?)",
+            (code, options["--frequency"], options["--start"], options["--end"]),
+        )
 
     connection.commit()
     connection.close()
@@ -227,6 +232,15 @@ def write_catalog_database(
             PRIMARY KEY ({quote_hub.CONTRACT_CODE_COLUMN},
                          {quote_hub.BAR_FREQUENCY_COLUMN}, Time)
         );
+        CREATE TABLE {quote_hub.QUERIED_BAR_SPANS_TABLE_NAME} (
+            {quote_hub.CONTRACT_CODE_COLUMN} TEXT,
+            {quote_hub.BAR_FREQUENCY_COLUMN} TEXT,
+            {quote_hub.QUERIED_SPAN_START_COLUMN} TEXT,
+            {quote_hub.QUERIED_SPAN_END_COLUMN} TEXT,
+            PRIMARY KEY ({quote_hub.CONTRACT_CODE_COLUMN},
+                         {quote_hub.BAR_FREQUENCY_COLUMN},
+                         {quote_hub.QUERIED_SPAN_START_COLUMN})
+        );
         """
     )
 
@@ -254,6 +268,21 @@ def write_catalog_database(
                 for day in calendar_days
             ],
         )
+
+        if calendar_days:
+            # 有 bar 就说明当时问过, 故账与 bar 一起灌。少了它, 桩库描述的是一个现实中不存在的
+            # 状态 (数据在、却没问过), 判据会退化成"每次都取", 那些"够用则零子进程"的用例
+            # 就不再测它们宣称要测的东西了。
+            connection.executemany(
+                f"INSERT INTO {quote_hub.QUERIED_BAR_SPANS_TABLE_NAME}"
+                f" ({quote_hub.CONTRACT_CODE_COLUMN}, {quote_hub.BAR_FREQUENCY_COLUMN},"
+                f" {quote_hub.QUERIED_SPAN_START_COLUMN},"
+                f" {quote_hub.QUERIED_SPAN_END_COLUMN}) VALUES (?, ?, ?, ?)",
+                [
+                    (code, frequency, min(calendar_days), max(calendar_days))
+                    for code in codes
+                ],
+            )
 
     connection.commit()
     connection.close()

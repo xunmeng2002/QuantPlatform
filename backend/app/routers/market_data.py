@@ -112,9 +112,13 @@ async def read_coverage_handler(
 ) -> MarketDataCoverageResponse:
     """这一轮要不要先下载. 组件不在位或参数拼不出合约时回 `available=false`, 不阻断提交.
 
-    **不问用户在提交页选的订阅周期**: 覆盖判据问的是"这份落盘数据在不在", 而落盘精度是平台常量
+    **不问用户在提交页选的订阅周期**: 覆盖判据问的是"这段问过上游没有", 而落盘精度是平台常量
     (`MARKET_DATA_PRECISION_FREQUENCY`). 收下那个周期只会让判据看起来依赖它——而用户的周期与
     "数据在不在"毫无关系, 这份依赖一旦写进签名, 早晚有人照着它去改判据.
+
+    这里只报"缺几天", 不做刷新后的收口: 那个收口 (`decide_after_refresh`) 要的是刷新**之后**的
+    事实, 而本端点是不碰文件系统的只读预检. 两者判的也不是同一件事——预检说"要不要下载", 收口说
+    "下完了能不能放行".
     """
 
     contract_code = quote_hub.build_contract_code(exchange_id, instrument_id)
@@ -140,7 +144,7 @@ async def read_coverage_handler(
             available=False, reason=COMPONENT_UNAVAILABLE_REASON
         )
 
-    verdict = judge_coverage(facts.expected_days, facts.covered_days)
+    verdict = judge_coverage(facts.expected_days, facts.asked_days, facts.has_bars)
 
     return MarketDataCoverageResponse(
         available=True,

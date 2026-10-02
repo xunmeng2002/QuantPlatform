@@ -39,6 +39,58 @@ Python 策略**。
 
 ## ✅ 已完成
 
+### D.27 · 2026-10-02 （第二十七批） 行情判据改看「已问区间」的账，下载窗口按年对齐
+
+- **触发**：用户纠了两处。① **「按年取也是增量的」**——我一度把「按年对齐」读成「每次重取用户整个
+  区间」，据此算出十几倍放大，用户否掉：库里已有 2024–2026、要 2022–2025 时只该取 2022–2023。
+  ② **旧判据的毛病**——它拿 `MinuteBars` 当覆盖集，而停牌日上游根本不返回数据，那个缺口**永远补
+  不上**，于是每次提交都重下一遍，永不收敛。
+- **五条用户拍板（不再重议）**：① 按年对齐 ≠ 重取整段，只取缺的那几年；② 组件侧要有一张**台账**，
+  记已成功查询的 bar 日区间；③ **记区间不记逐日**（`20230101`–`20261001` 两列即可）——按年对齐后
+  起始年份总从 1 月 1 日起，只有结束年份可能未闭合；④ **只看 span，不做 span ∪ `MinuteBars` 的
+  并集**（原话：「为了这点数据量专门实现逻辑不值得」）——失败方向是多取一次，可自愈；⑤「开工吧」。
+- **落点（两个仓）**。组件 `../QuoteHub`：新增 `sql/upgrades/Update_v2.3.0.sql` 的 `QueriedBarSpans`
+  （主键 `(Code, Frequency, StartDay)`），`BaoStockParquet.py` 加 `upsert_queried_bar_span` /
+  `merge_day_spans` / `_spans_are_contiguous` / `DAY_SPAN_ADJACENCY_DAYS`（=1，首尾相接也并成一
+  段），`ingest_stock` 在 `commit()` 前写账——**两路查询都成功才写**，失败即抛，账上只留上游真正
+  答过的段。平台：`quote_hub.py` 从 `_assert_expected_schema` 拆出 `_read_table_columns` 并新增
+  `OPTIONAL_SCHEMA_COLUMNS`（表可不在，在就必须列齐），`CoverageFacts.covered_days` 换成
+  `asked_days` + `has_bars`，新增 `_read_queried_day_spans` / `_is_day_within_queried_spans`；
+  `market_data_coverage.py` 判据整体重写；`market_data_preparation.py` 的 `_resolve_download_window`
+  改为按年对齐 + 掐日历末日（`None` 表示无处可问）；`routers/market_data.py` 一处漏改的调用点。
+- **顺手修掉一个组件缺陷**（读代码发现，非用户提出）：`BaoStock._collect_rows` 的 `while
+  error_code == "0"` 在分页中途失败时**静默返回部分行**，而 `query_minute_bars` 只在收集**之前**
+  检查一次错误码。只按 span 记覆盖之后，这种截断会被记成"问全了"，那个洞再也补不上。新增
+  `collect_rows_or_raise` 在收集**之后**复查，两个 `query_*` 改走它；`BaoStock.py` 里另外 18 个
+  `_collect_rows` 调用点不动（不在本批范围，且它们不写账）。
+- **一处越出原始设计的收紧（报备）**：`CoverageVerdict.sufficient` 加了 `and has_bars`。不加的话，
+  同一批事实会在**下载前**判"够"、**下载后**判"不够"（`decide_after_refresh` 本就先问 bar），于是
+  退市或整段停牌的合约被放行到引擎，报错退化成装载期的 `ErrorMarketDataNotExist`——那正是
+  `has_bars` 存在的理由。停牌日不受影响：它问的是"区间内有没有**至少一根** bar"。
+- **有意的降级方向**：账表不在（组件还没升级）或未记过账时，判"一段都没问过"→ 每次都取。故
+  **D.27 之后的第一轮会为传进去的每只合约各重取一次**，写过账即收敛。多取只是慢，少取才是错。
+- **审查（`code-reviewer`）逮到一处同类缺陷，已修**：`_resolve_download_window` 回 `None` 的那一
+  支——就是"没有可问的区间了"——**只看组件日历、不看 `has_bars`**，于是"日历够不着但区间内确有
+  bar"会被判成"该合约在所请求区间内没有行情数据"并**当场失败**。这与上面 `sufficient` 那处是同一个
+  毛病：日历没覆盖 ≠ 没有数据。`TradeDates` 由组件自己的交易日同步维护，**不在平台会跑的那几条
+  命令上**，所以"bar 已入库、日历还停在更早的日期"现实可达。
+  修法是让 `None` 也走同一张判定表（`_finish_after_refresh`，从原来的收口尾部抽出来，两处共用）：
+  有 bar 就放行，一根都没有才给那句话。顺带把 `missing_days` 为空的**两种由来**分开——"账已盖住整段
+  而零 bar"（退市/整段停牌）问上游是同一个答案，改判**无可问**，不再白跑一轮整所 `backfill`；那本是
+  每提交一次重演一次的成本。
+- **了结 D.24 的两条欠账**：「含停牌日的区间会重复下载」→ 就是这批的账；「下载窗口取缺失日的
+  最小 ~ 最大」→ 改按年对齐（见下方 D.24 条与 §14）。
+- **验收证据**：后端 **621 项全过**（D.25 记的是 605）。两个主测文件共 **60 条**——覆盖判据
+  `test_market_data_coverage.py` 35 条、下载 `test_market_data_download.py` 25 条；过程中修掉自己
+  写错的三处期望、一处空洞断言（`... or True`，改成真判 `_bar_days(...)`）与两条重复的 `--start` /
+  `--end` 断言（窗口那三条归窗口用例，全集用例只管 `--codes`）。前端 `type-check` 无错 + `vitest`
+  **209 项全绿**（本批未触碰前端，跑一遍确认）。组件侧**无自动化测试**，`merge_day_spans` 用独立脚本
+  穷举 8 例（相邻年份 / 单日空洞 / 重叠 / 未排序 / 被包含 / 重复 / 空 / 单元素）验证通过。
+- **仍未决 —— 待用户手工验收**：真组件 + 联网的端到端，**清单见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §14**（本批按 D.27 改写，
+  **走查顺序反转为先下载、后对照**，并新增 14.1 的账基线脚本与 14.4 的两条边界）。
+- **提交状态**：两个仓，见本批的提交。
+
 ### D.26 · 2026-10-01 （第二十六批） 提交页合约下拉改虚拟滚动：治「进页面点策略没反应」
 
 - **症状与诊断**：用户报「进新建回测后，选择策略那里要好久才有响应」。**不是后端**——本机实测
@@ -68,53 +120,20 @@ Python 策略**。
 
 ### D.25 · 2026-10-01 （第二十五批） 摘掉 manifest：策略配置 JSON 即表单模板，并解绑数据源周期
 
-- **本批的触发点是一个类别错误**，用户先发现、再拍板整批：平台把用户在提交页选的 K 线周期
-  写进**两处**——引擎 `BackTest.json.BarPreces`（那是**数据源精度**）与策略配置里的周期键
-  （那是**策略的订阅目标周期**）。而磁盘行情只有 5m（14 个文件全是 `*_5m.parquet`），于是选
-  15m 时引擎按 `Preces = '15m'` 过滤 → **零行** → 装载期 `ErrorMarketDataNotExist` → 整轮废掉。
-  **订正**：这不是三份文档此前说的"静默 0 成交"（`platform-plan.md:373-376`、
-  `job-workspace.md:72-78`、`strategy-manifest.md:73-77`），是**报错**；但详情报的是通用的
-  「引擎报告本轮回测失败」，用户看不出是周期选错了。三处说法已按实订正。
-- **六条用户拍板（不再重议）**：① 整个去掉 manifest，上传 = 一个 `.py` + 一个 `.json`；② **上传的
-  配置 JSON 即参数模板**，键即参数、一票一个控件、**键集不可增删**；③ **参数校验彻底不要**（无标题 /
-  无范围 / 无选项 / 无分组，控件形态由该键**当前取值的 JSON 类型**决定），参数合法性由策略自己守；
-  ④ 约定键名固定为 `ExchangeId` / `InstrumentId` / `BarPreces`；⑤ **周期语义解绑**——引擎那份恒为
-  平台常量 `5m`，策略那份是用户选的订阅周期（`5m`/`15m`/`30m`/`60m`，5m 的整数倍，由引擎在运行时
-  聚合，`BarAggregator` 要求 `targetSeconds % inputSeconds == 0`）；⑥ 老策略版本**一刀切作废**，
-  不做兼容回退，且**不删任何运行数据目录**（Harness §1）。
-- **落点**：新增 `app/strategy_configuration.py`（两份文件的形状校验，纯函数），删掉
-  `app/manifest.py`；上传改 multipart 两个文件部件；渲染改为「模板 + 用户编辑 + **覆写**三个平台键」；
-  解码从「查该版本的 manifest」简化成**常量差集**（策略配置减去 `PLATFORM_KEY_NAMES`）——写路径与
-  读路径引用同一份常量，两处不可能不一致；`config.py` 拆出 `MARKET_DATA_PRECISION = "5m"` 与
-  `SUBSCRIPTION_BAR_PERIODS`；`/coverage` 去掉 `bar_period`（覆盖判据只问"数据在不在"，与订阅周期
-  无关）；前端删 `domain/manifest.ts`、新增 `domain/strategy-configuration.ts` 与
-  `useConfigurationFileSource.ts`，`ParameterField` / `ParameterForm` / 提交页参数区全部改为遍历模板键。
-- **文档**：`docs/strategy-manifest.md` 与 `.example.json` 整份作废，替换为
-  [`docs/strategy-configuration.md`](docs/strategy-configuration.md) 与
-  `.example.json`（示例就是真引擎验收跑过的那一对）；`platform-plan.md` §7.1–§7.4 重写（§7.5 授权
-  共享的编号未动），§6/§8/§9/§12/§13 与决策表的 manifest 措辞逐处跟上；`backend/.env.example` 与
-  `job-workspace.md` 同步。
-- **三处偏离计划（报备）**：① **存储**：计划写的"无需任何 schema 变更 / 复用 `ManifestJson`"，
-  实施时改为**另起一列** `ConfigurationJson`（可空 `Text`），`ManifestJson` 降为**历史列**恒空串，
-  "旧形态版本"由 `ConfigurationJson IS NULL` 表达 —— 那是**结构性**判据，比去猜旧 manifest 的键
-  可靠；代价是库里多一列空列（`migrations.py` 只加列，保留它不花钱）。② 旧版本快照没有配置模板时，
-  提交与预填走 `InvalidRequestError` 让用户重传，而不是回退到旧 manifest 解析。③ 不做
-  「上传即拒策略自带的 `ExchangeId` 参数」——模板里写这三个键只会被覆写，写进文档比加一道闸
-  更省事（§7.2 已写明）。
-- **验收证据**：后端 **605 项全过**（5 deselected）；前端 `type-check` 无错 + `vitest` **204 项
-  全绿**（**其中一次全量运行里 `router/index.spec.ts` 的「未登录时的守卫 · 公开的主页放行,
-  且不为它去取身份」红了，紧接着重跑即 204/204 全绿**——就是 D.24 记过的那条**跨文件顺序
-  flake**，既有问题，与本批无关；本批没碰 router）；真引擎验收 **5 项全过**（29.09 s，含新增的
-  `test_a_subscription_period_finer_than_the_dataset_is_aggregated`——**它直接钉住本批修的那个
-  类别错误**：断言引擎那份 `BarPreces == "5m"`、策略那份 == 提交的订阅周期，两者**必须不同**）。
-  `BAR_MARKET_DATA_COUNT = 2928` 的基线不受订阅周期影响（引擎那张表装的是读进来的 bar）。
+> **全条见归档**（2026-10-02 D.27 写完后主文件逼近 50 KB，整条移出；一句话结论与关键词见
+> [`PROGRESS-index.md`](PROGRESS-index.md) 的 D.25 行）。留在主文件的是**仍未决的那半**：
+
 - **仍未决 —— 待用户手工验收**：浏览器里走一遍新上传契约（传 `.py` + 配置 `.json` → 提交页参数区
   按模板键渲染 → 选 15m 提交 → 回测跑通且策略收到 15m bar）。**清单见
-  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §13**（2026-10-01 补，含两份文件的
-  取法与一个**改名**坑：上传的 `.json` 名即作业目录里的文件名，配 `grid_strategy.py` 必须是
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §13**（含两份文件的取法与一个
+  **改名**坑：上传的 `.json` 名即作业目录里的文件名，配 `grid_strategy.py` 必须是
   `TestStrategyGrid.json`）。旧版本行那条**本机现有库里验不了**：唯一的版本已被重传成新形态
   （`StrategyVersions.ConfigurationJson` 非 NULL），要验得用带旧行的库。
-- **提交状态**：`8e96685`，64 个文件（2761 增 / 3490 删——删的比加的多，去 manifest 是净减法）。
+- **本批改了形态，上面 D.23 的走查项要重看**：模板里的参数键集由配置模板固定，换版本后旧模板可能
+  带着新版本没有的键（提交侧以 `UNKNOWN_PARAMETER_MESSAGE` 拒，见 `platform-plan.md` §9 的 P6 第
+  5 条）。
+- 其余（触发点的类别错误、六条拍板、落点、三处偏离计划的报备、验收证据）见归档，机制本身见
+  [`docs/strategy-configuration.md`](docs/strategy-configuration.md)。
 
 ### D.24 · 2026-10-01 （第二十四批） 行情改由 QuoteHub 按需下载落地
 
@@ -124,14 +143,15 @@ Python 策略**。
 - **仍未决 —— 待用户手工验收**：真组件 + 联网的端到端（计划验证 #2「新合约触发真 `backfill`
   且**不挤掉**已下过的 `600000`/`600519`」是防「静默挤掉」的验收句，必须钉死；#6「提交页列出
   5207 只且能按名称搜到」）。**清单见
-  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §14**（2026-10-01 补）：走查前后各量
-  一次 `market-data/Bar` 下每个年度文件的合约集合，「不挤掉」的判据就是**原来那几只仍在集合里**；
-  基线实测为**合约 5207 只 / 已下过 4 只**（`sh.600000` `sh.600004` `sh.600519` `sz.000001`），
-  下载窗口取「缺失日的最小 ~ 最大」，故走查时**区间取短**才不会去重取六年半。**另有三处已知欠账**：`market_data_prepare_timeout_seconds` 默认
-  **3600 是拍的**，未经实测外推（整所 `backfill` 要为区间内每个成员联网重取，耗时是最大未知）；
-  含停牌日的区间会**重复下载**（功能正确但费力，要收敛得另立"已确认上游无数据"的记账，那要写
-  状态）；~~`docs/strategy-manifest.md:16` 的「84 笔成交」是旧口径，随手订正即可~~ ——
-  **D.25 已把那份文件整个删掉，这条欠账随之了结**。
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §14**（2026-10-01 补，2026-10-02 按
+  D.27 改写，**走查顺序已反转为先下载、后对照**）：走查前后各量一次 `market-data/Bar` 下每个年度
+  文件的合约集合，「不挤掉」的判据就是**原来那几只仍在集合里**；基线实测为**合约 5207 只 / 已下过
+  4 只**（`sh.600000` `sh.600004` `sh.600519` `sz.000001`）。**仍欠一条**：
+  `market_data_prepare_timeout_seconds` 默认 **3600 是拍的**，未经实测外推（整所 `backfill` 要为
+  区间内每个成员联网重取，耗时是最大未知）。**另三条已了结**：含停牌日的区间会重复下载 —— D.27
+  另立了 `QueriedBarSpans` 那张「已问区间」的账，正是这条欠账说的「要另立记账、要写状态」；下载
+  窗口取「缺失日的最小 ~ 最大」—— D.27 已改为按年对齐；`docs/strategy-manifest.md:16` 的
+  「84 笔成交」是旧口径 —— D.25 已把那份文件整个删掉。
 - **一处越批订正**：D.24 当时把「周期与 parquet 后缀必须逐字一致，填错 → 静默 0 成交」当判据，
   **D.25 已订正为「引擎装载期即拒、报错收场」**，并把周期语义整个解绑（见上）。
 
@@ -197,6 +217,10 @@ Python 策略**。
   `D:/MdBaoStock` 迁进仓内的 `market-data/`。**仍未决 —— 待用户手工验收**：真组件 +
   联网的端到端（新合约触发真 `backfill` 且不挤掉已下过的合约、提交页列出 5207 只股票
   且能按名称搜到）；`market_data_prepare_timeout_seconds` 默认 3600 **是拍的**，未经实测外推。
+  **2026-10-02 追加（D.27）**：判据的**事实源**换成了组件侧 `QueriedBarSpans` 那张「已问区间」的
+  账，下载窗口也改为按年对齐 —— 同一笔里的两处欠账随之了结（见归档 D.24 那条与
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §14），走查顺序**反转为先下载、
+  后对照**。超时那条仍是欠账：按年对齐后起点落在年中也会把整年拉进来，**只会更慢，不会更快**。
 - **第六笔非分期项：摘掉 manifest（配置 JSON 即模板 + 周期解绑）**（2026-10-01，**D.25**）。
   同样**不在 P0–P8 的分期里**，是被「选 15m 就整轮废掉」这个类别错误牵出来的一整批。**它改的是
   上传契约本身**：此后**上传 = `.py` + 配置 `.json` 两份文件**，参数区由那份 JSON 的键渲染，

@@ -38,6 +38,7 @@ from ..config import (
 SECURITIES_TABLE_NAME = "Securities"
 TRADE_DATES_TABLE_NAME = "TradeDates"
 MINUTE_BARS_TABLE_NAME = "MinuteBars"
+QUERIED_BAR_SPANS_TABLE_NAME = "QueriedBarSpans"
 
 CONTRACT_CODE_COLUMN = "Code"
 CONTRACT_NAME_COLUMN = "CodeName"
@@ -50,6 +51,9 @@ IS_TRADING_DAY_COLUMN = "IsTradingDay"
 
 BAR_FREQUENCY_COLUMN = "Frequency"
 BAR_TRADING_DAY_COLUMN = "TradingDay"
+
+QUERIED_SPAN_START_COLUMN = "StartDay"
+QUERIED_SPAN_END_COLUMN = "EndDay"
 
 # 每个真表必须有的列; 少一列即视为 schema 漂移.
 EXPECTED_SCHEMA_COLUMNS: dict[str, frozenset[str]] = {
@@ -65,6 +69,21 @@ EXPECTED_SCHEMA_COLUMNS: dict[str, frozenset[str]] = {
     TRADE_DATES_TABLE_NAME: frozenset({CALENDAR_DATE_COLUMN, IS_TRADING_DAY_COLUMN}),
     MINUTE_BARS_TABLE_NAME: frozenset(
         {CONTRACT_CODE_COLUMN, BAR_FREQUENCY_COLUMN, BAR_TRADING_DAY_COLUMN}
+    ),
+}
+
+# 可以不在, 但**在就必须列齐**的表. `QueriedBarSpans` 是组件 v2.3.0 才有的账: 组件还没升过级
+# 时它不存在, 那时账为空、判据退化成"一段都没问过, 于是每次都取"——这是**有意**的降级方向,
+# 多取只是慢, 少取才是错. 但表在而列漂了是另一回事, 那种 schema 漂移必须显式报错, 不能当成
+# "账是空的"。
+OPTIONAL_SCHEMA_COLUMNS: dict[str, frozenset[str]] = {
+    QUERIED_BAR_SPANS_TABLE_NAME: frozenset(
+        {
+            CONTRACT_CODE_COLUMN,
+            BAR_FREQUENCY_COLUMN,
+            QUERIED_SPAN_START_COLUMN,
+            QUERIED_SPAN_END_COLUMN,
+        }
     ),
 }
 
@@ -98,21 +117,31 @@ class QuoteHubUnavailableError(Exception):
     """组件或其数据不在位. 文案必须是固定中文字符串, 且不带路径 (同 `UnrunnableJob` 的纪律)."""
 
 
+def _read_table_columns(connection: sqlite3.Connection, table_name: str) -> set[str]:
+    """表存在时回它的列名集合; 表不在回空集."""
+
+    return {
+        row["name"]
+        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+
+
 def _assert_expected_schema(connection: sqlite3.Connection) -> None:
-    """三张表都要在, 且列齐; 缺什么就报什么, 不静默降级成"没有数据"."""
+    """必有的表都要在且列齐, 可选的表在才要求列齐. 缺什么就报什么, 不静默降级成"没有数据"."""
 
     for table_name, expected_columns in EXPECTED_SCHEMA_COLUMNS.items():
-        actual_columns = {
-            row["name"]
-            for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
-        }
+        actual_columns = _read_table_columns(connection, table_name)
 
         if not actual_columns:
             raise QuoteHubUnavailableError("行情组件的数据库缺少预期的表")
 
-        missing_columns = expected_columns - actual_columns
+        if expected_columns - actual_columns:
+            raise QuoteHubUnavailableError("行情组件的数据库表结构与预期不符")
 
-        if missing_columns:
+    for table_name, expected_columns in OPTIONAL_SCHEMA_COLUMNS.items():
+        actual_columns = _read_table_columns(connection, table_name)
+
+        if actual_columns and expected_columns - actual_columns:
             raise QuoteHubUnavailableError("行情组件的数据库表结构与预期不符")
 
 
@@ -233,17 +262,22 @@ def read_ingested_codes(quote_hub_root: Path) -> list[str]:
 
 @dataclass(frozen=True)
 class CoverageFacts:
-    """判定"够不够"所需的全部事实, 一次连接读完."""
+    """判定"够不够"所需的全部事实, 一次连接读完.
+
+    `asked_days` 是**落在区间内、且已被账记过**的交易日; `has_bars` 是该频率在区间内是否至少
+    有一天真有 bar. 两者问的不是一件事, 故不能互相替代——见 `market_data_coverage` 的模块说明.
+    """
 
     expected_days: list[str]
-    covered_days: list[str]
+    asked_days: list[str]
+    has_bars: bool
     calendar_last_day: str | None
 
 
 def read_coverage_facts(
     quote_hub_root: Path, code: str, frequency: str, start_day: str, end_day: str
 ) -> CoverageFacts:
-    """三张表一次连接读完: 分开读要开三次 40 MB 的库, 而它们本来就是同一次判断的输入."""
+    """四张表一次连接读完: 分开读要开四次 40 MB 的库, 而它们本来就是同一次判断的输入."""
 
     with open_quote_hub_database_readonly(quote_hub_root) as connection:
         expected_rows = connection.execute(
@@ -254,24 +288,65 @@ def read_coverage_facts(
             (start_day, end_day),
         ).fetchall()
 
-        covered_rows = connection.execute(
-            f"SELECT DISTINCT {BAR_TRADING_DAY_COLUMN} FROM {MINUTE_BARS_TABLE_NAME}"
+        queried_day_spans = _read_queried_day_spans(
+            connection, code, frequency, start_day, end_day
+        )
+
+        bar_row = connection.execute(
+            f"SELECT 1 FROM {MINUTE_BARS_TABLE_NAME}"
             f" WHERE {CONTRACT_CODE_COLUMN} = ? AND {BAR_FREQUENCY_COLUMN} = ?"
             f" AND {BAR_TRADING_DAY_COLUMN} >= ? AND {BAR_TRADING_DAY_COLUMN} <= ?"
-            f" ORDER BY {BAR_TRADING_DAY_COLUMN}",
+            f" LIMIT 1",
             (code, frequency, start_day, end_day),
-        ).fetchall()
+        ).fetchone()
 
         calendar_row = connection.execute(
             f"SELECT MAX({CALENDAR_DATE_COLUMN}) FROM {TRADE_DATES_TABLE_NAME}"
             f" WHERE {IS_TRADING_DAY_COLUMN} = 1"
         ).fetchone()
 
+    expected_days = [row[0] for row in expected_rows]
+
     return CoverageFacts(
-        expected_days=[row[0] for row in expected_rows],
-        covered_days=[row[0] for row in covered_rows],
+        expected_days=expected_days,
+        asked_days=[
+            day
+            for day in expected_days
+            if _is_day_within_queried_spans(day, queried_day_spans)
+        ],
+        has_bars=bar_row is not None,
         calendar_last_day=None if calendar_row is None else calendar_row[0],
     )
+
+
+def _read_queried_day_spans(
+    connection: sqlite3.Connection, code: str, frequency: str, start_day: str, end_day: str
+) -> list[tuple[str, str]]:
+    """该合约该频率下与区间相交的已问日区间; **账表不在时回空**.
+
+    表不在 = 组件还停在 v2.3.0 之前, 账还没开始记, 于是退化成"一段都没问过、每次都得取".
+    这是有意的降级方向: 多取只是慢, 少取才是错.
+    """
+
+    if not _read_table_columns(connection, QUERIED_BAR_SPANS_TABLE_NAME):
+        return []
+
+    rows = connection.execute(
+        f"SELECT {QUERIED_SPAN_START_COLUMN}, {QUERIED_SPAN_END_COLUMN}"
+        f" FROM {QUERIED_BAR_SPANS_TABLE_NAME}"
+        f" WHERE {CONTRACT_CODE_COLUMN} = ? AND {BAR_FREQUENCY_COLUMN} = ?"
+        f" AND {QUERIED_SPAN_END_COLUMN} >= ? AND {QUERIED_SPAN_START_COLUMN} <= ?"
+        f" ORDER BY {QUERIED_SPAN_START_COLUMN}",
+        (code, frequency, start_day, end_day),
+    ).fetchall()
+
+    return [(row[0], row[1]) for row in rows]
+
+
+def _is_day_within_queried_spans(day: str, day_spans: list[tuple[str, str]]) -> bool:
+    """`2024-01-05` 是否落在某段已问区间内. 段是闭的, 两端都算 (ISO 日期串可直接比大小)."""
+
+    return any(span_start <= day <= span_end for span_start, span_end in day_spans)
 
 
 def format_platform_day(component_day: str) -> str:

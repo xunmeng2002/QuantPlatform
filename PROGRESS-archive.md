@@ -1525,6 +1525,58 @@
   仅余一处无害的文档零头：`docs/strategy-manifest.md:16` 举例用的「84 笔成交」是旧口径，
   现已无基线可对，**改不改都不影响判据**。
 
+---
+
+## D.25 · 2026-10-01 （第二十五批） 摘掉 manifest：策略配置 JSON 即表单模板，并解绑数据源周期
+
+- **本批的触发点是一个类别错误**，用户先发现、再拍板整批：平台把用户在提交页选的 K 线周期
+  写进**两处**——引擎 `BackTest.json.BarPreces`（那是**数据源精度**）与策略配置里的周期键
+  （那是**策略的订阅目标周期**）。而磁盘行情只有 5m（14 个文件全是 `*_5m.parquet`），于是选
+  15m 时引擎按 `Preces = '15m'` 过滤 → **零行** → 装载期 `ErrorMarketDataNotExist` → 整轮废掉。
+  **订正**：这不是三份文档此前说的"静默 0 成交"（`platform-plan.md:373-376`、
+  `job-workspace.md:72-78`、`strategy-manifest.md:73-77`），是**报错**；但详情报的是通用的
+  「引擎报告本轮回测失败」，用户看不出是周期选错了。三处说法已按实订正。
+- **六条用户拍板（不再重议）**：① 整个去掉 manifest，上传 = 一个 `.py` + 一个 `.json`；② **上传的
+  配置 JSON 即参数模板**，键即参数、一票一个控件、**键集不可增删**；③ **参数校验彻底不要**（无标题 /
+  无范围 / 无选项 / 无分组，控件形态由该键**当前取值的 JSON 类型**决定），参数合法性由策略自己守；
+  ④ 约定键名固定为 `ExchangeId` / `InstrumentId` / `BarPreces`；⑤ **周期语义解绑**——引擎那份恒为
+  平台常量 `5m`，策略那份是用户选的订阅周期（`5m`/`15m`/`30m`/`60m`，5m 的整数倍，由引擎在运行时
+  聚合，`BarAggregator` 要求 `targetSeconds % inputSeconds == 0`）；⑥ 老策略版本**一刀切作废**，
+  不做兼容回退，且**不删任何运行数据目录**（Harness §1）。
+- **落点**：新增 `app/strategy_configuration.py`（两份文件的形状校验，纯函数），删掉
+  `app/manifest.py`；上传改 multipart 两个文件部件；渲染改为「模板 + 用户编辑 + **覆写**三个平台键」；
+  解码从「查该版本的 manifest」简化成**常量差集**（策略配置减去 `PLATFORM_KEY_NAMES`）——写路径与
+  读路径引用同一份常量，两处不可能不一致；`config.py` 拆出 `MARKET_DATA_PRECISION = "5m"` 与
+  `SUBSCRIPTION_BAR_PERIODS`；`/coverage` 去掉 `bar_period`（覆盖判据只问"数据在不在"，与订阅周期
+  无关）；前端删 `domain/manifest.ts`、新增 `domain/strategy-configuration.ts` 与
+  `useConfigurationFileSource.ts`，`ParameterField` / `ParameterForm` / 提交页参数区全部改为遍历模板键。
+- **文档**：`docs/strategy-manifest.md` 与 `.example.json` 整份作废，替换为
+  [`docs/strategy-configuration.md`](docs/strategy-configuration.md) 与
+  `.example.json`（示例就是真引擎验收跑过的那一对）；`platform-plan.md` §7.1–§7.4 重写（§7.5 授权
+  共享的编号未动），§6/§8/§9/§12/§13 与决策表的 manifest 措辞逐处跟上；`backend/.env.example` 与
+  `job-workspace.md` 同步。
+- **三处偏离计划（报备）**：① **存储**：计划写的"无需任何 schema 变更 / 复用 `ManifestJson`"，
+  实施时改为**另起一列** `ConfigurationJson`（可空 `Text`），`ManifestJson` 降为**历史列**恒空串，
+  "旧形态版本"由 `ConfigurationJson IS NULL` 表达 —— 那是**结构性**判据，比去猜旧 manifest 的键
+  可靠；代价是库里多一列空列（`migrations.py` 只加列，保留它不花钱）。② 旧版本快照没有配置模板时，
+  提交与预填走 `InvalidRequestError` 让用户重传，而不是回退到旧 manifest 解析。③ 不做
+  「上传即拒策略自带的 `ExchangeId` 参数」——模板里写这三个键只会被覆写，写进文档比加一道闸
+  更省事（§7.2 已写明）。
+- **验收证据**：后端 **605 项全过**（5 deselected）；前端 `type-check` 无错 + `vitest` **204 项
+  全绿**（**其中一次全量运行里 `router/index.spec.ts` 的「未登录时的守卫 · 公开的主页放行,
+  且不为它去取身份」红了，紧接着重跑即 204/204 全绿**——就是 D.24 记过的那条**跨文件顺序
+  flake**，既有问题，与本批无关；本批没碰 router）；真引擎验收 **5 项全过**（29.09 s，含新增的
+  `test_a_subscription_period_finer_than_the_dataset_is_aggregated`——**它直接钉住本批修的那个
+  类别错误**：断言引擎那份 `BarPreces == "5m"`、策略那份 == 提交的订阅周期，两者**必须不同**）。
+  `BAR_MARKET_DATA_COUNT = 2928` 的基线不受订阅周期影响（引擎那张表装的是读进来的 bar）。
+- **仍未决 —— 待用户手工验收**：浏览器里走一遍新上传契约（传 `.py` + 配置 `.json` → 提交页参数区
+  按模板键渲染 → 选 15m 提交 → 回测跑通且策略收到 15m bar）。**清单见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §13**（2026-10-01 补，含两份文件的
+  取法与一个**改名**坑：上传的 `.json` 名即作业目录里的文件名，配 `grid_strategy.py` 必须是
+  `TestStrategyGrid.json`）。旧版本行那条**本机现有库里验不了**：唯一的版本已被重传成新形态
+  （`StrategyVersions.ConfigurationJson` 非 NULL），要验得用带旧行的库。
+- **提交状态**：`8e96685`，64 个文件（2761 增 / 3490 删——删的比加的多，去 manifest 是净减法）。
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型
