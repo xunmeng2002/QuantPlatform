@@ -24,7 +24,7 @@ Python 策略**。
 
 ## 归档索引
 
-已关闭条目的**原文**在 [`PROGRESS-archive.md`](PROGRESS-archive.md)，其**检索索引**
+已关闭条目的**原文或短版**在 [`PROGRESS-archive.md`](PROGRESS-archive.md)，其**检索索引**
 （一行一条 ID ＋ 日期 ＋ 主题 ＋ 判据注记）在 [`PROGRESS-index.md`](PROGRESS-index.md)。
 本文件不复述它们（2026-10-01 分层：主文件只留这个指针）。
 
