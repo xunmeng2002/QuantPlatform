@@ -34,7 +34,12 @@ interface NavigationLink {
 
 const isHeaderVisible = computed(() => route.meta.hidesHeader !== true);
 
-/** 用户管理是管理员专属, 故链接也跟着身份走 —— 普通用户看到一个点了会被弹回来的入口没有意义. */
+/**
+ * 管理员专属的入口挂在 `isAdmin` 分支里 (用户管理, 基础数据), 其余链接对谁都一样.
+ *
+ * 跟着身份走是必须的: 那两条路由都带 `meta.requiresAdmin`, 普通用户点进去会被守卫弹回运行列表
+ * —— 摆一个点了就被弹回来的入口, 不如不摆.
+ */
 const navigationLinks = computed<NavigationLink[]>(() => {
   const links: NavigationLink[] = [
     { routeName: 'runs', label: '回测运行' },
@@ -43,6 +48,7 @@ const navigationLinks = computed<NavigationLink[]>(() => {
   ];
 
   if (session.isAdmin) {
+    links.push({ routeName: 'reference-data', label: '基础数据' });
     links.push({ routeName: 'users', label: '用户管理' });
   }
 

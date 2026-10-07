@@ -16,9 +16,14 @@ import pytest
 from httpx import AsyncClient
 
 from app.catalog.database import PlatformDatabase
-from app.catalog.enums import RunStatus
+from app.catalog.enums import CommissionDirection, RunStatus
 from app.catalog.models import RunModel
-from app.config import MARKET_DATA_PRECISION, SUBSCRIPTION_BAR_PERIODS, PlatformSettings
+from app.config import (
+    MARKET_DATA_PRECISION,
+    SEED_DATABASE_FILENAME,
+    SUBSCRIPTION_BAR_PERIODS,
+    PlatformSettings,
+)
 from app.services import quote_hub
 from app.services.market_data_preparation import (
     MARKET_DATA_COMPONENT_MISSING_MESSAGE,
@@ -40,7 +45,13 @@ from app.scheduler.runner import (
 )
 from app.scheduler.workspace import STAGING_DIRECTORY_PREFIX
 
-from .helpers import SignedInAccount, create_signed_in_account, soft_delete_strategy_record
+from .helpers import (
+    DEFAULT_COMMISSION_GROUP_ID,
+    SignedInAccount,
+    create_signed_in_account,
+    read_seed_database_rows,
+    soft_delete_strategy_record,
+)
 from .quote_hub_stub import (
     DEFAULT_CONTRACT_CODE,
     enumerate_days,
@@ -50,11 +61,16 @@ from .quote_hub_stub import (
 from .run_helpers import (
     ARGV0_FILENAME,
     DEFAULT_BAR_PERIOD,
+    DEFAULT_COMMISSION_GROUP_NAME,
     DEFAULT_END_TRADING_DAY,
     DEFAULT_EXCHANGE_ID,
     DEFAULT_INITIAL_CAPITAL,
     DEFAULT_INSTRUMENT_ID,
+    DEFAULT_MIN_COMMISSION,
+    DEFAULT_RATE_BY_MONEY,
+    DEFAULT_STAMP_TAX_BY_MONEY,
     DEFAULT_START_TRADING_DAY,
+    DEFAULT_TRANSFER_FEE_BY_MONEY,
     ENGINE_CONFIGURATION_FILENAME,
     EXIT_DELAY_SECONDS_PARAMETER_KEY,
     FLOOD_BYTES_PARAMETER_KEY,
@@ -70,6 +86,7 @@ from .run_helpers import (
     build_stub_configuration_template,
     count_span_end_lines,
     create_runnable_strategy,
+    ensure_contract_rates,
     job_directory,
     maximum_overlap,
     read_job_json,
@@ -78,6 +95,7 @@ from .run_helpers import (
     read_span_intervals,
     running_client,
     settings_with,
+    staging_seed_database_names,
     submit_run,
 )
 
@@ -110,6 +128,9 @@ FLOOD_ELAPSED_LIMIT_SECONDS = 60
 
 FOREIGN_RUN_ID = "run-id-the-platform-never-issued"
 GBK_ERROR_MESSAGE = "引擎报告: 行情数据缺失"
+
+# 第二个手续费组: 用来验"交到作业目录的那份种子库是按**这一轮冻结的那个组**生成的".
+SECOND_COMMISSION_GROUP_ID = 2
 REPORTED_FAILURE_ERROR_ID = 4242
 
 # 桩那份模板里的全部键 (即它的五个参数旋钮). 用例把它与盘上的键集合对起来, 于是"渲染结果恰好
@@ -140,12 +161,18 @@ async def _submit_and_wait(
     strategy_id: str,
     params: dict[str, object] | None = None,
     bar_period: str = DEFAULT_BAR_PERIOD,
+    commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID,
     timeout_seconds: float = CONCURRENT_ELAPSED_LIMIT_SECONDS,
 ) -> RunModel:
     """提交一轮并等它落终态."""
 
     submitted = await submit_run(
-        client, token, strategy_id, bar_period=bar_period, params=params
+        client,
+        token,
+        strategy_id,
+        bar_period=bar_period,
+        commission_group_id=commission_group_id,
+        params=params,
     )
 
     return await await_run_terminal(database, submitted.id, timeout_seconds)
@@ -195,6 +222,121 @@ async def test_a_successful_run_is_recorded_end_to_end(
     assert run.runner_pid is not None
 
 
+async def test_the_job_directory_holds_a_seed_database_for_this_contract_only(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    run_owner: SignedInAccount,
+) -> None:
+    """作业目录里那份种子库只有这一轮的合约的费率行.
+
+    它是**按轮生成**的派生物: 库里存的是三级规则 (交易所级那一行合约格是空的), 引擎读到的必须是
+    展开后的合约级行 —— 引擎拿成交合约做一次精确查找, 空串那一格它永远查不到. 断言"只有这一只
+    合约"同样要紧: 一份铺满全市场的种子库会让文件大而无用, 而"哪些行该在"这件事没有任何接口能
+    观测到.
+    """
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    run = await _submit_and_wait(client, database, run_owner.token, runnable.strategy.id)
+
+    seed_database_path = job_directory(platform_settings, run.id) / SEED_DATABASE_FILENAME
+
+    assert seed_database_path.is_file()
+
+    assert read_seed_database_rows(seed_database_path, "CommissionGroup") == [
+        (DEFAULT_COMMISSION_GROUP_ID, DEFAULT_COMMISSION_GROUP_NAME)
+    ]
+
+    assert read_seed_database_rows(seed_database_path, "BaseCommission") == [
+        (
+            DEFAULT_COMMISSION_GROUP_ID,
+            DEFAULT_EXCHANGE_ID,
+            DEFAULT_INSTRUMENT_ID,
+            int(CommissionDirection.BUY),
+            DEFAULT_RATE_BY_MONEY,
+            DEFAULT_RATE_BY_MONEY,
+            0.0,
+            0.0,
+            DEFAULT_STAMP_TAX_BY_MONEY,
+            DEFAULT_STAMP_TAX_BY_MONEY,
+            DEFAULT_TRANSFER_FEE_BY_MONEY,
+            DEFAULT_TRANSFER_FEE_BY_MONEY,
+            DEFAULT_MIN_COMMISSION,
+            0.0,
+        ),
+        (
+            DEFAULT_COMMISSION_GROUP_ID,
+            DEFAULT_EXCHANGE_ID,
+            DEFAULT_INSTRUMENT_ID,
+            int(CommissionDirection.SELL),
+            DEFAULT_RATE_BY_MONEY,
+            DEFAULT_RATE_BY_MONEY,
+            0.0,
+            0.0,
+            DEFAULT_STAMP_TAX_BY_MONEY,
+            DEFAULT_STAMP_TAX_BY_MONEY,
+            DEFAULT_TRANSFER_FEE_BY_MONEY,
+            DEFAULT_TRANSFER_FEE_BY_MONEY,
+            DEFAULT_MIN_COMMISSION,
+            0.0,
+        ),
+    ]
+
+    # 暂存的那一份被**搬**进了作业目录, 运行根里不留残渣.
+    assert staging_seed_database_names(platform_settings) == set()
+
+
+async def test_the_job_directory_seed_database_follows_the_run_commission_group(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    run_owner: SignedInAccount,
+) -> None:
+    """用 2 号组跑一轮 → 作业目录里那份种子库的费率行属于 2 号组, 不属于 1 号组.
+
+    两个组**同时**在库里 (1 号组由 `create_runnable_strategy` 铺好, 2 号组另行备上), 于是这条断言
+    能区分两种实现: 按这一轮冻结的组号展开的, 与拿一个固定组号去展开的. 只验"跑成功了"看不出来
+    ——后者照样跑得完, 只是按另一套费率算钱.
+
+    `CommissionGroup` 那张表本身不参与区分 (种子库把库里的组**整份**带过去, 引擎只按组号去费率表里
+    找), 故断言落在 `BaseCommission` 的行上.
+    """
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    await ensure_contract_rates(
+        database, DEFAULT_EXCHANGE_ID, commission_group_id=SECOND_COMMISSION_GROUP_ID
+    )
+
+    run = await _submit_and_wait(
+        client,
+        database,
+        run_owner.token,
+        runnable.strategy.id,
+        commission_group_id=SECOND_COMMISSION_GROUP_ID,
+    )
+
+    assert run.status == RunStatus.SUCCEEDED.value
+
+    seed_database_path = job_directory(platform_settings, run.id) / SEED_DATABASE_FILENAME
+
+    seed_rate_rows = read_seed_database_rows(seed_database_path, "BaseCommission")
+
+    assert {row[0] for row in seed_rate_rows} == {SECOND_COMMISSION_GROUP_ID}
+
+    assert sorted(
+        (row[1], row[2], row[3]) for row in seed_rate_rows
+    ) == [
+        (DEFAULT_EXCHANGE_ID, DEFAULT_INSTRUMENT_ID, int(CommissionDirection.BUY)),
+        (DEFAULT_EXCHANGE_ID, DEFAULT_INSTRUMENT_ID, int(CommissionDirection.SELL)),
+    ]
+
+
 async def test_the_job_directory_matches_the_launch_contract(
     client: AsyncClient,
     database: PlatformDatabase,
@@ -225,6 +367,7 @@ async def test_the_job_directory_matches_the_launch_contract(
             STUB_ENTRY_FILENAME,
             "Sessions.json",
             RESULT_FILENAME,
+            SEED_DATABASE_FILENAME,
             "Dump",
             "stdout.txt",
             "stderr.txt",
@@ -246,7 +389,7 @@ async def test_the_job_directory_matches_the_launch_contract(
     assert engine_configuration["InitialCapital"] == DEFAULT_INITIAL_CAPITAL
     assert engine_configuration["MdDataPath"] == str(platform_settings.market_data_root)
     assert engine_configuration["DbInitHost"] == str(
-        platform_settings.seed_database_path
+        platform_settings.runs_root / run.id / SEED_DATABASE_FILENAME
     )
 
     for relative_path_key in ("DbHost", "DumpPath"):

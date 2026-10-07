@@ -1,0 +1,1 @@
+CommissionGroupId,ExchangeId,InstrumentId,Direction,OpenByMoney,CloseByMoney,OpenByVolume,CloseByVolume,OpenStampTaxByMoney,CloseStampTaxByMoney,OpenTransferFeeByMoney,CloseTransferFeeByMoney,MinCommission,MaxCommission

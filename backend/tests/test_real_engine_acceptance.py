@@ -3,7 +3,8 @@
 桩是纯 Python, 它证明得了"平台把配置写对了" (桩把读到的 `RunId` / `MatchMode` / `DbHost` 回显进
 结果文件), 但证明不了"引擎认这份配置". 只有真引擎才有的东西: `PYTHONPATH` 与 `.pyd`/DLL 的
 解析, `result.json` 的真实键名与口径, `MatchMode`/`BarPreces` 的真实对应, `MdDataPath` 的正确
-形态 (写错得到 `ErrorId 0x100F`), `DbHost` 的派生行为, 以及种子库缺失时引擎的降级.
+形态 (写错得到 `ErrorId 0x100F`), `DbHost` 的派生行为, 以及引擎真读得懂平台按轮生成的那份种子库
+(平台侧不再有"种子库缺失"这一档: 文件由调度侧在建作业目录之前生成, 缺费率在提交期就拦下了).
 
 **一条被实测推翻的旧记录** (此处留档, 免得后人又照抄): 平台启动引擎时传**裸文件名**, 但这**不是**
 因为"带路径的 `argv[0]` 会在启动期被日志器 `fopen` 失败打死"——2026-09-25 在本机
@@ -65,6 +66,7 @@ from .helpers import SignedInAccount, bearer_headers, create_signed_in_account
 from .quote_hub_stub import build_covered_component
 from .run_helpers import (
     RESULT_FILENAME,
+    ensure_contract_rates,
     RUNS_PATH,
     STATUS_POLL_INTERVAL_SECONDS,
     await_run_terminal,
@@ -101,7 +103,6 @@ STRATEGIES_PATH = "/api/strategies"
 REAL_ENTRY_FILENAME = "grid_strategy.py"
 REAL_CONFIG_FILENAME = "TestStrategyGrid.json"
 REAL_SESSION_FILENAME = "Sessions.json"
-REAL_SEED_DATABASE_FILENAME = "BackTestInit.db"
 
 STRATEGY_NAME = "成对网格 (真引擎验收)"
 
@@ -235,7 +236,6 @@ def real_settings(platform_settings: PlatformSettings, tmp_path: Path) -> Platfo
             end_day=ACCEPTANCE_COVERED_END_DAY,
         ),
         session_file_path=REAL_ENGINE_ROOT / REAL_SESSION_FILENAME,
-        seed_database_path=REAL_ENGINE_ROOT / REAL_SEED_DATABASE_FILENAME,
         run_timeout_seconds=RUN_TIMEOUT_SECONDS,
         max_concurrent_runs=1,
     )
@@ -274,6 +274,23 @@ def build_real_configuration_template() -> dict[str, object]:
         GRID_COUNT_PARAMETER_KEY: DEFAULT_GRID_COUNT,
         VOLUME_PER_GRID_PARAMETER_KEY: DEFAULT_VOLUME_PER_GRID,
     }
+
+
+async def create_real_owner(
+    database: PlatformDatabase, client: AsyncClient, username: str
+) -> SignedInAccount:
+    """登一个账号, 并把这一轮要提交的合约的费率备好.
+
+    费率那一步不是"用例自己造数据": 提交侧会按该轮选定的那个组把三级规则展开, 三档都没命中就 400 (见
+    `services.run_submission`). 这几条要验的是"真引擎认平台递过去的输入", 而不是"费率在不在",
+    故由这里统一铺好, 每一处都写一遍只会让漏掉的那一处以 400 的面目出现.
+    """
+
+    owner = await create_signed_in_account(database, client, username)
+
+    await ensure_contract_rates(database, EXCHANGE_ID)
+
+    return owner
 
 
 async def upload_real_strategy(
@@ -374,7 +391,7 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
 
     async with running_client(real_settings) as (application, client):
         database = application.state.database
-        owner = await create_signed_in_account(database, client, "real-engine-owner")
+        owner = await create_real_owner(database, client, "real-engine-owner")
 
         strategy_id, version_id = await upload_real_strategy(client, owner.token)
 
@@ -534,9 +551,7 @@ async def test_a_subscription_period_finer_than_the_dataset_is_aggregated(
 
     async with running_client(real_settings) as (application, client):
         database = application.state.database
-        owner = await create_signed_in_account(
-            database, client, "real-aggregation-owner"
-        )
+        owner = await create_real_owner(database, client, "real-aggregation-owner")
 
         strategy_id, version_id = await upload_real_strategy(client, owner.token)
 
@@ -584,9 +599,7 @@ async def test_two_real_runs_at_once_keep_their_databases_apart(
 
     async with running_client(concurrent_settings) as (application, client):
         database = application.state.database
-        owner = await create_signed_in_account(
-            database, client, "real-concurrency-owner"
-        )
+        owner = await create_real_owner(database, client, "real-concurrency-owner")
 
         strategy_id, version_id = await upload_real_strategy(client, owner.token)
         account_id = read_engine_account_id()
@@ -653,7 +666,7 @@ async def test_a_real_run_that_exceeds_its_limit_is_killed(
 
     async with running_client(impatient_settings) as (application, client):
         database = application.state.database
-        owner = await create_signed_in_account(database, client, "real-timeout-owner")
+        owner = await create_real_owner(database, client, "real-timeout-owner")
 
         strategy_id, version_id = await upload_real_strategy(client, owner.token)
 
@@ -720,7 +733,7 @@ async def test_cancelling_a_running_real_engine_job_stops_it(
 
     async with running_client(real_settings) as (application, client):
         database = application.state.database
-        owner = await create_signed_in_account(database, client, "real-cancel-owner")
+        owner = await create_real_owner(database, client, "real-cancel-owner")
 
         strategy_id, version_id = await upload_real_strategy(client, owner.token)
 

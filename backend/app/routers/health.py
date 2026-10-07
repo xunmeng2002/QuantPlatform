@@ -1,17 +1,19 @@
 """引擎自检.
 
 后端的可用性取决于引擎侧一组硬条件: 与当前解释器匹配的扩展模块存在 (名字里的 cpXXX 即 ABI
-标签, Python 小版本不匹配即不可用)、引擎运行时 DLL 齐备、运行根可写, 以及调度侧要读入的三个
+标签, Python 小版本不匹配即不可用)、引擎运行时 DLL 齐备、运行根可写, 以及调度侧要读入的两个
 文件分别在位. 这些条件不满足时提交回测只会得到一个难以归因的启动失败, 故在设置页提前暴露.
 
 本端点要求管理员 (计划原文把它列为免认证, P1 实施时先收为需认证, 现再收为仅管理员): 响应要
 报出引擎根与运行根的绝对路径、缺失的 DLL 名与解释器版本, 即本机内部布局的清单. 单机部署没有
 负载均衡这类匿名消费者, 而普通用户拿到这份清单只有泄漏面——他能做的动作里没有一项需要它.
 
-三个引擎侧输入的缺失**不并入 `ready`**: `market_data_root` 与 `session_file_path` 缺失会让
-每个作业都构造不出工作目录, `seed_database_path` 缺失只是让费用三项退化成 0 (引擎自己
-`exists` 之后 Warning 并继续, 见 `SimExchange.cpp`). 分成三个独立的旗标, 调用方才能分辨
-"跑不了"与"跑得了但费用不全".
+两个引擎侧输入的缺失**不并入 `ready`**: 两者缺失都会让每个作业构造不出工作目录 (行情根还决定
+行情备不备得齐). 分成独立的旗标, 调用方才能分辨"跑不了"与"跑得了但行情不全".
+
+**种子库不在这里**, 它不再是一个盘上的全局文件: 现在按轮生成、落在各轮自己的作业目录里 (见
+`reference_data.seed_database`), 没有一个固定的路径可以探. 费率够不够在**提交时**就拦下来
+(见 `services.run_submission`), 自检不必再承担这一项.
 """
 
 from __future__ import annotations
@@ -57,8 +59,6 @@ class EngineHealthResponse(BaseModel):
     market_data_root_exists: bool
     session_file_path: str
     session_file_exists: bool
-    seed_database_path: str
-    seed_database_exists: bool
 
 
 def _probe_directory_writable(directory: Path) -> bool:
@@ -84,7 +84,7 @@ async def read_health_handler(
     settings: SettingsDependency,
     admin_user: AdminUserDependency,
 ) -> EngineHealthResponse:
-    """引擎自检: 扩展模块、运行时 DLL、运行根可写性与三个引擎侧输入."""
+    """引擎自检: 扩展模块、运行时 DLL、运行根可写性与两个引擎侧输入."""
 
     python_binding = find_python_binding(settings.engine_root)
 
@@ -111,6 +111,4 @@ async def read_health_handler(
         market_data_root_exists=settings.market_data_root.is_dir(),
         session_file_path=str(settings.session_file_path),
         session_file_exists=settings.session_file_path.is_file(),
-        seed_database_path=str(settings.seed_database_path),
-        seed_database_exists=settings.seed_database_path.is_file(),
     )

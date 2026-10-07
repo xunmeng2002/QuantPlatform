@@ -45,6 +45,7 @@ class LastSubmittedParameters:
     start_trading_day: str = ""
     end_trading_day: str = ""
     initial_capital: float | None = None
+    commission_group_id: int | None = None
     params: dict[str, object] = field(default_factory=dict)
 
 
@@ -93,5 +94,6 @@ async def read_last_submitted_parameters(
         start_trading_day=decoded_fields.start_trading_day,
         end_trading_day=decoded_fields.end_trading_day,
         initial_capital=decoded_fields.initial_capital,
+        commission_group_id=decoded_fields.commission_group_id,
         params=decoded_fields.parameter_values,
     )

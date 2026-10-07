@@ -37,15 +37,15 @@ RUN_OWNER_USERNAME = "run-owner"
 
 
 @pytest.fixture
-def engine_inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
-    """三个引擎侧输入的真实落位: 行情根 (目录), 会话表 (文件), 种子库 (不建).
+def engine_inputs(tmp_path: Path) -> tuple[Path, Path]:
+    """两个引擎侧输入的真实落位: 行情根 (目录) 与会话表 (文件).
 
     会话表**必须真的落一个文件**: 提交侧在 `session_file_path` 缺失时直接 400, 不建它的话
     每一条提交用例都会死在"会话表文件不存在"上, 而与它想测的东西毫无关系.
 
-    种子库故意**不建**: 本机 `bin/Release` 下本就没有 `BackTestInit.db`, 引擎对它缺失是优雅
-    降级 (费用三项退化成 0). 造一个假的反而让测试环境与本机真实环境不一致. 需要它的用例
-    自己 touch 一个.
+    **种子库不在这里**: 它按轮生成、落在各轮自己的作业目录里 (见 `reference_data.seed_database`),
+    盘上没有哪个固定的全局文件可以预先摆好 —— 要动它的用例得自己造一份, 见
+    `test_seed_database.py`.
 
     行情根只建到 `Bar/` 一层: 引擎自己往下拼 `Identity=*/Year=*/*.parquet`, 而桩策略根本不
     读行情——桩读的是平台渲染的配置, 这条正是 §7.1 要测的等价性.
@@ -58,7 +58,7 @@ def engine_inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
     session_file_path.parent.mkdir(parents=True, exist_ok=True)
     session_file_path.write_text(TEST_SESSION_FILE_CONTENT, encoding="utf-8")
 
-    return market_data_root, session_file_path, tmp_path / "engine" / "BackTestInit.db"
+    return market_data_root, session_file_path
 
 
 @pytest.fixture
@@ -76,12 +76,12 @@ def quote_hub_root(tmp_path: Path) -> Path:
 @pytest.fixture
 def platform_settings(
     tmp_path: Path,
-    engine_inputs: tuple[Path, Path, Path],
+    engine_inputs: tuple[Path, Path],
     quote_hub_root: Path,
 ) -> PlatformSettings:
     """指向临时目录的配置."""
 
-    market_data_root, session_file_path, seed_database_path = engine_inputs
+    market_data_root, session_file_path = engine_inputs
 
     return PlatformSettings(
         database_url=f"sqlite+aiosqlite:///{(tmp_path / 'catalog.db').as_posix()}",
@@ -98,7 +98,6 @@ def platform_settings(
         http_port=TEST_HTTP_PORT,
         market_data_root=market_data_root,
         session_file_path=session_file_path,
-        seed_database_path=seed_database_path,
         quote_hub_root=quote_hub_root,
     )
 

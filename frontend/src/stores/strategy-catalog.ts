@@ -8,17 +8,9 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 
+import { collectAllPages } from '../api/pagination';
 import { fetchStrategies } from '../api/strategies';
-import { MAXIMUM_PAGE_SIZE } from '../api/types';
 import type { Strategy } from '../api/types';
-
-/**
- * 翻页上限.
- *
- * 兼作死循环的保险: 后端若把 `total` 报得比实际记录数大, `offset >= total` 永远不成立,
- * 没有这个上限就会一直请求下去.
- */
-const MAXIMUM_CATALOG_PAGE_COUNT = 20;
 
 export const useStrategyCatalogStore = defineStore('strategy-catalog', () => {
   const strategies = ref<Strategy[]>([]);
@@ -42,21 +34,7 @@ export const useStrategyCatalogStore = defineStore('strategy-catalog', () => {
     isLoading.value = true;
 
     try {
-      const collectedStrategies: Strategy[] = [];
-      let offset = 0;
-
-      for (let pageIndex = 0; pageIndex < MAXIMUM_CATALOG_PAGE_COUNT; pageIndex += 1) {
-        const page = await fetchStrategies(offset, MAXIMUM_PAGE_SIZE);
-
-        collectedStrategies.push(...page.records);
-        offset += page.records.length;
-
-        if (page.records.length === 0 || offset >= page.total) {
-          break;
-        }
-      }
-
-      strategies.value = collectedStrategies;
+      strategies.value = await collectAllPages(fetchStrategies);
       hasLoaded.value = true;
     } finally {
       isLoading.value = false;

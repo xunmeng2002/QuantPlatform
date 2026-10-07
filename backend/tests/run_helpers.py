@@ -27,15 +27,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.catalog.database import PlatformDatabase
 from app.catalog.enums import (
     TERMINAL_RUN_STATUSES,
+    CommissionDirection,
     MarketDataType,
     RunStatus,
     StrategyVisibility,
 )
-from app.catalog.models import RunModel, StrategyModel, StrategyVersionModel, UserModel
+from app.catalog.models import (
+    BaseCommissionModel,
+    CommissionGroupModel,
+    RunModel,
+    StrategyModel,
+    StrategyVersionModel,
+    UserModel,
+)
 from app.catalog.schemas import RunDetailResponse
 from app.config import PlatformSettings
 from app.ids import generate_identifier
 from app.main import create_application
+from app.reference_data.rate_expansion import EXCHANGE_LEVEL_INSTRUMENT_ID
+from app.reference_data.seed_database import SEED_DATABASE_STAGING_PREFIX
 from app.services.strategy_store import (
     UploadedStrategyVersion,
     store_strategy_version,
@@ -46,7 +56,7 @@ from app.strategy_configuration import (
     INSTRUMENT_ID_KEY_NAME,
 )
 
-from .helpers import bearer_headers
+from .helpers import DEFAULT_COMMISSION_GROUP_ID, bearer_headers
 
 
 STUB_SOURCE_PATH = Path(__file__).resolve().parent / "strategies" / "stub_strategy.py"
@@ -95,6 +105,24 @@ DEFAULT_INSTRUMENT_ID = "600519"
 DEFAULT_START_TRADING_DAY = "20241001"
 DEFAULT_END_TRADING_DAY = "20241231"
 DEFAULT_INITIAL_CAPITAL = 1000000.0
+
+DEFAULT_COMMISSION_GROUP_NAME = "用例的费率组"
+
+# 用例在这两个交易所下提交 A 股合约 (`test_run_prefill` 用的是深市那只), 故两处都要备好费率;
+# 交易所级那一档对任何合约都成立, 于是备的是一对而不是一份合约清单.
+RATE_READY_EXCHANGE_IDS = (DEFAULT_EXCHANGE_ID, "SZSE")
+
+# 引擎那两档方向 (买、卖各一行), 也就是"没用到方向通配"的那一对 —— `ensure_contract_rates` 的
+# 默认取值. 写成裸 `int` 是因为那个参数本身收裸 `int` (要收得下平台侧的 `-1`).
+ENGINE_RATE_DIRECTIONS = (CommissionDirection.BUY.value, CommissionDirection.SELL.value)
+
+# 封底取一个正值: 引擎那边 MinCommission 为正即参与封底, 于是"这一轮真的收了费"这件事不取决于
+# 成交金额 (桩策略可以一笔都不成交), 而封顶留 0 —— 引擎把它当"不设限".
+DEFAULT_MIN_COMMISSION = 5.0
+DEFAULT_NO_COMMISSION_CAP = 0.0
+DEFAULT_RATE_BY_MONEY = 0.0003
+DEFAULT_STAMP_TAX_BY_MONEY = 0.0005
+DEFAULT_TRANSFER_FEE_BY_MONEY = 0.00001
 
 STATUS_POLL_INTERVAL_SECONDS = 0.02
 DEFAULT_TERMINAL_TIMEOUT_SECONDS = 60.0
@@ -158,6 +186,130 @@ def build_stub_configuration_text(
     )
 
 
+def _build_rate_row(
+    exchange_id: str, direction: int, commission_group_id: int
+) -> BaseCommissionModel:
+    """交易所级 (合约格留空) 的一行费率.
+
+    **交易所级而不是合约级**: 品种级的短码要先在品种表里登记才过得了守门, 而这里只是给用例铺一个
+    能跑的起点; 交易所级那一档对任何合约都成立, 于是用例换合约也不必再补一行.
+
+    方向收的是**裸 `int`**: 这里也要造得出平台侧的第三档 `双向` (`-1`), 而它不在
+    `CommissionDirection` 里 —— 收枚举就等于在造数据的入口上先把那一档挡掉一半.
+
+    组号显式传入而不是取那个默认常量: 用例要造得出"2 号组有费率、1 号组没有"这种局面, 而组号正是
+    那种局面的全部差别.
+    """
+
+    return BaseCommissionModel(
+        id=generate_identifier(),
+        commission_group_id=commission_group_id,
+        exchange_id=exchange_id,
+        instrument_id=EXCHANGE_LEVEL_INSTRUMENT_ID,
+        direction=int(direction),
+        open_by_money=DEFAULT_RATE_BY_MONEY,
+        close_by_money=DEFAULT_RATE_BY_MONEY,
+        open_by_volume=0.0,
+        close_by_volume=0.0,
+        open_stamp_tax_by_money=DEFAULT_STAMP_TAX_BY_MONEY,
+        close_stamp_tax_by_money=DEFAULT_STAMP_TAX_BY_MONEY,
+        open_transfer_fee_by_money=DEFAULT_TRANSFER_FEE_BY_MONEY,
+        close_transfer_fee_by_money=DEFAULT_TRANSFER_FEE_BY_MONEY,
+        min_commission=DEFAULT_MIN_COMMISSION,
+        max_commission=DEFAULT_NO_COMMISSION_CAP,
+    )
+
+
+async def ensure_contract_rates(
+    database: PlatformDatabase,
+    exchange_id: str,
+    directions: Sequence[int] = ENGINE_RATE_DIRECTIONS,
+    commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID,
+) -> None:
+    """给这个交易所备好该组的费率行, 使得该交易所下的合约提交得上去.
+
+    提交侧会按**这一轮选中的那个组**把三级规则展开, 三档都没命中就 400 (见
+    `services.run_submission`). 提交类用例要验的都不是"费率在不在", 而是权限、字段校验、产物落
+    盘那些事; 不备费率的话每一条都会死在"没有费率"上, 与它想测的东西毫无关系. 要验那条拦截的用例
+    把行删掉即可 (见 `drop_contract_rates`); 要验"换个组就没费率"的用例给这里传另一个组号即可.
+
+    `directions` 默认是引擎那两档 (买、卖各一行); 传 `(BOTH_DIRECTIONS,)` 就只铺**一条双向**的
+    规则 —— 库里存的是 `-1`, 只有展开那一步才摊成买、卖两行.
+
+    幂等: 已经备过就什么都不做, 于是同一个用例里调两次也不会撞上那条唯一约束.
+    """
+
+    async with database.session_scope() as session:
+        group_id = await session.scalar(
+            select(CommissionGroupModel.id).where(
+                CommissionGroupModel.commission_group_id == commission_group_id
+            )
+        )
+
+        if group_id is None:
+            session.add(
+                CommissionGroupModel(
+                    id=generate_identifier(),
+                    commission_group_id=commission_group_id,
+                    commission_group_name=DEFAULT_COMMISSION_GROUP_NAME,
+                )
+            )
+
+            # 费率行对组有外键, 而本仓不用 `relationship()`, 故 SQLAlchemy 排不出这两张表的插入
+            # 次序——冲一下等于明说"组先落库".
+            await session.flush()
+
+        for direction in directions:
+            resolved_direction = int(direction)
+
+            existing_row_id = await session.scalar(
+                select(BaseCommissionModel.id).where(
+                    BaseCommissionModel.commission_group_id == commission_group_id,
+                    BaseCommissionModel.exchange_id == exchange_id,
+                    BaseCommissionModel.instrument_id
+                    == EXCHANGE_LEVEL_INSTRUMENT_ID,
+                    BaseCommissionModel.direction == resolved_direction,
+                )
+            )
+
+            if existing_row_id is None:
+                session.add(
+                    _build_rate_row(exchange_id, resolved_direction, commission_group_id)
+                )
+
+        await session.commit()
+
+
+async def drop_contract_rates(
+    database: PlatformDatabase,
+    direction: CommissionDirection | None = None,
+    commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID,
+) -> None:
+    """把该组里所有**交易所级**的行撤掉 —— 给"缺费率就要被拦"那组用例用.
+
+    `direction` 留空即全部撤掉; 指定一个就只撤那一侧, 用来验"只有买缺"这种半个缺口. 组号留空即
+    默认那一组: 撤掉别组对默认组那一轮毫无影响, 那种差别正是"组号现在真的被用到了"的证据.
+    """
+
+    conditions = [
+        BaseCommissionModel.commission_group_id == commission_group_id,
+        BaseCommissionModel.instrument_id == EXCHANGE_LEVEL_INSTRUMENT_ID,
+    ]
+
+    if direction is not None:
+        conditions.append(BaseCommissionModel.direction == direction.value)
+
+    async with database.session_scope() as session:
+        rows = (
+            await session.scalars(select(BaseCommissionModel).where(*conditions))
+        ).all()
+
+        for row in rows:
+            await session.delete(row)
+
+        await session.commit()
+
+
 async def create_runnable_strategy(
     database: PlatformDatabase,
     settings: PlatformSettings,
@@ -168,11 +320,17 @@ async def create_runnable_strategy(
     visibility_type: StrategyVisibility = StrategyVisibility.PRIVATE,
     configuration_template: dict[str, object] | None = None,
 ) -> RunnableStrategy:
-    """建一个策略并把它的一份版本**真的写到盘上**.
+    """建一个策略并把它的一份版本**真的写到盘上**, 顺带让默认交易所的合约提交得上去.
 
     版本走 `store_strategy_version`, 与上传接口同一条代码路径: 作业目录构造要从版本目录复制入口
     文件, 只落库的版本会让每一个作业在"复制入口文件"那一步失败, 而那种失败看起来像调度器的缺陷.
+
+    费率那一步见 `ensure_contract_rates`: 一份"可跑"的策略若配上一条提交不上去的合约, 它就不叫
+    可跑, 而这条链上每一个用例都会死在同一个与它无关的地方.
     """
+
+    for exchange_id in RATE_READY_EXCHANGE_IDS:
+        await ensure_contract_rates(database, exchange_id)
 
     resolved_template = (
         configuration_template
@@ -220,6 +378,7 @@ def build_run_request(
     start_trading_day: str = DEFAULT_START_TRADING_DAY,
     end_trading_day: str = DEFAULT_END_TRADING_DAY,
     initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID,
     params: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """一份合法的提交请求体.
@@ -236,6 +395,7 @@ def build_run_request(
         "start_trading_day": start_trading_day,
         "end_trading_day": end_trading_day,
         "initial_capital": initial_capital,
+        "commission_group_id": commission_group_id,
         "params": dict(params or {}),
     }
 
@@ -276,6 +436,7 @@ async def submit_run(
     start_trading_day: str = DEFAULT_START_TRADING_DAY,
     end_trading_day: str = DEFAULT_END_TRADING_DAY,
     initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID,
     params: dict[str, object] | None = None,
 ) -> RunDetailResponse:
     """经接口提交一次回测, 断言 201 再解出响应体."""
@@ -293,6 +454,7 @@ async def submit_run(
             start_trading_day=start_trading_day,
             end_trading_day=end_trading_day,
             initial_capital=initial_capital,
+            commission_group_id=commission_group_id,
             params=params,
         ),
     )
@@ -610,3 +772,21 @@ def run_directory_names(settings: PlatformSettings) -> set[str]:
         return set()
 
     return {entry.name for entry in settings.runs_root.iterdir() if entry.is_dir()}
+
+
+def staging_seed_database_names(settings: PlatformSettings) -> set[str]:
+    """运行根下残留的暂存种子库文件名.
+
+    这一族文件以 `.seed-` 开头、落在运行根里 (见 `reference_data.seed_database`): 正常路径上它被
+    搬进作业目录, 失败路径上它被删掉 —— 两种收场都不该在运行根里留下它. 它是**文件**而不是目录,
+    故 `run_directory_names` 看不见它.
+    """
+
+    if not settings.runs_root.exists():
+        return set()
+
+    return {
+        entry.name
+        for entry in settings.runs_root.iterdir()
+        if entry.name.startswith(SEED_DATABASE_STAGING_PREFIX)
+    }

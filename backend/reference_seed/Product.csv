@@ -1,0 +1,3 @@
+ExchangeId,ProductId,ProductName,ProductClass,VolumeMultiple,PriceTick,MaxMarketOrderVolume,MinMarketOrderVolume,MaxLimitOrderVolume,MinLimitOrderVolume,SessionName
+SSE,600,股票,6,1,0.01,0,0,0,0,
+SZSE,000,股票,6,1,0.01,0,0,0,0,

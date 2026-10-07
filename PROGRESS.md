@@ -39,149 +39,302 @@ Python 策略**。
 
 ## ✅ 已完成
 
+### D.34 · 2026-10-07 （第三十四批） 手续费组随轮冻结：提交页选组 + 删组两道闸
+
+- **触发**：用户「在新建回测的地方选手续费组」。此前组号是
+  `app/scheduler/engine_config.py` 的**模块常量** `COMMISSION_GROUP_ID = 1`，管理端能建 2 号、
+  3 号组，但**永远只有 1 号组会被用到**。
+- **用户拍板两点**：① 请求体里这一格**必填、不给默认值**；② 被**配置模板**引用着的组，
+  **删除时拦**。
+- **引擎侧零改动（三处 `file:line` 已核实）**：这个键本来就由 `Config` 解析
+  （`Config.cpp:53`）、由 `SimExchange` 记下（`SimExchange.cpp:106`）并在建账号时带上
+  （`SimExchange.cpp:786`）——与**早就是运行级字段**的 `InitialCapital` 完全同构（同一个
+  `Config` 解析、同一个 `HandleRegisterAccount` 消费）。故本批全部落在 QuantPlatform，
+  `QuantTrading` 只改一句文档（见其 `docs/backtest-run-contract.md` §5）。
+- **语义：组号随轮冻结**。提交时写进该轮 `BackTest.json` 的 `CommissionGroupId`，落库于
+  `Runs.BacktestConfigJson`；**提交期的费率校验与调度期按轮生成种子库读同一个值**，不再各读
+  一个常量。
+- **落点（后端）**：`services/run_configuration.py` 加 `COMMISSION_GROUP_ID_FIELD_NAME` /
+  `COMMISSION_GROUP_ID_KEY = "CommissionGroupId"` / `validate_commission_group_id`（照
+  `validate_initial_capital` 的形制）；`DecodedRunFields` 加字段，`decode_run_fields` **从引擎
+  配置**读它（与 `initial_capital` 同一侧，**刻意不进** `RUN_FIELD_KEY_NAMES` —— 那张表喂的是
+  策略配置，而组号只在 `BackTest.json` 里）；
+  **新增** `app/services/commission_group.py`（DRY：`commission_group_exists` 共用那条 `select`
+  谓词 + `ensure_commission_group_exists` 400 包装，被提交与模板建两处共用）；
+  `services/run_submission.py` 在费率校验**之前**另问一次"组存在"；
+  `scheduler/runner.py` 的 `LaunchContext` 多一个 `commission_group_id`（从**冻结的**
+  `engine_configuration_text` 解出，`_decode_launch_fields` 只负责如实退回取值），解不出即
+  `UnrunnableJob(UNDECODABLE_COMMISSION_GROUP_MESSAGE)`。
+- **报备：删掉 `engine_config.COMMISSION_GROUP_ID` 这个模块常量**（属 Harness §3.1「弃用一个
+  既有导出符号」的强制确认点，本批按计划里已获批处理）。理由：留着它早晚被下一个调用点捡回去
+  用，而三个消费点（提交侧费率校验、种子库展开、`render_engine_config`）**全部改走运行级取值**。
+  测试侧改从 `tests/helpers.py:DEFAULT_COMMISSION_GROUP_ID` 取（约七个文件）。
+- **两道闸的错误码**：提交 / 建模板时组不存在 → **400**
+  （`UNKNOWN_COMMISSION_GROUP_MESSAGE_TEMPLATE`，点名组号并指向「基础数据」页）；
+  删一个被模板引用的组 → **409**
+  （`COMMISSION_GROUP_TEMPLATE_REFERENCED_MESSAGE_TEMPLATE`，**点名条数**），与既有的"组下还
+  有费率明细就拦"并列。**这条 400 不能并进那次费率校验**：交易对留空时那条整个跳过，而组号照样
+  会被冻进这一轮的引擎配置——表现为引擎按一个空组计费。
+- **迁移的 `default=1` 是回填值，不是接口默认值**：
+  `catalog/migrations.py::add_missing_columns` 要求 NOT NULL 新列有一个**可渲染的标量默认**，
+  否则该列根本不会被加上。老模板行得到 1，**与它们此前的实际行为一致**（那时平台侧只有那一个
+  常量）。docstring 里把这句写死，免得日后被读成"接口默认值"。
+- **新增一条非管理员只读路由** `GET /api/reference-data/commission-group-options`：管理面那九个
+  端点都挂着 `AdminUserDependency`，而**普通用户有权提交回测** —— 他要选组就必须看得见组。故在
+  同一 router 里加一条**只要登录**的只读投影（组号 + 组名），并在该模块 docstring 里点明这处
+  例外（"这是给提交页用的选项投影，不是管理面"）。
+- **前端**：`domain/run-form.ts` 的 `RunFieldInputs.commissionGroupId: number | null`
+  （**不拿文本承载数值** —— 这一格是下拉选出来的，与手输的 `initialCapitalText` 有意分叉）；
+  新增 `readCommissionGroupId`，拒 `null` / 非整数 / `< 0`，且**不写 `?? 0`**（`0` 是**合法**
+  组号，与 `initialCapital ?? 0` 那种"下游还会再拒一次"的情形不同）；`RunSubmitView.vue` 在
+  「运行范围」卡片加**第三个独立取数**的下拉（`id="run-commission-group"`，文案「组号 · 组名」），
+  **不预选**（只有"上次提交的参数"里带了组号才回填）；一个组都没有时禁用并给出"先去基础数据页
+  建一个"的**可读原因**，而不是一个空的静默下拉。
+- **验收**：后端 `pytest` **740 项全过**（D.33 基线 730 + 本节 10）；前端 `type-check` 干净 +
+  `vitest` **238 项 / 30 文件全绿**（233 + 5）。
+- **仍未决 —— 待用户手工验收**：新建回测页选组走查（含**一个组都没有时的提示**、与"上次提交的
+  参数"的回填往返）、删一个被模板引用的组被 409 拒、该轮 `BackTest.json` 的 `CommissionGroupId`
+  与作业目录种子库里的费率行属于**同一个组**。清单见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §16。
+- **新 ❓：组号 `0` 与"键丢了"在引擎侧分辨不出**（jsoncpp 的 `asInt()` 对缺键返回 0）。平台侧
+  从不把键弄丢（`_read_integer` 回 `None` → 翻译成 `UnrunnableJob`），故这是"绕过平台手改
+  `BackTest.json`"才够得着的场景；本批保留 `>= 0` 的取值域（与管理端写侧 schema 同口径），
+  **未另行收口**。
+- **已知风险（已接受）**：① **组选错 = 静默按 0 计费**（引擎对不存在的组不报错，
+  `CommissionGroupNotExist` 是死代码）—— 靠提交期那两道校验兜住，两者都点名组号与合约；
+  ② **队列里的轮不受删组拦截保护** —— 它们会在起跑前以 `UnrunnableJob` 失败，文案点名缺哪个
+  合约、哪个方向（**不是静默降级**）。
+- **提交状态**：**与 D.31 / D.32 / D.33 的改动同一棵未提交树**（同一批文件被四批都动过，
+  清单见 `git status`）。**未提交**（按惯例由用户执行）。
+
+### D.33 · 2026-10-07 （第三十三批） 费率方向加「双向」通配 + 展开时摊成两行
+
+- **触发**：用户「给买卖方向也提供一个通配选项吧, 大部分对于买卖双向都是一样的。也在生成
+  initdb 时进行扩展」。D.32 解决了"按合约 / 品种 / 交易所录"，但方向那一格仍是买卖各占一行 ——
+  佣金与过户费本来就买卖同数，只有印花税分侧，于是每录一条规则都要复制一遍。
+- **用户拍板**：新建规则的「方向」**默认取双向**（买 / 卖仍可选）。
+- **编码方式与三级作用域同一套路：不加列，由 `Direction` 的取值承载** —— `-1` = 双向（**只在
+  平台侧存在**）、`0` = 只买、`1` = 只卖。引擎那四列的精确查找一字不动，**引擎零改动**。
+- **两侧同时放宽时谁赢，两条次序**：① **作用域先于方向**（更具体的一档遮住更宽的一档，故合约级
+  「双向」压过品种级「卖」）；② **同一格内，精确方向遮住双向**（同一合约上既有「双向」又有
+  「卖」时，卖那一笔取「卖」那一行）。
+- **落点**：后端 `catalog/enums.py` 加 `RateDirection`（`BOTH = -1`，买 / 卖两值**取自**
+  `CommissionDirection` 而不另写一遍）；`catalog/schemas.py` 的写侧改收它（读侧仍是裸 `int`）；
+  `rate_expansion.py` 加 `_find_row_for_direction`（**每档内先精确、再双向**），
+  `_with_instrument_id` 改名为 **`_bind_row_to_contract`**（整行照搬，**同时改写合约格与方向格**
+  这两处键列）；`seed_database.py` 在写文件**之前**加 `_ensure_base_commissions_are_expanded`
+  （方向只许 0 / 1、合约格不许为空，不符即抛且**连目录都不建**）。
+  前端：`api/types.ts` 的 `COMMISSION_DIRECTIONS` / `CommissionDirection` 换成
+  `RATE_DIRECTIONS` / `RateDirection`（**删一个导出符号**，全仓唯一消费者是费率面板）+
+  `BOTH_DIRECTIONS`；`domain/labels.ts` 加 `-1: '双向'` 与 `describeCommissionDirectionPhrase`
+  （`双向` 已经是完整说法，**不再接「向」**）；面板默认双向、下拉三档、方向那一格的提示改写。
+- **有意撤掉一条既有校验（报备）**：`test_a_direction_outside_the_engine_values_is_rejected`
+  原本参数化 `[-1, 2]` 两条都期望 422 —— `-1` 从"引擎取值之外"变成**有意收下的合法档**，故这条
+  收成 `[2]`，另起一条"双向可建、可读回"的用例。**"方向只能是 0 / 1"这条规则只在引擎那一侧
+  继续成立**，平台这一侧不再成立。
+- **三道网兜住「`-1` 漏进种子库」**（这是本次唯一会**静默算错钱**的路径：引擎那四列查不到就
+  `CommissionMissingCount++`、费用按 0 算，而回测照常报"成功"）：① 绑定函数同时改写方向格；
+  ② 写入口的断言（管得住任何调用方，`write_seed_database` 是公开函数）；③ `test_seed_database.py`
+  里对**真生成的文件**断言每一行 `BaseCommission.Direction ∈ {0, 1}`。前端另有一条断言钉住
+  「双向费率」那句话里**不出现**「双向向费率」。
+- **验收**：后端 `pytest` **730 项全过**（D.32 基线 722 + 本节 8 条）；前端 `type-check` 干净 +
+  `vitest` **233 项 / 30 文件全绿**（231 + 2）。
+- **仍未决 —— 待用户手工验收**：`acceptance-checklist.md` §16.2 加的"**只录一条双向即可提交**"、
+  §16.3 加的第 4 条判据（**产物 `Direction` 只有 0 与 1，绝不出现 `-1`**）。
+- **已知风险（已接受）**：**双向会把印花税收进买入侧** —— 界面提示里明说了这件事，但**不拦**
+  （别的市场确实两侧都收），要不要拆成买 / 卖两行由用户定。
+- **提交状态**：**与 D.31 / D.32 的改动同一棵未提交树**（同一批文件被三批都动过，清单见
+  `git status`）。**未提交**（按惯例由用户执行）。
+
+### D.32 · 2026-10-07 （第三十二批） 费率三级设置 + 种子库改按轮生成
+
+- **触发**：用户「费率怎么没有通配方案？这样得对每个合约都设一遍。我要按**合约 / 品种 /
+  交易所**三级来设」。D.31 的费率明细只能逐合约录，扩到全市场不可维护。
+- **引擎侧的硬约束（已核实，决定了做法）**：`CommissionCalculator::Apply` 对
+  `(CommissionGroupId, ExchangeId, InstrumentId, Direction)` 只做**一次精确哈希查找**，
+  `BaseCommission` 表里没有"品种"这一档、`Trade` 也不带 `ProductId`。所以通配**不可能只靠
+  数据表达**，只能二选一：改引擎加回退链，或平台侧把通配**展开**成具体合约行。
+- **用户拍板**：**平台侧展开，引擎零改动**——三级规则存 catalog，**每一轮开始前**按该轮用到的
+  合约摊成合约级行，写进作业目录里的 `BackTestInit.db`；引擎读到的永远是一份只有该轮合约的小库。
+- **反转了 D.31 的拍板 ①**（全局共享一份种子库 → 按轮生成）。**显式改写、不静默覆盖**：
+  `platform-plan.md` §14 起首加同日订正块、§14.2 重写、§14.4 重写、拍板表与 §12.14 各加指针；
+  `acceptance-checklist.md` §16 全节改写；`job-workspace.md` §1 加第五个输入与 §1.1。
+  **撤掉的实现**：`commit_and_export_seed_database`（保存即重写全局文件）、状态端点
+  `GET/POST /api/reference-data/seed-database`、`SeedDatabaseUnavailableError` + 503 映射、
+  `app.state.seed_database_lock`、`settings.seed_database_path` / `QUANT_SEED_DATABASE_PATH`。
+  **保留**：`SEED_DATABASE_FILENAME` 常量（作业目录里仍用）、启动期"空表播种"（`initial_rows`）。
+- **三级作用域不加列**，由 `InstrumentId` 那一格的取值承载：空串 = 交易所级；≤ 4 字符且**已在
+  `Products` 表登记**的短码 = 品种级；其余 = 合约级。不另存一列，免得"作用域写着品种、合约格
+  写着 `600519`"那种自相矛盾的行。
+- **落点**：后端新增 `reference_data/rate_expansion.py`（纯函数展开器：精确 → 品种前缀 →
+  交易所空串，**方向不回退**、**整行替换**）；`seed_database.py` 改为 `write_seed_database`
+  写**指定行集合**（`generate_run_seed_database` / `build_seed_database_staging_path` /
+  `discard_staged_seed_database`）；
+  `services/run_submission.py` 加 `_ensure_run_rates_available`（**提交就拦**，缺任一格 400，
+  文案点名合约与方向）并把 `DbInitHost` 从全局路径改为 `runs/<RunId>/BackTestInit.db`；
+  `scheduler/workspace.py` 的 `JobFileSet` 多一个 `seed_database_source_path`（**搬**进作业目录、
+  随其余文件一起 `rename` 原子发布）、`runner.py` 的 `_stage_run_seed_database` 在起进程前生成、
+  失败则 `discard_staged_seed_database` 让该轮失败；
+  `routers/reference_data.py` 加**品种级守门**（未登记的短码 → 400）。
+  前端：`api/types.ts` 加 `RATE_SCOPES` / `RateScope` / `MAXIMUM_PRODUCT_CODE_LENGTH`、
+  删 `SeedDatabaseStatus`；新 `domain/rate-scope.ts`（`resolveRateScope` / `describeRateScope` /
+  `describeRateScopeTarget`）；新 `api/pagination.ts`（`collectAllPages`，从 `strategy-catalog`
+  抽出，DRY）；`ReferenceBaseCommissionPanel.vue` 换**作用域选择器** + 条件输入 + 作用域徽章列；
+  `ReferenceDataView.vue` 删状态卡与「重新生成」。
+- **几处非显然的判断**：① **前端认作用域不用抓品种目录**——后端守门使"非空且 ≤ 4 字符 ⇒ 必然
+  已登记"成立，故长度规则**精确复现**后端分类，`resolveRateScope` 是纯函数（已写了边界测试）；
+  ② 品种下拉**不建 Pinia store**（单一消费者、跨测试串状态），改为面板内 `collectAllPages` 取数，
+  抽取到 `api/pagination.ts` 供 `strategy-catalog` 复用；③ 品种级时**锁住交易所那一格**，让
+  "交易所与品种对不上"在结构上造不出来；④ 展开器**整行替换**（含 `MinCommission` /
+  `MaxCommission`），不做"合约级只覆盖佣金、印花税从交易所级继承"那种部分覆盖。
+- **验收**：后端 `pytest` **722 项全过**（基线 700 + 本节新增）；
+  前端 `type-check` 干净 + `vitest` **231 项 / 30 文件全绿**。
+- **仍未决 —— 待用户手工验收**：费率三级走查（含未登记短码被 400 拦、换作用域清空代码）、
+  该轮作业目录 `sqlite3` 三条判据（**恰好三表 / 列序对齐 / `BaseCommission` 只有该轮合约的行**）、
+  真引擎一轮四个计数、**三级全删则提交被 400 拦**、以及**与 `MdbStructs.cpp` 的列序人工对照**
+  （每一轮都新造一份，漂移暴露面更大）。清单见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §16。
+- **已知风险（已接受）**：`bin/*/BackTestInit.db` **从此无人维护**（WSL 手工跑 `TestBackTest`
+  时费率会缺，用户已确认）；**启发式守门 ≤ 4 字符**是近似；**策略自订别的合约**不在本期扫描范围。
+- **提交状态**：**与 D.31 的改动同一棵未提交树**，无法按批切成两个提交（同一批文件被两边都动过，
+  清单见 `git status`）。**未提交**（按惯例由用户执行）。
+- **几处计划外的额外改动（报备）**：① `get_database` / `DatabaseDependency` 再次被删（等于恢复
+  D.29 的清理——中途临时加回过，最终不留）；② `/api/health` 响应去掉两个字段；③ 品种级守门返回
+  **400**（计划写的是 422）；④ **D.03 的无回显规则**有意收窄："缺费率"文案点名的是一个**合法
+  输入**（缺哪个合约、哪个方向），不按 `assert_rejected` 的无回显口径路由；⑤ 费率面板十项费率的
+  `ElInputNumber` 步进由 `0.0001` 放到 **`0.000001`**（用户当场指出"四位不够"）——步进只管键盘上
+  下键，但它同时是"这一格认到第几位小数"的下限；显示 (`formatDecimal` 默认 6 位) 与后端 (`Float`)
+  本来就是六位 / 不限，故这一改只是把三者对齐，`最小变动价位` 那格（`0.01`，两位）未动。
+
+### D.31 · 2026-10-07 （第三十一批） 回测基础数据管理端：引擎种子库由平台生成
+
+> ⚠️ **本条有一半当日即被 `D.32` 推翻**（2026-10-07，同一批工作的后半段）：**拍板 ①「种子库
+> 全局共享一份、不做 per-job」已反转**为**按轮生成、落在作业目录里**；随之撤掉"保存即重写全局
+> 文件"那条路径（`commit_and_export_seed_database`）、`SeedDatabaseUnavailableError` → 503
+> **映射与 `app.state` 那把锁**；`settings.seed_database_path` / `QUANT_SEED_DATABASE_PATH`
+> **已删**。下文的正文是 D.31 当时的原文，**以 `D.32` 为准**（种子库落点、页面上的状态卡与
+> 「重新生成」按钮、费率三级与提交侧缺口校验都在 `D.32`）。这一批的另一半（三表 CRUD、
+> 引擎列序硬契约、品种码三位、`MinCommission` 0 语义）**未被推翻**。
+
+- **触发**：用户「管理端就是在 QuantPlatform 里面做，可以开始了」。引擎启动时读的三张表
+  （`Product` / `CommissionGroup` / `BaseCommission`）此前**没有任何自动生产方**——
+  `SimExchangeInit` 从 CTP 拉行情但不产费率、`Product` 只有期货档，运行的组号是硬编码常量
+  `COMMISSION_GROUP_ID = 1`。唯一路径是手工跑 `makeseeddb.py`。
+- **推翻一条已记录的决策**：`platform-plan.md` §12.14 与拍板表里的「**种子库不重建**」已显式改写
+  （原文保留并标注订正）。那一条的前提是"盘上没有它、也没有生产方"——**2026-10-07 起生产方就是
+  本平台**。它钉的四条断言（`BasicDataLoaded` / `CommissionMissingCount` / 费用三项）
+  **期望值翻面**：从「缺失」翻成「在位」，见 §16。
+- **用户中途纠正过一次方向**：先前设想的"权威源"不成立——CSV **不是**日常维护的入口，只承担
+  **建表播种**（某张表为空时读一次，此后再不相干）。故**不提供通用 CSV 导入**：数据住在 catalog，
+  日常维护走管理页，引擎读的那个文件是派生物。
+- **四条拍板（2026-10-07 用户定，不再重议）**：① 种子库**全局共享一份**
+  （`settings.seed_database_path`，不做 per-job）；② 本期**只做三表 CRUD + 生成种子库**，
+  提交前缺口校验留下一期；③ **catalog 为准**，`makeseeddb.py` 与 `Configs/SeedCsv/`
+  退役为历史遗留（**文件保留、不再执行**）；④ 种子库落点跟引擎同目录，**不动 `.env`**。
+- **落点**：后端新包 `app/reference_data/`（契约 / 生成器 / 播种三块）、新路由
+  `app/routers/reference_data.py`（九个写端点 + 状态与重生成，全套 `AdminUserDependency`）、
+  随代码发布的 `backend/reference_seed/` 三份 CSV、`errors.py` 新增
+  `SeedDatabaseUnavailableError` → **503**、lifespan 两步接线（播种 → **仅缺文件时**补生成）；
+  前端 `/reference-data`（一页 + 三面板 + `use-reference-table` 组合式）与导航、路由。
+- **几处非显然的判断**：① **引擎按下标读**那个文件（`SELECT *` 喂进字段描述数组），故**列名 /
+  列序 / 列数**是硬契约，唯一声明处是 `seed_contract.py`，生成器**自己写显式 DDL**——用
+  `create_all` 会把九张平台表一并写进种子库、且 `Id` 落在首列就是静默错位；② 九个写端点与
+  「重新生成」**共用** `commit_and_export_seed_database()`（`flush` → 建临时文件 → `commit` →
+  原子发布），次序要排掉的是"库新文件旧"那种**没有接口能观测到**的状态；③ 那把 `asyncio.Lock`
+  挂在 `app.state` 而不是模块全局（pytest-asyncio 每用例一个新事件循环）；④ **品种代码是三位**
+  （`600` / `000`）——它是引擎从行情数据里取到的那个 `ProductId`，填成 `600519` 就一个品种都
+  匹配不上，静默走 `VolumeMultiple = 1` 兜底并计入 `VolumeMultipleFallbackProductCount`；
+  ⑤ 改一个**被引用的组号**改为"先数引用行再拒"（外键没有 `ON UPDATE`，否则 SQLite 抛的
+  `IntegrityError` 会被译成误导性的「该组号已存在」）。
+- **一条旧风险销账**：`MinCommission` / `MaxCommission` 的 0 语义已在
+  `CommissionCalculator.cpp::CalcTradeFee` 查证——**0 表示这一侧不设限**（不是封到 0），
+  且封底封顶**只作用于佣金**，印花税与过户费按成交金额实收。
+- **验收**：后端 `pytest` **700 项全过**（基线 656 + 新增 44）；
+  前端 `type-check` 干净 + `vitest` **220 项 / 28 文件全绿**。
+- **仍未决 —— 待用户手工验收**：页面走查（权限、三表 CRUD、删被引用的组、状态卡与重新生成）、
+  `sqlite3` 的三条判据（**恰好三表 / 列序对齐 / 无平台列**）、真引擎一轮看那四个计数、以及
+  **与 `MdbStructs.cpp` 的列序人工对照**（引擎侧模板生成、会漂移）。清单见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §16。
+- **已知风险（已接受）**：平台**接管了** `bin/Release/BackTestInit.db`（手工造的那份会在第一次
+  保存时被覆盖）；那把锁只在单 worker 内有效，多 worker 部署需换文件锁。
+- **提交状态**：本批（后端 9 改 + 新包 4 文件 + 新路由 + 4 个新测试文件 + 3 份 CSV；前端 6 改 +
+  8 个新文件；四份文档 + 本文件与归档层两文件）。**未提交**（按惯例由用户执行）。
+
 ### D.30 · 2026-10-02 （第三十批） 登录失败节流 + 可信代理白名单
 
-- **触发**：用户「现在就考虑吧，后面就要上云了」。`POST /api/auth/login` 是唯一免令牌的端点，
-  此前可无限次尝试，而口令校验是**同步** PBKDF2（260k 轮）——被刷不只是猜口令，还会把事件循环
-  拖住。上云后它暴露公网，这条从「该不该做」变成「上云前必须落地」。
-- **五条拍板（不再重议）**：① 计数放**进程内存**（单实例是调度器硬前提 §12.11，故无"多 worker
-  各记一份、阈值翻 N 倍"）；② 形态取**连续失败 N 次 → 锁 T 分钟**；③ 阈值 **5 次 / 15 分钟**；
-  ④ 按**用户名 + 来源地址**两维各自计数；⑤ 取 IP 用**可信地址白名单，默认空**——白名单的默认值
-  在任何拓扑下都安全，不需要现在就知道上云后的代理层数；按"代理跳数"配则填小了会产生**静默**的
-  伪造缺口（每次换个自造的 header 就换个桶，永远发现不了）。
-- **落点**：新文件 `app/auth/login_throttle.py`（解析地址的纯函数 + 计数类）；`config.py` 三个
-  带默认值的新字段与校验；`main.py` 装配到**应用实例**（每实例一份，测试互不串味）；`dependencies.py`
-  一个依赖；`routers/auth.py` 把查锁放在**验口令之前**（省一次 DB 查询与 260k 轮 PBKDF2），
-  命中即 429 + `Retry-After`；前端 `client.ts` 补 429 的兜底文案（后端文案正常路径下胜出，
-  这一行兜的是"429 来自反代、响应体没有 `detail`"）。
-- **不加锁，且这不是巧合**：全部公开方法都是**同步**的（内部一次 `await` 都没有），事件循环单线程
-  ⇒「读计数 → 写计数」天然原子；加 `asyncio.Lock` 只会把 PBKDF2 拖进临界区、把登录串行成队列，
-  却拦不到任何真实交错。纪律的落点是一条 `inspect.iscoroutinefunction` 断言——谁改成 `async def`，
-  谁就在读与写之间开了个让出点，而那种失效在单线程手工测试里复现不出来。
-- **几处非显然的判断**：① 未知用户名**照常计数**——只对存在的账号计数的话，429 本身就成了用户名
-  枚举接口，等于把登录那处假校验的防线还回去；② 成功登录**只清用户名桶**，不清地址桶，否则攻击者
-  每隔几次插一次自己的有效登录就能把地址计数清零；③ 停用账号那条 401 **不计数**，它只在口令
-  **已正确**时才走得到；④ 地址解析遇到**解析不出来的项就地回退对端，绝不继续往左**——左边是
-  请求方可写区，这处写错等于把伪造值当客户端；⑤ 两维各 **4096 键**硬上限、惰性清扫，淘汰时
-  **正在生效的锁排在最后**（淘汰它等于给攻击者一条解锁捷径）。
-- **验收证据**：后端 **656 项全过**（基线 621 + 新增 35；新增用例数与改动对得上，无静默跳过）。
-  前端 `type-check` 干净 + `vitest` **209 全绿**（首跑有一条既有 flake——`router/index.spec.ts`
-  的守卫超时，与本批无关，复跑即绿）。**两次变异测试各揪出一条空洞用例**：把"遇坏项即停"改成
-  "跳过坏项继续往左"、把淘汰排序键里的锁定期判断删掉，两次都**全绿**——前者是那条参数化用例
-  左侧填了个同样解析不出来的串（改成**可解析的伪造值**才钉得住），后者是被用户名桶兜住了
-  （五次失败改成分散在五个地址上才露出来）。两处均已修，变异已回滚。
-- **仍未决 —— 待用户手工验收**：错口令 5 次后第 6 次应得 429 且带 `Retry-After`、锁定期间拿对口令
-  仍是 429、以及配了白名单后不同来源各自分桶。**清单见
-  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §15**。
-- **内生风险（已接受，不另做缓解）**：知道受害者用户名的人每 15 分钟发 5 次错口令即可让该账号持续
-  登不进来——影响面限于"被针对账号的登录"（拿不到数据、冒充不了、已签发令牌不受影响），且锁定
-  事件记 warning 日志以便发现。**不采用"锁定期放行正确口令"那种缓解**：那等于让攻击者在 5 次之后
-  继续无限猜，猜对了就进去了。机制与取值规则见 `platform-plan.md` §5.4（部署期安全要求）。
-- **提交状态**：本批（后端 6 个文件 + 前端 1 处 + 三份文档）。
+> **全条见归档**（2026-10-07 移出，原文一字未改）。一段话：给 `POST /api/auth/login` 加
+> 「连续失败 N 次则锁 T 分钟」的节流，阈值 **5 次 / 15 分钟**，按**用户名 + 来源地址**两维各自
+> 计数，计数放**进程内存**（单实例是调度器硬前提）；取来源地址用**可信地址白名单**
+> （`QUANT_TRUSTED_PROXY_ADDRESSES`，**默认空**），默认空值在任何拓扑下都安全。查锁放在
+> **验口令之前**（省一次 DB 查询与 260k 轮 PBKDF2），命中即 429 + `Retry-After`。后端 **656 项
+> 全过**（基线 621 + 新增 35），前端 **209 全绿**；两次变异测试各揪出一条空洞用例（均已修）。
+> 留在主文件的是**仍未决的那半**：
+
+- **仍未决 —— 待用户手工验收**：错口令 5 次后第 6 次应得 429 且带 `Retry-After`；锁定期间拿
+  **正确**口令仍是 429；配了白名单后不同来源各自分桶。清单见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §15。
+- **内生风险（已接受，不另做缓解）**：知道受害者用户名的人每 15 分钟发 5 次错口令即可让该账号
+  持续登不进来，影响面限于「被针对账号的登录」（拿不到数据、冒充不了、已签发令牌不受影响），
+  且锁定事件记 warning 日志以便发现。**不采用「锁定期放行正确口令」那种缓解** —— 那等于让
+  攻击者在 5 次之后继续无限猜。取值规则与部署期要求见 `docs/platform-plan.md` §5.4。
 
 ### D.29 · 2026-10-02 （第二十九批） 删掉 4 个无调用点的导出符号
 
-- **触发**：用户裁定「无用的代码删了」。这 4 个符号由 2026-09-25 的审查提出、D.06 复核，
-  因 Harness §3「删公开符号须用户确认」一直留着，在 ❓ 段挂了七天。
-- **删前**重新扫了全仓 `.py` / `.md` / `.ts` / `.vue`，不采信旧记载：`get_database` 3 处
-  （自身定义 + `DatabaseDependency` + 本文件）、`DatabaseDependency` 2 处（定义 + 本文件）、
-  `PlatformDatabase.engine` 与 `PlatformDatabase.session_factory` 各 **0 处对外引用**
-  （私有字段 `_engine` / `_session_factory` 仍在用）。同族的 `SettingsDependency`（21 处）/
-  `SessionDependency`（34）/ `SchedulerDependency`（4）都在用，**保留**。
-- **落点**：`app/dependencies.py` 去掉 `get_database` 与 `DatabaseDependency`；
-  `app/catalog/database.py` 去掉 `engine` 与 `session_factory` 两个 property。
-  `get_session` 本就直接读 `request.app.state.database`、不经过 `get_database`，故不受影响。
-- **验收**：后端 `pytest` **621 项全过**（删除后跑的）。前端与行情侧零改动。
+> **全条见归档**。删掉 4 个无调用点的导出符号（`get_database` / `DatabaseDependency` /
+> `PlatformDatabase.engine` / `.session_factory`），删前重扫全仓而不采信旧记载。**本条无未决项**
+> （关键词见 [`PROGRESS-index.md`](PROGRESS-index.md) 的 D.29 行）。
 
 ### D.28 · 2026-10-02 （第二十八批） 品牌视觉换成「薪火」火色
 
-- **触发**：用户提出「配色和图案跟 fireseeker 域名不搭」——产品名「薪火量化」与域名都指向火，
-  品牌色却一直是蓝的。**两条拍板**：① 取**「余烬橙 · 守浅底」**，浅色结构一分不动；
-  ② 名称**保留「薪火量化」**。
-- **落点（只有前端两个文件）**：`style.css` 的 `@theme` 换 `--color-brand` → `#c2410c`、
-  `--color-brand-strong` → `#9a3412`；`favicon.svg` 的三根白柱改画成一条闭合路径的**白火苗**。
-  品牌色**只有这两个出处**——EP 的 `--el-*` 全由 `color-mix()` 指回令牌，图表无硬编码色值。
-- **火苗改了三轮，教训三条**：① 第一版是对称的圆底尖顶，**渲染出来读作水滴**——水滴与火苗的
-  差别几乎全在顶部（一个尖顶 vs 几条舌、舌间凹下去）。手写 SVG 路径**必须离屏栅格化出来看**，
-  `viewBox` 里的数字看不出像什么。② 用户看过第一版后要求「至少三个峰」，三舌版才落定；且**峰高
-  必须有层次**——试过把右舌抬到与中舌齐平，两条并成一条又变回「一个尖顶」，中舌独占最高点才
-  读得成火。③ 注释里写 `` `--color-brand` `` 会让整个 XML 解析失败（`--` 在 XML 注释里非法），
-  表现是页内碎图 + 标签页图标退回上一张。
-- **语义色必须跟着挪**：原警示 `#b45309` **本身就是橙褐**，挨着新品牌色会分不清主色与警告
-  → 警示换 yellow-700 `#a16207`（色相隔开 20° 以上），危险换纯红 `#b91c1c`。成功与信息不动。
-- **一处有意的不动（2026-10-02 已拍板：不转暖）**：中性体系保持冷灰——`--color-page` /
-  `--color-line` / `--color-info` 与模板里 **157 处 `slate-*`**（散在 28 个文件）一个没动。
-  只转 `page` / `line` 两档会造出"两套灰 + 两种线深"（`style.css` 那段注释点名的失效）；
-  全转暖则要扫 28 个文件并重验 `EmptyNotice.spec.ts` 里两条断言 slate 类名的用例。
-  用户看过观感后裁定：**火色只出现在品牌与语义层就够**。
-- **顺手订正**：`favicon.svg` 注释里「全仓第二处硬编码色值 = backend 的 `/docs` 主题」**已不成立**
-  （后端一处也没有）；`acceptance-checklist.md` §2 / §5 / §8 三处色值描述一并改成火色。
-- **验收**：`type-check` 干净；`vitest` 首跑 208 过 + 1 条既有 flake（router 守卫超时，同归档
-  D.25），复跑 **209/209 全绿**。**浏览器里的观感仍未验**：新图标要重启 dev server 或 `Ctrl+F5`
-  （改的是 `public/`，普通刷新读不到）。图标本体已用离屏栅格化在 128/32/16px 下看过。
+> **全条见归档**。余烬橙 · 守浅底：两个品牌令牌换色、`favicon.svg` 改画白火苗；中性体系
+> （157 处 `slate-*`）**有意不转暖**；警示色换成 yellow-700。
+
+- **仍未决 —— 待用户看一眼浏览器**：新图标要重启 dev server 或 `Ctrl+F5` 才读得到（改的是
+  `public/`）。图标本体已离屏栅格化在 128/32/16px 下看过，**页内观感无人验过**。
 
 ### D.27 · 2026-10-02 （第二十七批） 行情判据改看「已问区间」的账，下载窗口按年对齐
 
-> **全条见归档**（2026-10-02 第三十批写完后移出，主文件超 50 KB；一句话结论与关键词见
-> [`PROGRESS-index.md`](PROGRESS-index.md) 的 D.27 行）。一句话：组件侧新增 `QueriedBarSpans`
-> 台账记「已成功问过的 bar 日区间」，判据从「MinuteBars 覆盖」改为「账盖住了没有」，下载窗口改
-> 按年对齐；顺带修掉组件分页中途失败时**静默返回部分行**的缺陷，以及
-> `_resolve_download_window` 回 `None` 那一支漏看 `has_bars` 的同类毛病（日历够不着 ≠ 没有数据）。
-> 留在主文件的是**仍未决的那半**：
+> **全条见归档**。新增 `QueriedBarSpans` 台账记「已成功问过的 bar 日区间」，判据从「MinuteBars
+> 覆盖」改为「账盖住了没有」，下载窗口改按年对齐；顺带修掉分页中途失败**静默返回部分行**与
+> `_resolve_download_window` 回 `None` 漏看 `has_bars` 两处同类毛病（日历够不着 ≠ 没有数据）。
 
-- **仍未决 —— 待用户手工验收**：真组件 + 联网的端到端。**清单见
-  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §14**（走查顺序已反转为先下载、
-  后对照）：新合约触发真 `backfill` 且**不挤掉**已下过的合约、提交页列出 5207 只且能按名称搜到、
-  停牌日不再是缺口、区间落在组件日历之外时当场给「该合约在所请求区间内没有行情数据」。
+- **仍未决 —— 待用户手工验收**：真组件 + 联网的端到端（**走查顺序已反转为先下载、后对照**）。
+  清单见 [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §14。
 
 ### D.25 · 2026-10-01 （第二十五批） 摘掉 manifest：策略配置 JSON 即表单模板，并解绑数据源周期
 
-> **全条见归档**（2026-10-02 D.27 写完后主文件逼近 50 KB，整条移出；一句话结论与关键词见
-> [`PROGRESS-index.md`](PROGRESS-index.md) 的 D.25 行）。留在主文件的是**仍未决的那半**：
+> **全条见归档**；机制本身见 [`docs/strategy-configuration.md`](docs/strategy-configuration.md)。
 
 - **仍未决 —— 待用户手工验收**：浏览器里走一遍新上传契约（传 `.py` + 配置 `.json` → 提交页参数区
-  按模板键渲染 → 选 15m 提交 → 回测跑通且策略收到 15m bar）。**清单见
-  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §13**（含两份文件的取法与一个
+  按模板键渲染 → 选 15m 提交 → 回测跑通且策略收到 15m bar）。清单见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §13（含两份文件的取法与一个
   **改名**坑：上传的 `.json` 名即作业目录里的文件名，配 `grid_strategy.py` 必须是
-  `TestStrategyGrid.json`）。旧版本行那条**本机现有库里验不了**：唯一的版本已被重传成新形态
-  （`StrategyVersions.ConfigurationJson` 非 NULL），要验得用带旧行的库。
-- **本批改了形态，上面 D.23 的走查项要重看**：模板里的参数键集由配置模板固定，换版本后旧模板可能
-  带着新版本没有的键（提交侧以 `UNKNOWN_PARAMETER_MESSAGE` 拒，见 `platform-plan.md` §9 的 P6 第
-  5 条）。
-- 其余（触发点的类别错误、六条拍板、落点、三处偏离计划的报备、验收证据）见归档，机制本身见
-  [`docs/strategy-configuration.md`](docs/strategy-configuration.md)。
+  `TestStrategyGrid.json`）。**另欠一条**：旧版本行那条在**本机现有库里验不了**（唯一的版本已被
+  重传成新形态 `StrategyVersions.ConfigurationJson` 非 NULL），要验得用带旧行的库。
+- **形态改了，D.23 的走查项要重看**：模板的参数键集由配置模板固定，换版本后旧模板可能带着新版本
+  没有的键（提交侧以 `UNKNOWN_PARAMETER_MESSAGE` 拒，见 `platform-plan.md` §9 的 P6 第 5 条）。
 
 ### D.24 · 2026-10-01 （第二十四批） 行情改由 QuoteHub 按需下载落地
 
-> **全条见归档**（2026-10-01 D.25 写完后主文件逼近 50 KB，整条移出；一句话结论与关键词见
-> [`PROGRESS-index.md`](PROGRESS-index.md) 的 D.24 行）。留在主文件的是**仍未决的那半**：
+> **全条见归档**。
 
-- **仍未决 —— 待用户手工验收**：真组件 + 联网的端到端（计划验证 #2「新合约触发真 `backfill`
-  且**不挤掉**已下过的 `600000`/`600519`」是防「静默挤掉」的验收句，必须钉死；#6「提交页列出
-  5207 只且能按名称搜到」）。**清单见
-  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §14**（2026-10-01 补，2026-10-02 按
-  D.27 改写，**走查顺序已反转为先下载、后对照**）：走查前后各量一次 `market-data/Bar` 下每个年度
-  文件的合约集合，「不挤掉」的判据就是**原来那几只仍在集合里**；基线实测为**合约 5207 只 / 已下过
-  4 只**（`sh.600000` `sh.600004` `sh.600519` `sz.000001`）。**仍欠一条**：
-  `market_data_prepare_timeout_seconds` 默认 **3600 是拍的**，未经实测外推（整所 `backfill` 要为
-  区间内每个成员联网重取，耗时是最大未知）。**另三条已了结**：含停牌日的区间会重复下载 —— D.27
-  另立了 `QueriedBarSpans` 那张「已问区间」的账，正是这条欠账说的「要另立记账、要写状态」；下载
-  窗口取「缺失日的最小 ~ 最大」—— D.27 已改为按年对齐；`docs/strategy-manifest.md:16` 的
-  「84 笔成交」是旧口径 —— D.25 已把那份文件整个删掉。
+- **仍未决 —— 待用户手工验收**：真组件 + 联网的端到端。清单见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §14。判据：走查前后各量一次
+  `market-data/Bar` 下每个年度文件的合约集合，「不挤掉」即**原来那几只仍在集合里**（基线实测
+  **合约 5207 只 / 已下过 4 只**：`sh.600000` `sh.600004` `sh.600519` `sz.000001`）。
+- **仍欠一条**：`market_data_prepare_timeout_seconds` 默认 **3600 是拍的**，未经实测外推（整所
+  `backfill` 要为区间内每个成员联网重取，耗时是最大未知）。**另三条已了结**（停牌日重复下载 /
+  下载窗口取「缺失日的最小 ~ 最大」/ `strategy-manifest.md:16` 的「84 笔成交」旧口径），分别由
+  D.27 与 D.25 收口，原文见归档。
 - **一处越批订正**：D.24 当时把「周期与 parquet 后缀必须逐字一致，填错 → 静默 0 成交」当判据，
-  **D.25 已订正为「引擎装载期即拒、报错收场」**，并把周期语义整个解绑（见上）。
+  **D.25 已订正为「引擎装载期即拒、报错收场」**。
 
 ### D.23 · 2026-09-28 （第二十三批） P6 多轮对比与配置模板 + P7 删除与保留清理
 
-> **全条见归档**（2026-10-01 移出）。一句话：新表 `RunTemplates` + 四个模板端点、
-> `GET /api/runs/compare?ids=`、`DELETE /api/runs/{id}` 与保留清理（默认关）、前端 `/compare` 页
-> 与提交页「配置模板」区；两处搬位置而 HTTP 契约一字不变。提交 `32441b1`（49 个文件）。
-
-- **仍未决 —— 待用户手工验收**：浏览器与磁盘上的走查（对比页两列并排、模板套用往返、
-  删除后目录消失、开保留策略跑 N+2 轮只剩 N 轮），清单见
-  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §11/§12。
-  **D.25 改形态后这批的走查项要重看**：模板里的参数键集由配置模板固定，换版本后旧模板可能
-  带着新版本没有的键（提交侧以 `UNKNOWN_PARAMETER_MESSAGE` 拒，见 `platform-plan.md` §9 的 P6 第 5 条）。
+> **全条见归档**（`RunTemplates` + 四个模板端点、`GET /api/runs/compare?ids=`、
+> `DELETE /api/runs/{id}` 与保留清理默认关、`/compare` 页与提交页「配置模板」区；
+> 提交 `32441b1`）。**仍未决 —— 待用户手工验收**：浏览器与磁盘上的走查，清单见
+> [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §11/§12。
 
 ### 早期九批的合并存根（D.05 / D.06 / D.09 / D.12 – D.17）
 
@@ -360,16 +513,30 @@ Python 策略**。
 
 ## 备注
 
-- **环境锁定**：Windows + 后端与引擎同机；前端 **Node 24.16.0 + npm 11.13.0**
-  （原记 24.15，归档 D.07 实测订正）。**"上云"等于一台 Windows 云主机，横向扩展无余地。**
-  　**⚠️ Python 版本两条记录打架，以本机实测为准（2026-10-01）**：原记 **3.14.5 / `cp314`**
-  （且"Linux 无解"），本机实测却是 **3.11.1**（`py -0p` 只有这一个）＋
-  `QuantTrading.cp311-win_amd64.pyd` —— 两者**自洽**（`runner.py:344` 用 `sys.executable`
-  拉起策略进程），不影响运行。**决定性证据**：`test_engine_probe.py` 一直把 `.pyd` 名硬编码成
-  `cp314`，于是 4 项断言恒失败，而 `../QuantTrading/bin/Release` 里**只有 `cp311` 那个文件**；
-  改成从探针自己的常量推导后 12 项全绿。故 **3.14.5 / `cp314` 不描述这台机器**
-  （"当时在另一台机器上记的"仍未排除），**别再拿它当本机事实**。同日在本机重建开发环境：
-  `npm ci` ＋ 新建 `backend/.env` ＋ 空库首次启动播种出 `admin`，产物都在 `.gitignore` 覆盖内。
+- **环境锁定**：Windows + 后端与引擎同机；前端 **Node 24.16.0 + npm 11.13.0**（原记 24.15，
+  归档 D.07 实测订正）。**"上云"等于一台 Windows 云主机，横向扩展无余地。**
+  **⚠️ Python 版本以本机实测为准（2026-10-01）**：原记 **3.14.5 / `cp314`**（且"Linux 无解"），
+  本机实测却是 **3.11.1**（`py -0p` 只有这一个）＋ `QuantTrading.cp311-win_amd64.pyd`，
+  两者**自洽**（`runner.py:344` 用 `sys.executable` 拉起策略进程），不影响运行。决定性证据：
+  `test_engine_probe.py` 把 `.pyd` 名硬编码成 `cp314` 时 4 项断言恒失败，而
+  `../QuantTrading/bin/Release` 里**只有 `cp311` 那个文件**；改成从探针自己的常量推导后 12 项
+  全绿。故 **3.14.5 / `cp314` 不描述这台机器**（"在另一台机器上记的"仍未排除），别当本机事实。
+- **`market-data/` 是可丢的运行数据, 丢了只在提交时报一句 400（2026-10-07 实测重建）**：仓根
+  `market-data/` 被 `.gitignore` 的 `/market-data/` 锚定,**不进版本库、`git status` 里也不显示**。
+  它一旦不在盘上（本机 2026-10-07 就是这样, 同批不见的还有 `backend/_acc_tmp_old/`）, 提交回测
+  会在 `services/run_submission.py:204` 的 `_ensure_engine_inputs_available` 处 **400**, 文案是
+  **"行情数据根目录不存在, 请先配置"** —— 文案有意**不带路径**（路径是服务端的目录布局）, 故别
+  指望它告诉你缺哪个目录。**定位方法**（一次问全四项输入, 不必逐项猜）：
+  `cd backend && python -c "from app.config import PlatformSettings as S; s=S.from_environment();
+  print(s.market_data_root.is_dir(), s.session_file_path.is_file(), s.engine_root.is_dir(),
+  s.quote_hub_root.is_dir())"`。**修法**：`mkdir` 一个空目录即可 —— 那道闸只问 `is_dir()`, 而
+  QuoteHub 的 `--output-root` 是它自己建的（`BaoStockParquet.py:380` 的
+  `os.makedirs(..., exist_ok=True)`）, 空根会在首轮提交时按需下载填上。**不必重启后端**:
+  `is_dir()` 是**逐请求**求值, 不是启动期快照。两点附带：① `market_data_root` 同时是引擎
+  `BackTest.json` 的 `MdDataPath`, 故它必须与引擎同机可读；② 仓外那两份现成的行情根都对不上
+  ——`D:/Md` 是 2025-04/05 的旧档（`Preces` 只有 `1m`/`1d`/`1h`, 而平台渲染的 `BarPreces` 是常量
+  `5m`）, `D:/MdBaoStock` 正是 D.24 当初**拷进仓内**的那份（14 文件 / `Preces=5m`）, 想省下载就
+  从它拷, 别改配置指过去（那会偏离 D.24「行情根进仓」的决定）。
 - **本地开发要两个终端**（P4 起，见 `platform-plan.md` §8.1）：一个跑
   `cd backend && python -m app.main`，一个跑 `cd frontend && npm run dev`。
   前端**没有 CORS 中间件**，靠 Vite 的 `/api` 代理（**不重写路径**）打到
@@ -420,10 +587,11 @@ Python 策略**。
   退出码 `1`；C++ 侧靠 `Main.cpp` 的 try/catch 避免 `abort()` 撞上
   「引擎报告失败」的码 `3`）。**改参数语义或单位必须重取真引擎验收基线**
   并同步 `job-workspace.md` 的实测表——旧数字属旧口径，不可与新数字混算。
-- **P3 的六项已知缺口**（**明确不做**，别当缺陷修）：纯 FIFO 无配额、
+- **P3 的已知缺口**（**明确不做**，别当缺陷修）：纯 FIFO 无配额、
   不做重启后续跑、不做多 worker（单实例是调度器硬前提）、孤儿进程不自动清理、
-  Tick 不可提交、种子库不重建。逐条理由见 `platform-plan.md` §12.9–12.14，
-  落地细节见 D.06。
+  Tick 不可提交。逐条理由见 `platform-plan.md` §12.9–12.13，落地细节见 D.06。
+  **原第一条「种子库不重建」已于 2026-10-07 销账**（D.31）：那不再是缺口，而是被做掉的功能
+  ——见 `platform-plan.md` §12.14（原文保留 + 订正标注）与 §14。
 - **P4 新增的已知缺口**（**明确不做**，别当缺陷修，逐条理由见
   `platform-plan.md` §12.15–12.18）：`display_name` **无唯一约束**（重名时
   授权表单分不清两个人，选错人等于把策略授权给错的人）、授权被撤销后
@@ -443,40 +611,28 @@ Python 策略**。
   "取消未起进程的行"那两条 `WHERE Status='queued'` / `='running'` 条件，
   去掉后 380 项全绿——它们只在两个 `await` 之间那个窗口里起作用，
   而从 HTTP 侧无法确定性抵达。要杀掉得给 runner 插可注入的暂停点。
-- **`runs/` 下有 3 个探针期遗留的草稿目录**（`probe-runA`、`probe-runB`、
-  `probe-runC`，各约 3 MB），是被 gitignore 的探针残渣，可随时删。
-  **AI 未自行删除**——按 Harness §1，git 之外的路径不得递归删除。
-  正式产物 `runs/probe/` 建议保留作 P0 证据。
-- **⚠️ D.06 的探针动过 `../QuantTrading` 仓（用户需知道）**：为验证
-  `argv[0]` 那条约束，在 `bin/Release` 下直接跑了两轮真回测（一次
-  `./grid_strategy.py`、一次带绝对路径），代价是：
-  ① **`bin/Release/result.json` 被覆盖**（**2026-09-26 再订正一次**：它现在是用户自己
-  13:30 那轮的 `20260926_133008_119`（`SSE/600519`、`OrderCount=654`、`TradeCount=84`、
-  `Balance=999377.0899999999`），D.06 探针的 `20260925_225502_898` 已被那轮盖掉；
-  P0 那份带种子库的七项基线数字已抄进 `job-workspace.md` §6.1 与归档 D.01，信息未丢，
-  但**文件本身已不是原物**。⚠️ 步长改比例后这四个数都是旧口径，现值见归档 D.09 与 §6.3）；
-  ② 多出 `BackTest_<RunId>.db`、`log/`、`Dump/<RunId>/` 等产物；
-  ③ 另有一次在系统临时目录里跑的复测（不落在两个仓内）。
-  **未改任何源码，也未删任何文件。** 若要还原，`result.json` 需重跑一轮
-  （要带种子库才能得到 P0 那份数）。
-- **`backend/_acc_tmp/` 是真引擎验收的 pytest 临时根**（约 22 MB，
-  四个用例各一个作业目录；归档 D.09 的重取基线那轮收在其下的 **`ratio-20260926/`**
-  子目录里，与旧口径的产物分开放）。它已并入 `.gitignore`（连同 `.gitignore` 的
-  这条注释一起提交），故不会误入库；用例的 docstring 也写明了规范调用形态
-  `pytest -m real_engine … --basetemp=_acc_tmp`（`%TEMP%` 下的临时根在
-  验收失败时不好找，而那时第一件事就是进去看 `stdout.txt`/`result.json`）。
-  **AI 未删除它**：按 Harness §1 不自行递归删除，用户确认后可删——
-  它只是 `--basetemp` 的产物，随时可按上述命令重建。
-  （**说明**：本轮跑验收时 AI 曾用 `rm -rf ./_acc_tmp` 清理过这个自己刚建的
-  临时根**三次**——虽是自建残渣，仍与 Harness §1 的字面要求相冲，在此记明，
-  后续不再这么做。）
-- **⚠️ 另有一个 `backend/_acc_tmp_old/`（2026-10-01，D.24 留下的）**：约 8.8 MB，
-  里面是 `test_a_real_bar_backtest_runs_0/`。它是本轮**控制实验**（用旧根
-  `D:/MdBaoStock` 复跑那条验收用例，以证明成交数漂移与行情迁移无关）的
-  `--basetemp`。**它没有并入 `.gitignore`**（那里只锚了 `backend/_acc_tmp/`），
-  故 `git status` 里是个未跟踪目录。**AI 未删除它**：按 Harness §1，未跟踪路径不得
-  递归删除，请用户处置（删掉即可，是自建残渣；要留就顺手把
-  `backend/_acc_tmp_old/` 加进 `.gitignore`，或干脆改名叫 `_acc_tmp/` 复用现有那条）。
+- **AI 未自行删除的三处自建残渣**（按 Harness §1，git 之外的路径不得递归删除；
+  三处都是探针 / 验收期的产物，请用户处置）：
+  - `runs/probe-runA|probe-runB|probe-runC`（各约 3 MB，已被 gitignore）。正式产物
+    `runs/probe/` 建议保留作 P0 证据。
+  - `backend/_acc_tmp/`（约 22 MB，真引擎验收的 pytest `--basetemp` 根，已并入 `.gitignore`；
+    归档 D.09 的重取基线那轮收在其下的 `ratio-20260926/`，与旧口径产物分开放）。规范调用形态
+    写在用例 docstring 里：`pytest -m real_engine … --basetemp=_acc_tmp`（`%TEMP%` 下的临时根
+    在验收失败时不好找，而那时第一件事就是进去看 `stdout.txt`/`result.json`）。随时可按它重建。
+    （**说明**：AI 曾用 `rm -rf ./_acc_tmp` 清过这个自建临时根**三次**——虽是自建残渣，仍与
+    Harness §1 的字面要求相冲，在此记明，后续不再这么做。）
+  - `backend/_acc_tmp_old/`（约 8.8 MB，2026-10-01 D.24 的控制实验留存，用旧根 `D:/MdBaoStock`
+    复跑验收用例以证明成交数漂移与行情迁移无关）。**未并入 `.gitignore`**（那里只锚了
+    `backend/_acc_tmp/`），故 `git status` 里是个未跟踪目录；要留就把它加进 `.gitignore`，
+    或改名叫 `_acc_tmp/` 复用现有那条。
+- **⚠️ D.06 的探针动过 `../QuantTrading` 仓（用户需知道）**：为验证 `argv[0]` 那条约束，在
+  `bin/Release` 下直接跑了两轮真回测（一次 `./grid_strategy.py`、一次带绝对路径）。代价：
+  ① **`bin/Release/result.json` 被覆盖**（2026-09-26 再订正：现在是用户自己 13:30 那轮
+  `20260926_133008_119`，P0 那份带种子库的七项基线数字已抄进 `job-workspace.md` §6.1 与归档
+  D.01，信息未丢，但**文件本身已不是原物**；步长改比例后那四个数都是旧口径，现值见归档 D.09
+  与 §6.3）；② 多出 `BackTest_<RunId>.db`、`log/`、`Dump/<RunId>/` 等产物；③ 另有一次在系统
+  临时目录里跑的复测（不落在两个仓内）。**未改任何源码，也未删任何文件**；若要还原
+  `result.json`，需带种子库重跑一轮。
 - **`.gitignore` 已覆盖全部运行数据**：`runs/`、`users/`、`backend/data/`
   （含 catalog 库与 JWT 密钥）、`node_modules/`、`.vs/`。
 - **⚠️ 仓根 `.gitignore` 的无锚点模式会静默吞掉前端源码**（归档 D.07 踩到）：

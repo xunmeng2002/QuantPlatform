@@ -2,18 +2,23 @@
 
 响应模型统一开 from_attributes, 直接读 ORM 对象属性, 不做逐字段手工搬运.
 枚举字段一律标注为枚举类型, 使合法取值只有一处来源 (catalog.enums).
+
+**例外**: 基础数据三表的读侧把 `product_class` / `direction` 声明为普通 `int`, 理由逐条写在
+`ProductResponse` 的文档串里 —— 一句话是"库里出现枚举外取值时, 枚举类型会让列表接口 500".
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Generic, TypeVar
+from typing import Annotated, Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from .enums import (
     GrantPermission,
     MarketDataType,
+    ProductClass,
+    RateDirection,
     RunStatus,
     StrategyVisibility,
     UserStatus,
@@ -29,6 +34,22 @@ MAXIMUM_PASSWORD_LENGTH = 256
 MAXIMUM_STRATEGY_NAME_LENGTH = 128
 MAXIMUM_STRATEGY_DESCRIPTION_LENGTH = 500
 MAXIMUM_RUN_TEMPLATE_NAME_LENGTH = 64
+
+# 基础数据三表的字符列宽度, 逐列取自引擎的结构体声明 (char[n] -> String(n)).
+MAXIMUM_EXCHANGE_ID_LENGTH = 8
+MAXIMUM_PRODUCT_ID_LENGTH = 32
+MAXIMUM_PRODUCT_NAME_LENGTH = 32
+MAXIMUM_SESSION_NAME_LENGTH = 32
+MAXIMUM_INSTRUMENT_ID_LENGTH = 32
+MAXIMUM_COMMISSION_GROUP_NAME_LENGTH = 64
+
+"""**品种代码长度的启发式上限**, 4 是取出来的: A 股品种码 3 位数字 (`600`), 期货品种码 1-4 位
+字母 (`rb`), 而合约码总在 6 位以上 (`600519` / `rb2401`). 故"不长于 4 位、又不是已登记品种码"
+的取值, 几乎只可能是把品种码打错或者漏登记, 值得拦下来问一句; 长于它的取值一律当合约码放行
+—— 平台手里没有合约清单, 无从核实一个合约码是否真实存在.
+"""
+
+MAXIMUM_PRODUCT_CODE_LENGTH = 4
 
 
 class PageResponse(BaseModel, Generic[T]):
@@ -89,6 +110,9 @@ class RunConfigurationRequest(BaseModel):
     start_trading_day: str = ""
     end_trading_day: str = ""
     initial_capital: float
+    # 必填且**不给默认值**: 组号决定这一轮按哪一套费率计费, 引擎查不到就安静地按 0 计——"没选"
+    # 与"选了 1 号组"必须是两件可分辨的事, 而一个默认值会把前者抹成后者. 取值规则同样在 service.
+    commission_group_id: int
     params: dict[str, object] = Field(default_factory=dict)
 
 
@@ -135,6 +159,7 @@ class RunTemplateResponse(BaseModel):
     start_trading_day: str
     end_trading_day: str
     initial_capital: float
+    commission_group_id: int
     params: dict[str, object]
     created_at: datetime
     updated_at: datetime
@@ -446,4 +471,195 @@ class LastSubmittedParametersResponse(BaseModel):
     start_trading_day: str | None = None
     end_trading_day: str | None = None
     initial_capital: float | None = None
+    commission_group_id: int | None = None
     params: dict[str, object] = Field(default_factory=dict)
+
+
+"""费率与税额列. 十列的取值规则完全相同 (非负 double), 故共用一个受约束类型.
+
+逐列手写 `Field(ge=0)` 的话, 日后加第十一列时漏写一处, 就是一个只在那一列上出现的静默缺口:
+负费率会被接受, 而引擎按它算出来的手续费是负数.
+"""
+NonNegativeAmount = Annotated[float, Field(default=0.0, ge=0.0)]
+
+
+"""引擎侧的代码字段: 首尾空白一律去掉, 且不允许为全空白.
+
+`"SSE "` 与 `"SSE"` 是两行不同的数据, 而引擎按整串精确比较, 前者永远匹配不上 —— 那是只在
+回测结果里显形的静默错误 (与 WPF 侧"粘贴路径先 `Trim()`"是同一条教训). `strip_whitespace`
+由 pydantic 在长度校验**之前**施加, 故一个只由空白组成的输入会落到 `min_length` 上回 422,
+而不会存成一个看着非空、其实匹配不到任何东西的空串.
+"""
+CodeText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+TrimmedText = Annotated[str, StringConstraints(strip_whitespace=True)]
+
+
+class ProductResponse(BaseModel):
+    """品种基本数据的一条.
+
+    `product_class` 声明的类型是 **`int` 而不是 `ProductClass`**: 库里一旦存在枚举外的取值
+    (日后从引擎侧 dump 灌进 CTP 那套 `1` / `2` / `7` 是迟早的事), 枚举类型会让
+    `model_validate` 逐行抛异常, 整个列表接口 500 —— 一条读不认识的品种不该把整页挡在门外.
+    写入侧仍按枚举校验 (见 `ProductWriteRequest`), 故缺口只可能来自导入, 而那种行应该被显示
+    出来交给人工处理. 前端的标签映射对未知值回落显示原数字.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    exchange_id: str
+    product_id: str
+    product_name: str
+    product_class: int
+    volume_multiple: int
+    price_tick: float
+    max_market_order_volume: int
+    min_market_order_volume: int
+    max_limit_order_volume: int
+    min_limit_order_volume: int
+    session_name: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProductWriteRequest(BaseModel):
+    """新建 / 修改一个品种. 两条路径共用一份字段定义 (见本文件末尾的说明).
+
+    `volume_multiple` / `price_tick` 的默认值取自 A 股一手一股、最小变动 0.01 元 —— 本期实际
+    录入的第一批就是 A 股, 而这两个数在四个手数上限全为 0 (不限) 时是仅有的两份"非零且必填"
+    的取值. `product_class` 默认股票同理: 引擎只对 `Future` 造主力合约, 默认成期货会凭空多出
+    一批主力合约 (见 `QuantTrading/makeseeddb.py` 的同一条注记).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    exchange_id: CodeText = Field(max_length=MAXIMUM_EXCHANGE_ID_LENGTH)
+    product_id: CodeText = Field(max_length=MAXIMUM_PRODUCT_ID_LENGTH)
+    product_name: CodeText = Field(max_length=MAXIMUM_PRODUCT_NAME_LENGTH)
+    product_class: ProductClass = ProductClass.STOCK
+    volume_multiple: int = Field(default=1, ge=0)
+    price_tick: float = Field(default=0.01, ge=0.0)
+    max_market_order_volume: int = Field(default=0, ge=0)
+    min_market_order_volume: int = Field(default=0, ge=0)
+    max_limit_order_volume: int = Field(default=0, ge=0)
+    min_limit_order_volume: int = Field(default=0, ge=0)
+    session_name: TrimmedText = Field(default="", max_length=MAXIMUM_SESSION_NAME_LENGTH)
+
+
+class CommissionGroupResponse(BaseModel):
+    """手续费组的一条."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    commission_group_id: int
+    commission_group_name: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class CommissionGroupOptionResponse(BaseModel):
+    """提交页选组用的投影: 只要"选哪一组"需要的两项.
+
+    与管理端的 `CommissionGroupResponse` **刻意分开**: 这条路由普通用户就能取 (他要提交回测,
+    就得看得见有哪些组), 而主键与两个时间戳对他没有任何用处——一个响应里装着界面用不到的内部
+    标识, 只会在日后被人当作某种"可以依赖的 id"而引用起来. 少给两个字段, 那种引用无从发生.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    commission_group_id: int
+    commission_group_name: str
+
+
+class CommissionGroupWriteRequest(BaseModel):
+    """新建 / 修改一个手续费组.
+
+    `commission_group_id` 由操作员填而不是平台生成: 每一轮回测的引擎配置里写的就是这个组号,
+    自增的话组号与"哪一行"的对应关系会随插入次序漂移.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    commission_group_id: int = Field(ge=0)
+    commission_group_name: CodeText = Field(
+        max_length=MAXIMUM_COMMISSION_GROUP_NAME_LENGTH
+    )
+
+
+class BaseCommissionResponse(BaseModel):
+    """费率明细的一条.
+
+    `direction` 与 `ProductResponse.product_class` 同理, 读侧声明为 `int`.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    commission_group_id: int
+    exchange_id: str
+    instrument_id: str
+    direction: int
+    open_by_money: float
+    close_by_money: float
+    open_by_volume: float
+    close_by_volume: float
+    open_stamp_tax_by_money: float
+    close_stamp_tax_by_money: float
+    open_transfer_fee_by_money: float
+    close_transfer_fee_by_money: float
+    min_commission: float
+    max_commission: float
+    created_at: datetime
+    updated_at: datetime
+
+
+class BaseCommissionWriteRequest(BaseModel):
+    """新建 / 修改一条费率明细.
+
+    **四列一起构成查找键, 引擎按四列精确匹配**: `CommissionCalculator::Apply` 走
+    `BaseCommission->PrimaryKey->Select(组号, 交易所, 合约, 方向)`, 没有通配、没有前缀、没有
+    "空了就当默认". 键里任何一列对不上, 这一笔成交就匹配不到费率, 三列费用全按 0 算并计入
+    `CommissionMissingCount` —— 回测照跑完, 只是手续费是零.
+
+    **但平台这一侧的三级语义正是靠「合约格」的空与不空表达的** (`reference_data.rate_expansion`
+    在写种子库时把它展开成具体合约的行): 空 = 交易所级, 等于该交易所下一个**已登记**的品种码
+    = 品种级, 其余 = 合约级. 故这里允许 `instrument_id` 为空串 —— 那是交易所级那一档, 不是漏填.
+    正则形状的校验拦不住"这不是个合约码", 那一问在路由层 (`_ensure_instrument_scope_is_known`).
+
+    `direction` 同理有一档通配 (`RateDirection.BOTH` = 双向, 买卖共用这一套费率): 它也只活在
+    平台侧, 展开时被摊成买、卖两行 —— 引擎那四列精确查找永远只看得到 0 与 1.
+
+    `min_commission` / `max_commission` 的 **0 (或负值) 表示该侧不设限** (见
+    `CommissionCalculator.cpp` 的 `ClampCommission`), 只有正值才参与封底封顶; 封顶只管佣金,
+    印花税与过户费按法定费率实收. 这解释了为什么 `max_commission` 的默认值 0 不等于"封顶到 0".
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    commission_group_id: int = Field(ge=0)
+    exchange_id: CodeText = Field(max_length=MAXIMUM_EXCHANGE_ID_LENGTH)
+    instrument_id: TrimmedText = Field(
+        default="", max_length=MAXIMUM_INSTRUMENT_ID_LENGTH
+    )
+    direction: RateDirection = RateDirection.BOTH
+    open_by_money: NonNegativeAmount
+    close_by_money: NonNegativeAmount
+    open_by_volume: NonNegativeAmount
+    close_by_volume: NonNegativeAmount
+    open_stamp_tax_by_money: NonNegativeAmount
+    close_stamp_tax_by_money: NonNegativeAmount
+    open_transfer_fee_by_money: NonNegativeAmount
+    close_transfer_fee_by_money: NonNegativeAmount
+    min_commission: NonNegativeAmount
+    max_commission: NonNegativeAmount
+
+
+"""基础数据三表的"建单"与"改单"各自收哪些字段?
+
+**同一份 `...WriteRequest` 供给两条路径**, 不另立 `...CreateRequest` / `...UpdateRequest` 两个
+类. PATCH 走的是整行替换语义, 两条路径收的字段逐字相同; 各写一份的话, "建单收得下的取值"与
+"改单收得下的取值"就成了两个集合, 而它们的差别只在特定取值上出现 —— 症状是"建得下、改时
+422", 排查时两个类看上去都合理. 共同的字段只声明一次, 这种漂移就没有可发生的缝隙.
+(同一条理由在 `RunConfigurationRequest` 的文档串里已写过一次: 那里是提交与存模板共用.)
+"""

@@ -167,19 +167,24 @@ describe('已登录态的用户区', () => {
 });
 
 describe('导航项', () => {
-  it('普通用户看不到「用户管理」', async () => {
+  it('普通用户看不到「用户管理」与「基础数据」', async () => {
     await enterHomeAs(REGULAR_USER);
 
     const navigationText = mountLayout().get('nav').text();
 
     expect(navigationText).toContain('回测运行');
     expect(navigationText).toContain('策略');
+    // 两条路由都带 `meta.requiresAdmin`: 摆出来的入口点一下就被守卫弹回运行列表.
     expect(navigationText).not.toContain('用户管理');
+    expect(navigationText).not.toContain('基础数据');
   });
 
-  it('管理员看得到「用户管理」', async () => {
+  it('管理员看得到那两个入口', async () => {
     await enterHomeAs(ADMIN_USER);
 
-    expect(mountLayout().get('nav').text()).toContain('用户管理');
+    const navigationText = mountLayout().get('nav').text();
+
+    expect(navigationText).toContain('用户管理');
+    expect(navigationText).toContain('基础数据');
   });
 });

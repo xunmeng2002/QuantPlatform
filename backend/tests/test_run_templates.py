@@ -22,7 +22,11 @@ from app.catalog.enums import MarketDataType, StrategyVisibility
 from app.catalog.models import RunTemplateModel, StrategyModel
 from app.config import PlatformSettings
 from app.ids import generate_identifier
+from app.routers.reference_data import (
+    COMMISSION_GROUP_TEMPLATE_REFERENCED_MESSAGE_TEMPLATE,
+)
 from app.routers.run_templates import MAXIMUM_TEMPLATES_PER_STRATEGY
+from app.services.commission_group import UNKNOWN_COMMISSION_GROUP_MESSAGE_TEMPLATE
 from app.services.run_configuration import (
     BAR_PERIOD_FIELD_NAME,
     BAR_PERIOD_INVALID_MESSAGE,
@@ -36,12 +40,14 @@ from app.services.run_configuration import (
 )
 from app.strategy_configuration import BAR_PERIOD_KEY_NAME
 
+from .conftest import TEST_ADMIN_PASSWORD, TEST_ADMIN_USERNAME
 from .helpers import (
     STRATEGIES_PATH,
     SignedInAccount,
     assert_rejected,
     bearer_headers,
     create_signed_in_account,
+    login,
     persist_record,
 )
 from .run_helpers import (
@@ -58,6 +64,8 @@ from .run_helpers import (
 
 
 TEMPLATES_PATH_TEMPLATE = f"{STRATEGIES_PATH}/{{strategy_id}}/run-templates"
+
+COMMISSION_GROUPS_PATH = "/api/reference-data/commission-groups"
 
 OWNER_USERNAME = "template-owner"
 OUTSIDER_USERNAME = "template-outsider"
@@ -77,6 +85,13 @@ UNKNOWN_PARAMETER_KEY = "NotDeclared"
 RECORDED_FLOOD_BYTES = 16
 
 BROKEN_PARAMS_JSON = "{ 这不是 JSON"
+
+#: 一个**夹具不会自动建出来**的组号. 验"模板存的是所选的组"不能用 1 号组: 它是那一列的回填默认
+#: 值, 存进去与没存进去在 1 上分不出来 —— 用例会跟着实现一起错.
+SECOND_COMMISSION_GROUP_ID = 2
+
+#: 表里绝不会有这个组.
+UNKNOWN_COMMISSION_GROUP_ID = 99
 
 # 参数块里**不许**出现的键: 平台那三个运行级键在表上各有具名列, 再进 `ParamsJson` 就有了两份
 # 真相. 按策略配置里的键名去找, 而不是按字段名——参数块用的就是策略那一侧的词汇.
@@ -196,6 +211,38 @@ async def delete_template(
 ):
     return await client.delete(
         template_item_path(strategy_id, template_id), headers=bearer_headers(token)
+    )
+
+
+async def create_commission_group(
+    client: AsyncClient, admin_token: str, commission_group_id: int
+) -> dict[str, object]:
+    """以管理员身份登记一个手续费组, 原样返回那一行 (含主键 `id`).
+
+    模板与组是**两张表的字段级耦合** (模板那一列存的是组号, 没有外键), 故这组用例必须自己把组
+    造出来: 不造的话,"模板指向的组"要么不存在 (验的是另一条用例), 要么落在 1 号组那个回填值上.
+    """
+
+    response = await client.post(
+        COMMISSION_GROUPS_PATH,
+        json={
+            "commission_group_id": commission_group_id,
+            "commission_group_name": f"{commission_group_id} 号组",
+        },
+        headers=bearer_headers(admin_token),
+    )
+
+    assert response.status_code == 201, response.text
+
+    return response.json()
+
+
+async def delete_commission_group(
+    client: AsyncClient, admin_token: str, commission_group_record_id: str
+):
+    return await client.delete(
+        f"{COMMISSION_GROUPS_PATH}/{commission_group_record_id}",
+        headers=bearer_headers(admin_token),
     )
 
 
@@ -384,6 +431,109 @@ async def test_a_run_field_override_reaches_the_named_column(
 
     assert rows[0].bar_period == DEFAULT_BAR_PERIOD
     assert DEFAULT_BAR_PERIOD not in json.loads(rows[0].params_json).values()
+
+
+async def test_a_saved_template_keeps_the_chosen_commission_group(
+    client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard
+) -> None:
+    """所选的手续费组存进自己那一列, 读回时原样带出, 且不进参数块.
+
+    组号与单根 K 线周期同路: 它是**运行级字段**, 决定这一轮按哪一套费率算钱 —— 存进 `ParamsJson`
+    就等于同一件事有两份真相, 而引擎那一侧只认具名列里的那个.
+    """
+
+    board = template_board
+    admin_token = await login(client, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD)
+
+    await create_commission_group(client, admin_token, SECOND_COMMISSION_GROUP_ID)
+
+    created = await create_template(
+        client,
+        board.owner.token,
+        board.strategy.id,
+        commission_group_id=SECOND_COMMISSION_GROUP_ID,
+    )
+
+    assert created["commission_group_id"] == SECOND_COMMISSION_GROUP_ID
+
+    rows = await read_template_rows(database, board.strategy.id)
+
+    assert rows[0].commission_group_id == SECOND_COMMISSION_GROUP_ID
+    assert SECOND_COMMISSION_GROUP_ID not in json.loads(rows[0].params_json).values()
+
+
+async def test_a_template_pointing_at_an_unknown_commission_group_is_rejected(
+    client: AsyncClient, template_board: TemplateBoard
+) -> None:
+    """模板引用一个没登记的组 → 400, 文案与提交侧同一句.
+
+    放它存下的话, 这份模板套用出来的每一次提交都会被同一句话拒掉 —— 用户在存模板那一刻什么提示
+    都没有, 事后才发现这份模板从来提交不出去.
+    """
+
+    board = template_board
+
+    response = await post_template(
+        client,
+        board.owner.token,
+        board.strategy.id,
+        build_template_request(
+            board.strategy.id, commission_group_id=UNKNOWN_COMMISSION_GROUP_ID
+        ),
+    )
+
+    assert_rejected(
+        response,
+        UNKNOWN_COMMISSION_GROUP_MESSAGE_TEMPLATE.format(
+            commission_group_id=UNKNOWN_COMMISSION_GROUP_ID
+        ),
+    )
+
+
+async def test_deleting_a_commission_group_a_template_points_at_is_rejected(
+    client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard
+) -> None:
+    """被模板引用的组删不掉, 报出被几个模板引用; 那些模板删掉之后同一个组就删得动.
+
+    模板那一列没有外键指向组表, 故删组在库层面不会报错 —— 拦不拦纯是策略: 放过去等于把一批"存得
+    下、永远提交不出去"的模板留给用户, 而删组那一下看起来是成功的.
+
+    这条也钉住"两道闸的先后": 这个组底下一条费率明细都没有 (夹具的费率挂在 1 号组), 故被拒的理由
+    只可能是模板, 而不是费率明细那道先行的闸.
+    """
+
+    board = template_board
+    admin_token = await login(client, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD)
+
+    commission_group = await create_commission_group(
+        client, admin_token, SECOND_COMMISSION_GROUP_ID
+    )
+
+    template = await create_template(
+        client,
+        board.owner.token,
+        board.strategy.id,
+        commission_group_id=SECOND_COMMISSION_GROUP_ID,
+    )
+
+    rejected = await delete_commission_group(
+        client, admin_token, str(commission_group["id"])
+    )
+
+    assert rejected.status_code == 409, rejected.text
+    assert rejected.json()["detail"] == (
+        COMMISSION_GROUP_TEMPLATE_REFERENCED_MESSAGE_TEMPLATE.format(template_count=1)
+    )
+
+    await delete_template(client, board.owner.token, board.strategy.id, str(template["id"]))
+
+    accepted = await delete_commission_group(
+        client, admin_token, str(commission_group["id"])
+    )
+
+    assert accepted.status_code == 200, accepted.text
+
+    assert await read_template_rows(database, board.strategy.id) == []
 
 
 async def test_the_same_name_may_live_under_two_strategies(

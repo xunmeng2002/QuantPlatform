@@ -51,11 +51,10 @@ VALID_SETTINGS_ARGUMENTS = {
     "initial_admin_password": None,
     "http_host": "127.0.0.1",
     "http_port": DEFAULT_HTTP_PORT,
-    # 三个引擎侧输入必须是绝对路径 (配置自身就拒绝相对值), 而 `Path("/market-data")` 在
+    # 两个引擎侧输入必须是绝对路径 (配置自身就拒绝相对值), 而 `Path("/market-data")` 在
     # Windows 上并非绝对路径——故这里从本文件的真实位置派生, 跨平台都成立.
     "market_data_root": ABSOLUTE_TEST_ROOT / "market-data",
     "session_file_path": ABSOLUTE_TEST_ROOT / "engine" / "Sessions.json",
-    "seed_database_path": ABSOLUTE_TEST_ROOT / "engine" / "BackTestInit.db",
 }
 
 
@@ -265,10 +264,10 @@ def test_port_boundaries_are_accepted(boundary_port: int) -> None:
 
 @pytest.mark.parametrize(
     "relative_field_name",
-    ["market_data_root", "session_file_path", "seed_database_path"],
+    ["market_data_root", "session_file_path"],
 )
 def test_relative_engine_input_paths_are_rejected(relative_field_name: str) -> None:
-    """三个引擎侧输入留相对值必须当场报错.
+    """引擎侧输入留相对值必须当场报错.
 
     同一个相对值在引擎 (相对 job 目录解析) 与平台 (相对后端 CWD 解析) 下指向不同位置, 且
     都不报错——故障只在作业跑起来之后以"没有行情数据"的面目出现, 那时已归因不到配置上.
@@ -278,19 +277,18 @@ def test_relative_engine_input_paths_are_rejected(relative_field_name: str) -> N
         _build_settings(**{relative_field_name: Path("relative-input")})
 
 
-def test_from_environment_reads_the_three_engine_input_paths(
+def test_from_environment_reads_the_engine_input_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """三个新环境变量必须真的被读进去, 且默认值本就绝对.
+    """两个环境变量必须真的被读进去, 且默认值本就绝对.
 
-    默认引擎根来自 `QUANT_ENGINE_ROOT`, 而 `session_file_path` / `seed_database_path` 由它
-    拼接派生——若哪天把默认值改成相对串, 配置构造期就会抛 ValueError, 起不来的是整个后端.
+    默认引擎根来自 `QUANT_ENGINE_ROOT`, 而 `session_file_path` 由它拼接派生——若哪天把默认值
+    改成相对串, 配置构造期就会抛 ValueError, 起不来的是整个后端.
     """
 
     for name in (
         "QUANT_MARKET_DATA_ROOT",
         "QUANT_SESSION_FILE_PATH",
-        "QUANT_SEED_DATABASE_PATH",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -299,21 +297,16 @@ def test_from_environment_reads_the_three_engine_input_paths(
     defaulted_settings = PlatformSettings.from_environment()
 
     assert defaulted_settings.session_file_path.is_absolute()
-    assert defaulted_settings.seed_database_path.is_absolute()
     assert defaulted_settings.market_data_root.is_absolute()
 
     override_root = ABSOLUTE_TEST_ROOT / "overridden-engine-inputs"
     monkeypatch.setenv("QUANT_MARKET_DATA_ROOT", str(override_root))
     monkeypatch.setenv("QUANT_SESSION_FILE_PATH", str(override_root / "Sessions.json"))
-    monkeypatch.setenv(
-        "QUANT_SEED_DATABASE_PATH", str(override_root / "BackTestInit.db")
-    )
 
     overridden_settings = PlatformSettings.from_environment()
 
     assert overridden_settings.market_data_root == override_root
     assert overridden_settings.session_file_path == override_root / "Sessions.json"
-    assert overridden_settings.seed_database_path == override_root / "BackTestInit.db"
 
 
 def test_from_environment_applies_documented_defaults(
@@ -335,7 +328,6 @@ def test_from_environment_applies_documented_defaults(
         "QUANT_HTTP_PORT",
         "QUANT_MARKET_DATA_ROOT",
         "QUANT_SESSION_FILE_PATH",
-        "QUANT_SEED_DATABASE_PATH",
         "QUANT_MAXIMUM_OUTPUT_TAIL_BYTES",
         "QUANT_RUN_RETENTION_ENABLED",
         "QUANT_RETAINED_RUNS_PER_USER",

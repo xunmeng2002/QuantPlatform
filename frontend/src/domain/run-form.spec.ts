@@ -46,6 +46,9 @@ function buildFormInput(overrides: Partial<RunFormInput> = {}): RunFormInput {
     startTradingDay: '20240102',
     endTradingDay: '20241231',
     initialCapitalText: '100000',
+    // 刻意用一个**不是 1** 的组号: 1 号组是模型那一列的回填默认值, 用它当夹具的话, "组号有没有
+    // 被带进请求体"这一问在 1 上分不出来.
+    commissionGroupId: 7,
     parameterValues: { GridStep: 0.01 },
     ...overrides,
   };
@@ -78,6 +81,7 @@ describe('validateRunForm 的正向路径', () => {
       start_trading_day: '20240102',
       end_trading_day: '20241231',
       initial_capital: 100000,
+      commission_group_id: 7,
       params: { GridStep: 0.01 },
     });
   });
@@ -160,14 +164,41 @@ describe('validateRunForm 的必填与格式', () => {
 
   it('多处不合格时每处都有各自的说法', () => {
     const errors = readErrors(
-      buildFormInput({ strategyId: '', barPeriod: '', startTradingDay: 'x' }),
+      buildFormInput({
+        strategyId: '',
+        barPeriod: '',
+        startTradingDay: 'x',
+        commissionGroupId: null,
+      }),
     );
 
     expect(Object.keys(errors).sort()).toEqual([
       'bar_period',
+      'commission_group_id',
       'start_trading_day',
       'strategy_id',
     ]);
+  });
+
+  it('手续费组恒必填: 没选时就地报错, 且报错键是后端那个字段名', () => {
+    // 不给默认值是用户拍板的那条决定在界面上的一环: "没选"与"选了 1 号组"必须是两件可分辨的事,
+    // 而后端收的正是 `commission_group_id` (它自己会回 400), 故错误键照抄那个名字.
+    expect(readErrors(buildFormInput({ commissionGroupId: null })).commission_group_id).toBe(
+      '请选择手续费组',
+    );
+  });
+
+  it('手续费组须为不小于 0 的整数', () => {
+    // 这一格在界面上只能从下拉框选出来, 故这句防的是**运行时数据**: 预填与套用收的是接口回来的
+    // 取值, 类型标注管不住它.
+    for (const badGroupId of [-1, 1.5, Number.NaN]) {
+      expect(
+        readErrors(buildFormInput({ commissionGroupId: badGroupId })).commission_group_id,
+      ).toBe('须为不小于 0 的整数');
+    }
+
+    // 0 号组是**合法**的 (组号由管理员手工指定, 没有"必须从 1 开始"这条约定).
+    expect(validateRunForm(buildFormInput({ commissionGroupId: 0 })).ok).toBe(true);
   });
 });
 
@@ -189,6 +220,7 @@ describe('buildTemplateDraft', () => {
         start_trading_day: '20240102',
         end_trading_day: '20241231',
         initial_capital: 100000,
+        commission_group_id: 7,
         params: { GridStep: 0.01 },
       },
     });
@@ -282,6 +314,7 @@ describe('buildPrefilledRunFields', () => {
       start_trading_day: '20220104',
       end_trading_day: '20221230',
       initial_capital: 250000,
+      commission_group_id: 12,
       params: {},
       ...overrides,
     };
@@ -295,6 +328,7 @@ describe('buildPrefilledRunFields', () => {
       startTradingDay: '20220104',
       endTradingDay: '20221230',
       initialCapitalText: '250000',
+      commissionGroupId: 12,
     });
   });
 
@@ -312,6 +346,7 @@ describe('buildPrefilledRunFields', () => {
       start_trading_day: '20220104',
       end_trading_day: '20221230',
       initial_capital: 250000,
+      commission_group_id: 12,
       params: {},
       created_at: '2026-09-26T03:00:00',
       updated_at: '2026-09-26T03:00:00',
@@ -330,16 +365,18 @@ describe('buildPrefilledRunFields', () => {
       startTradingDay: '20240102',
       endTradingDay: '20241231',
       initialCapitalText: '500000',
+      commissionGroupId: 3,
     };
 
     expect(buildPrefilledRunFields(null, current)).toEqual(current);
   });
 
   it('单项读不动时只丢那一项, 其余照填', () => {
-    // 日期不是 8 位数字、资金非正: 各自回落当前输入, 不让其余三项跟着失效.
+    // 日期不是 8 位数字、资金非正、组号是个负数: 各自回落当前输入, 不让其余几项跟着失效.
     const prefill = buildPrefill({
       start_trading_day: '2022-01-04',
       initial_capital: 0,
+      commission_group_id: -1,
     });
 
     expect(buildPrefilledRunFields(prefill, EMPTY_RUN_FIELDS)).toEqual({
@@ -349,7 +386,19 @@ describe('buildPrefilledRunFields', () => {
       startTradingDay: '',
       endTradingDay: '20221230',
       initialCapitalText: '100000',
+      commissionGroupId: null,
     });
+  });
+
+  it('记忆里没带组号时这一格留空, 不替用户认领任何一组', () => {
+    // 后端那一格可空 (`LastSubmittedParameters.commission_group_id`): 读不出来就不回填 —— 认领一个
+    // 组号等于按一套不知道是谁的费率预填.
+    expect(
+      buildPrefilledRunFields(
+        buildPrefill({ commission_group_id: null }),
+        EMPTY_RUN_FIELDS,
+      ).commissionGroupId,
+    ).toBeNull();
   });
 
   it('读不动的取值按运行级字段那套判据挡下', () => {

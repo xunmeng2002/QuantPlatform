@@ -29,10 +29,12 @@ from .errors import (
     PermissionDeniedError,
     ResourceNotFoundError,
 )
+from .reference_data.initial_rows import ensure_initial_reference_data
 from .routers import (
     auth,
     health,
     market_data,
+    reference_data,
     run_templates,
     runs,
     strategies,
@@ -62,6 +64,8 @@ RUN_TEMPLATES_PREFIX = "/api/strategies/{strategy_id}/run-templates"
 RUNS_PREFIX = "/api/runs"
 # 行情来自另一个仓的组件, 不属于任何策略域, 故自带一层顶层前缀.
 MARKET_DATA_PREFIX = "/api/market-data"
+# 回测的基本数据 (品种 / 手续费组 / 费率) 同样是全局一份, 不挂在任何策略域下.
+REFERENCE_DATA_PREFIX = "/api/reference-data"
 
 MULTIPART_FRAMING_ALLOWANCE_BYTES = 64 * 1024
 
@@ -124,6 +128,25 @@ async def _prune_retained_runs(
         logger.info("启动清理移除了 %d 轮历史运行", removed_count)
 
 
+async def _run_startup_step(
+    step_description: str, step: Callable[[], Awaitable[None]]
+) -> None:
+    """跑一个启动期的维护步骤, **失败只记日志、不阻断启动**.
+
+    与 `_prune_retained_runs` 是同一条取舍: 这些步骤都是维护性的, 让一次磁盘或数据问题把整个
+    后端拦在启动之外, 是把可用性问题升级成停机. 这是有意的让步, 不是空 except —— 失败原因
+    带着步骤名进日志, 排查时看得出是哪一步.
+
+    捕获面刻意是 `Exception` 而不是几个具体类型: 两步各自可能抛磁盘错、库错, 也可能抛
+    "契约与模型对不上"这种代码错, 而在**这一步**它们都该以同一种方式收场.
+    """
+
+    try:
+        await step()
+    except Exception as error:
+        logger.error("%s失败, 后端照常启动: %s", step_description, error)
+
+
 def _build_retention_sweep(
     database: PlatformDatabase, settings: PlatformSettings
 ) -> Callable[[str], Awaitable[None]]:
@@ -156,6 +179,12 @@ async def _application_lifespan(application: FastAPI) -> AsyncIterator[None]:
 
     await database.initialize()
     await ensure_initial_admin(database, settings)
+    # 基础数据一步排在播种管理员之后、恢复运行之前: 它只碰自己那三张表, 与运行恢复没有顺序
+    # 关系, 放在这里是因为这一段的主题本来就是"把库补成一个可用的初始状态". 失败不阻断启动.
+    await _run_startup_step(
+        "基础数据初始化 (空表按初始化 CSV 播种)",
+        lambda: ensure_initial_reference_data(database),
+    )
     await recover_interrupted_runs(database)
     await _prune_retained_runs(database, settings)
     await scheduler.start()
@@ -283,6 +312,9 @@ def _register_routers(application: FastAPI) -> None:
     application.include_router(runs.router, prefix=RUNS_PREFIX, tags=["runs"])
     application.include_router(
         market_data.router, prefix=MARKET_DATA_PREFIX, tags=["market-data"]
+    )
+    application.include_router(
+        reference_data.router, prefix=REFERENCE_DATA_PREFIX, tags=["reference-data"]
     )
 
 

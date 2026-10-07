@@ -274,6 +274,9 @@ export interface RunDetail extends RunSummary {
  *
  * `params` 只需给**用户改过的**键; 没给的键取那份上传的配置里的值 (见
  * `run_configuration.build_strategy_configuration`). 三个运行级键不许出现在这里: 后端回 400.
+ *
+ * `commission_group_id` **必填**: 它决定这一轮按哪一套费率计费, 而"没选"与"选了 1 号组"必须是
+ * 两件可分辨的事 —— 给它一个默认值就把前者抹成了后者.
  */
 export interface RunSubmitPayload {
   strategy_id: string;
@@ -285,6 +288,7 @@ export interface RunSubmitPayload {
   start_trading_day: string;
   end_trading_day: string;
   initial_capital: number;
+  commission_group_id: number;
   params: Record<string, unknown>;
 }
 
@@ -306,6 +310,7 @@ export interface RunTemplate {
   start_trading_day: string;
   end_trading_day: string;
   initial_capital: number;
+  commission_group_id: number;
   params: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -332,6 +337,8 @@ export interface RunTemplateCreatePayload {
   start_trading_day: string;
   end_trading_day: string;
   initial_capital: number;
+  /** 与提交同一口径: 必填. 后端要求"这个组已登记", 否则 400. */
+  commission_group_id: number;
   params: Record<string, unknown>;
 }
 
@@ -355,6 +362,11 @@ export interface LastSubmittedParameters {
   start_trading_day: string | null;
   end_trading_day: string | null;
   initial_capital: number | null;
+  /**
+   * 可空: 读的是历史运行里冻结的那一格, 而"这一格读不出来"是可能的 (旧配置 / 被改坏的文本).
+   * 空即**不回填**这一格, 由用户重新选 —— 不替它认领某个组号, 那等于按一套不知道是谁的费率预填.
+   */
+  commission_group_id: number | null;
   params: Record<string, unknown>;
 }
 
@@ -519,3 +531,183 @@ export interface MarketDataCoverageQuery {
   /** 它整份交给 `request` 的 `query`, 那边收的是开放键集; 四个字段拼错名字是这里唯一的防线. */
   [parameterName: string]: string;
 }
+
+/* ── 回测基础数据 (品种 / 手续费组 / 费率) ───────────────────── */
+
+/**
+ * 引擎的 `ProductClassType` (`Spark/Types.h`), 与 `catalog/enums.py` 的 `ProductClass` 逐值对应.
+ *
+ * 取值不可改: 它会被引擎按数字读, 换个数字等于把这些品种说成另一类资产. 默认股票而不是期货
+ * 是有意的 —— 引擎只对 `Future` 造主力合约, 默认成期货会凭空多出一批合约.
+ */
+export const PRODUCT_CLASSES = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;
+export type ProductClass = (typeof PRODUCT_CLASSES)[number];
+
+/**
+ * 一条费率规则管哪个方向: 引擎那两档, 加上平台自己的通配档「双向」.
+ *
+ * 引擎那两档 (`0` / `1`) **是费率主键的一部分**, 不是"用哪一列"的开关: 同一合约的买与卖各占
+ * 一行, 引擎拿成交方向去取行, 再按开平标志决定用行里的开仓列还是平仓列.
+ *
+ * `-1` (双向) **只在平台这一侧存在** —— 与 `RateScope` 同一套路子: 不另存一列, 由取值承载. 它
+ * 说的是"买卖共用这一套费率", 写种子库时被摊成 `0` 与 `1` 两行
+ * (`backend/app/reference_data/rate_expansion.py`). 它一旦原样落到引擎那张表上, 那四列的精确
+ * 查找**一条都命不中**: 那一笔的费用静默按 0 算, 而回测照常"成功".
+ *
+ * 顺序即下拉框的显示顺序, `-1` 在最前 —— 它也是新建规则时的默认取值.
+ */
+export const RATE_DIRECTIONS = [-1, 0, 1] as const;
+export type RateDirection = (typeof RATE_DIRECTIONS)[number];
+
+/**
+ * 通配档 (双向) 的取值. 单独给它一个名字而不是在调用点写 `-1`: 它排在 `RATE_DIRECTIONS` 第一位
+ * 是显示顺序上的安排, 不是"它就是第一个"这种语义.
+ */
+export const BOTH_DIRECTIONS: RateDirection = -1;
+
+/**
+ * 一条费率规则的作用域. 它可以按合约、按品种、按交易所三级设置.
+ *
+ * **不另存一列, 由「合约格」的取值承载** (`domain/rate-scope.ts` 把它读出来): 存了就会有"作用域
+ * 写着品种、合约格写着 `600519`"那种自相矛盾的行, 而两处真相迟早会分叉. 后端的展开器
+ * (`backend/app/reference_data/rate_expansion.py`) 按同一份口径把三级规则摊成具体合约的行.
+ */
+export const RATE_SCOPES = ['contract', 'product', 'exchange'] as const;
+export type RateScope = (typeof RATE_SCOPES)[number];
+
+/**
+ * 交易所代码的**建议**值, 允许自填.
+ *
+ * 做成建议而不是闭集: 引擎侧没有交易所的枚举, 它只拿这四个字符去与成交记录里的对, 多一个交易
+ * 所不需要改代码. 收成闭集反而会拦住一个引擎本来就认的取值.
+ */
+export const EXCHANGE_SUGGESTIONS = ['SSE', 'SZSE', 'CFFEX', 'SHFE', 'DCE', 'CZCE', 'INE'] as const;
+
+/**
+ * 录入框的 `maxlength`, 与 `catalog/schemas.py` 一致, 逐个对应引擎的 `char[n]`.
+ *
+ * 在客户端就拦住超长比等后端回 422 有用: 宽一倍的字符串会被引擎**截断**后按定长比较, 于是那个
+ * 品种静默地匹配不上, 而界面上看不出哪里不对.
+ */
+export const MAXIMUM_EXCHANGE_ID_LENGTH = 8;
+export const MAXIMUM_PRODUCT_ID_LENGTH = 32;
+export const MAXIMUM_PRODUCT_NAME_LENGTH = 32;
+export const MAXIMUM_SESSION_NAME_LENGTH = 32;
+export const MAXIMUM_INSTRUMENT_ID_LENGTH = 32;
+export const MAXIMUM_COMMISSION_GROUP_NAME_LENGTH = 64;
+
+/**
+ * **品种代码长度的启发式上限**, 与后端 `catalog/schemas.py` 的同名常量逐值一致.
+ *
+ * 前端只用它**认**一条已有费率的作用域 (`domain/rate-scope.ts`), 不用它拦提交 —— 拦是后端
+ * `_ensure_instrument_scope_is_known` 的事. 两者读的是同一个数字, 改一处必须改两处.
+ */
+export const MAXIMUM_PRODUCT_CODE_LENGTH = 4;
+
+export interface Product {
+  id: string;
+  exchange_id: string;
+  product_id: string;
+  product_name: string;
+  /**
+   * 读侧是**裸数字**, 不是 `ProductClass`.
+   *
+   * 与后端 `ProductResponse` 同一条理由: 库里一旦存在枚举外的取值 (从引擎侧 dump 灌进来的那套
+   * `1` / `2` / `7` 是迟早的事), 用联合类型去接就等于让那一行把整个列表页变成一句解析错误.
+   * 显示时由 `domain/labels` 的映射回落成原数字.
+   */
+  product_class: number;
+  volume_multiple: number;
+  price_tick: number;
+  max_market_order_volume: number;
+  min_market_order_volume: number;
+  max_limit_order_volume: number;
+  min_limit_order_volume: number;
+  session_name: string;
+  /** UTC 朴素时间串, **无时区标记**: 必须经 `domain/format` 的解析函数处理. */
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * 品种的写侧: 逐列等于 `Product` 里可写的那部分.
+ *
+ * 用 `Omit` 派生而不是重抄一遍: 重抄的那份会在后端加一列时静默少一列, 而少的那一列在**改单**
+ * 时最危险 —— PATCH 是整行替换语义, 发出去的请求里没有它, 后端就把这一列重置成默认值.
+ */
+export type ProductPayload = Omit<
+  Product,
+  'id' | 'created_at' | 'updated_at' | 'product_class'
+> & {
+  /** 写侧收枚举: 建单与改单都由下拉框给出, 越界取值在后端也会被 422 拦下. */
+  product_class: ProductClass;
+};
+
+export interface CommissionGroup {
+  id: string;
+  /** 人工指定的组号, 不是自增主键: 引擎按这一轮配置里的那个组号认它. */
+  commission_group_id: number;
+  commission_group_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * 提交页选组用的选项: 组号 + 组名.
+ *
+ * 与 `CommissionGroup` **刻意分开**: 这条列表普通用户也能取 (他要提交回测, 就得看得见有哪些组),
+ * 而主键与两个时间戳对界面没有用处. 与后端 `catalog.schemas.CommissionGroupOptionResponse` 逐字
+ * 对应.
+ */
+export interface CommissionGroupOption {
+  commission_group_id: number;
+  commission_group_name: string;
+}
+
+export type CommissionGroupPayload = Omit<
+  CommissionGroup,
+  'id' | 'created_at' | 'updated_at'
+>;
+
+export interface BaseCommission {
+  id: string;
+  commission_group_id: number;
+  exchange_id: string;
+  /**
+   * 这一格同时承载**作用域**与**代码** (`domain/rate-scope.ts` 是唯一读法):
+   *
+   * - 空串 → 交易所级 (这一交易所下所有合约的兜底);
+   * - 已登记的品种码 (`600` / `rb`) → 品种级;
+   * - 合约码 (`600519` / `rb2401`) → 合约级.
+   *
+   * 引擎自己只看得到 `(exchange_id, instrument_id)` 两格, 三级语义是平台在写种子库时展开掉的.
+   */
+  instrument_id: string;
+  /**
+   * 读侧是裸数字, 理由同 `Product.product_class`. 库里的合法取值比引擎多一档: 双向 (`-1`), 它
+   * 说的是"买卖共用这一套费率" —— 只有展开那一步才把它摊成买、卖两行.
+   */
+  direction: number;
+  open_by_money: number;
+  close_by_money: number;
+  open_by_volume: number;
+  close_by_volume: number;
+  open_stamp_tax_by_money: number;
+  close_stamp_tax_by_money: number;
+  open_transfer_fee_by_money: number;
+  close_transfer_fee_by_money: number;
+  /** 0 表示**不设下限**, 不是"封到 0": 只有正值才参与封底 (引擎的 `ClampCommission`). */
+  min_commission: number;
+  /** 0 表示**不设上限**. 封顶只管佣金, 印花税与过户费按法定费率实收. */
+  max_commission: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type BaseCommissionPayload = Omit<
+  BaseCommission,
+  'id' | 'created_at' | 'updated_at' | 'direction'
+> & {
+  /** 写侧收三档 (含双向): 建单与改单都由下拉框给出, 越界取值在后端也会被 422 拦下. */
+  direction: RateDirection;
+};

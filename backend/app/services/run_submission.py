@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,15 +27,27 @@ from ..catalog.enums import MarketDataType, RunStatus
 from ..catalog.models import RunModel, StrategyVersionModel, UserModel
 from ..catalog.schemas import RunSubmitRequest
 from ..catalog.visibility import load_visible_strategy
-from ..config import PlatformSettings
+from ..config import SEED_DATABASE_FILENAME, PlatformSettings
 from ..errors import InvalidRequestError
 from ..ids import generate_identifier
-from ..scheduler.engine_config import render_engine_config, serialize_configuration
+from ..reference_data.rate_expansion import (
+    RunContract,
+    describe_missing_rates,
+)
+from ..reference_data.seed_database import expand_seed_rows, read_seed_rows
+from ..scheduler.engine_config import (
+    render_engine_config,
+    serialize_configuration,
+)
 from ..strategy_configuration import parse_configuration_template
+from .commission_group import ensure_commission_group_exists
 from .engine_probe import read_engine_version
 from .run_configuration import (
+    EXCHANGE_ID_FIELD_NAME,
+    INSTRUMENT_ID_FIELD_NAME,
     build_strategy_configuration,
     resolve_run_field_values,
+    validate_commission_group_id,
     validate_initial_capital,
     validate_match_mode,
     validate_trading_day_range,
@@ -50,6 +63,10 @@ CONFIGURATION_UNREADABLE_MESSAGE = (
 )
 MARKET_DATA_MISSING_MESSAGE = "行情数据根目录不存在, 请先配置"
 SESSION_FILE_MISSING_MESSAGE = "会话表文件不存在, 请先配置"
+MISSING_RATE_MESSAGE_TEMPLATE = (
+    "{commission_group_id} 号组下没有 {contract_rates} 的费率, 这一轮的费用会全按 0 算. "
+    "请到「基础数据」页给这个合约 (或它所属的品种 / 交易所) 补一条费率再提交"
+)
 
 
 async def submit_run(
@@ -79,6 +96,14 @@ async def submit_run(
 
     run_field_values = resolve_run_field_values(request_body)
 
+    commission_group_id = validate_commission_group_id(request_body.commission_group_id)
+    # 这一问**不能**并进下面那次费率校验: 交易对留空时那条整个跳过 (那一轮不指名合约, 引擎也不会
+    # 拿空串去查费率), 于是"组不存在"在留空的那些轮里就没人问了 —— 而组号照样会被冻进这一轮的引擎
+    # 配置, 表现为引擎按一个空组计费.
+    await ensure_commission_group_exists(session, commission_group_id)
+
+    await _ensure_run_rates_available(session, commission_group_id, run_field_values)
+
     start_trading_day, end_trading_day = validate_trading_day_range(
         request_body.start_trading_day, request_body.end_trading_day
     )
@@ -91,8 +116,11 @@ async def submit_run(
         start_trading_day=start_trading_day,
         end_trading_day=end_trading_day,
         initial_capital=validate_initial_capital(request_body.initial_capital),
+        commission_group_id=commission_group_id,
         market_data_path=settings.market_data_root,
-        seed_database_path=settings.seed_database_path,
+        # 种子库**按轮生成**, 落在这轮自己的作业目录里 (见 `reference_data.seed_database`), 故这里
+        # 写的是一个提交时就确定的绝对路径: 目录名就是运行主键, 调度侧起进程前把它填上.
+        seed_database_path=settings.runs_root / run_id / SEED_DATABASE_FILENAME,
     )
 
     strategy_configuration_text = serialize_configuration(
@@ -123,6 +151,47 @@ async def submit_run(
     await session.commit()
 
     return run
+
+
+async def _ensure_run_rates_available(
+    session: AsyncSession,
+    commission_group_id: int,
+    run_field_values: Mapping[str, str],
+) -> None:
+    """该轮那个合约的费率必须能在三级 (合约 / 品种 / 交易所) 之内命中.
+
+    **这是把"静默按 0 计费"变成"提交被拦"的那一步**: 引擎查不到费率时不报错, 它照跑完, 只把缺口
+    写进 `result.json` 的 `CommissionMissingCount` —— 用户手上那个回测的手续费是零, 而报告里没有
+    一处说明为什么. 在这里拦下, 文案点名缺的是哪个合约的哪个方向, 以及该去哪儿补.
+
+    查的是**这一轮选中的那个组**, 不是某个常量: 同一个合约在 2 号组有费率、在 1 号组没有, 是正常
+    局面, 而"该用哪个组"只由这一轮的取解决定.
+
+    用**同一份**读库与展开逻辑 (调度侧写种子库时用的是它们): 两边各写一遍的话, 迟早出现"提交
+    过了、跑起来却缺费率"——那正是这条校验存在的理由.
+
+    合约或交易所留空时整个跳过: 那一轮不指名合约, 引擎也不会拿空串去查费率 (见 `RunContract`).
+    """
+
+    exchange_id = run_field_values[EXCHANGE_ID_FIELD_NAME]
+    instrument_id = run_field_values[INSTRUMENT_ID_FIELD_NAME]
+
+    if not exchange_id or not instrument_id:
+        return
+
+    expansion = expand_seed_rows(
+        await read_seed_rows(session, commission_group_id),
+        commission_group_id,
+        (RunContract(exchange_id=exchange_id, instrument_id=instrument_id),),
+    )
+
+    if expansion.missing_rates:
+        raise InvalidRequestError(
+            MISSING_RATE_MESSAGE_TEMPLATE.format(
+                commission_group_id=commission_group_id,
+                contract_rates=describe_missing_rates(expansion.missing_rates),
+            )
+        )
 
 
 def _ensure_engine_inputs_available(settings: PlatformSettings) -> None:

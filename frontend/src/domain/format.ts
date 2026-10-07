@@ -143,6 +143,29 @@ export function formatAmount(
   return value < 0 ? `-${magnitude}` : magnitude;
 }
 
+/**
+ * 可长可短的小数: 固定位数显示, 但**末尾的零不留**.
+ *
+ * 最小变动价位与费率都能小到小数点后五六位 (0.0003 是真实存在的), 而它们也能正好是 1.
+ * `formatAmount` 的固定两位会把前者显示成 `0.00`, 固定六位又会把后者显示成 `1.000000` —
+ * 两个都读不出原值. 这里以最长的那个位数对齐, 再把尾巴上的零去掉.
+ *
+ * 只在**有小数部分**时才去零: `formatAmount(1000, 0)` 得到的是 `1,000`, 不带小数点, 此时
+ * 去零会把整千的数字吃成 `1`.
+ */
+export function formatDecimal(
+  value: number | null | undefined,
+  fractionDigits = 6,
+): string {
+  const fixedText = formatAmount(value, fractionDigits);
+
+  if (!fixedText.includes('.')) {
+    return fixedText;
+  }
+
+  return fixedText.replace(/0+$/, '').replace(/\.$/, '');
+}
+
 /** 计数: 整数 + 千位分隔. */
 export function formatCount(value: number | null | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) {

@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import TypeVar
 
 from httpx import AsyncClient, Response
@@ -44,6 +47,11 @@ LOGIN_PATH = "/api/auth/login"
 STRATEGIES_PATH = "/api/strategies"
 
 UNUSABLE_PASSWORD_HASH = "not-a-password-hash"
+
+# 用例里的手续费组号. 从前它取自 `app.scheduler.engine_config` 的模块常量, 而那个常量已经删掉
+# (组号改成了逐轮冻结的运行级取值), 于是测试侧自己定一个: 值仍是 1, 与各处夹具此前默认的那一个
+# 一致, 免得把一堆断言连带改掉.
+DEFAULT_COMMISSION_GROUP_ID = 1
 
 BASELINE_TRADE_COUNT = 84
 BASELINE_ORDER_COUNT = 654
@@ -123,6 +131,21 @@ def record_ids(page: PageResponse[RecordType]) -> list[str]:
     """当页各记录的 id, 保持既有顺序."""
 
     return [record.id for record in page.records]
+
+
+def read_seed_database_rows(
+    database_path: Path, table_name: str
+) -> list[tuple[object, ...]]:
+    """把引擎种子库里的某张表整表读出来.
+
+    用 `SELECT *` 而**不列列名**: 列序本身就是种子库用例要验的东西之一, 列出来就把它的来源从被
+    验的文件改成了测试自己.
+    """
+
+    with closing(sqlite3.connect(database_path)) as connection:
+        return [
+            tuple(row) for row in connection.execute(f'SELECT * FROM "{table_name}"')
+        ]
 
 
 async def list_visible_strategy_ids(client: AsyncClient, token: str) -> list[str]:

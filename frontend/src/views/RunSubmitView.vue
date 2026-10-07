@@ -25,6 +25,9 @@
  * 选完合约后表单就地做一次覆盖预检, 提前说清"提交后还要先下载"—— 预检只告知, 不挡提交: 真下载发生
  * 在调度器里, 这一页不碰文件系统. 组件不在位时下拉禁用并给出原因, **不退回自由文本**.
  *
+ * **手续费组**是这一页第三个与策略无关的取数 (与合约清单并列): 它决定这一轮按哪一套费率计费, 选项
+ * 来自一条只要求登录的投影路由, 故提交页不必是管理员页. 一个组都没建时同样禁用 + 给出那句话.
+ *
  * 反馈分流: 提交失败是**表单自己的失败** (a 类) —— 参数不合法、标的没填, 那句话的读者正在这张表单上,
  * 所以它就地留在 `submitErrorMessage` 里, 不弹 toast. 成功才弹: 回包之后立刻跳运行详情页, 提示条会
  * 跟着这次跳转一起消失, 而 toast 挂在 body 上, 正好落在"东西真的在跑"的那一页.
@@ -37,11 +40,13 @@ import { ElAlert, ElButton, ElDialog, ElInput, ElOption, ElSelect, ElSelectV2 } 
 import { RouterLink, useRouter } from 'vue-router';
 
 import { fetchMarketDataContracts, fetchMarketDataCoverage } from '../api/market-data';
+import { collectAllPages } from '../api/pagination';
+import { fetchCommissionGroupOptions } from '../api/reference-data';
 import { submitRun } from '../api/runs';
 import { createRunTemplate, fetchRunTemplates } from '../api/run-templates';
 import { fetchLastSubmittedParameters, fetchStrategyDetail } from '../api/strategies';
 import { SUBMITTABLE_MATCH_MODE } from '../api/types';
-import type { LastSubmittedParameters, MarketDataContractList, MarketDataCoverage, MarketDataType, RunSubmitPayload, RunTemplate, StrategyDetail } from '../api/types';
+import type { CommissionGroupOption, LastSubmittedParameters, MarketDataContractList, MarketDataCoverage, MarketDataType, RunSubmitPayload, RunTemplate, StrategyDetail } from '../api/types';
 import EmptyNotice from '../components/EmptyNotice.vue';
 import ErrorBanner from '../components/ErrorBanner.vue';
 import PageHeader from '../components/PageHeader.vue';
@@ -67,6 +72,16 @@ const MATCH_MODE: MarketDataType = SUBMITTABLE_MATCH_MODE;
 
 /** 与 `run_submission.CONFIGURATION_UNREADABLE_MESSAGE` 同一件事, 这里只负责说在提交页上. */
 const PRE_CHANGE_VERSION_MESSAGE = '该版本落在改形态之前, 没有配置模板';
+
+/**
+ * 一个手续费组都没有时那句原因.
+ *
+ * 这不是异常状态: 全新安装的组表就是空的 (`reference_seed/CommissionGroup.csv` 只有表头), 组由
+ * 管理员在「基础数据」页维护. 空下拉框配一句"还没有组"是**可行动**的; 空下拉框什么都不说, 用户
+ * 只会以为页面坏了.
+ */
+const NO_COMMISSION_GROUP_MESSAGE =
+  '还没有手续费组. 回测的费用按组计算, 请先请管理员到「基础数据」页建一个组并录入费率';
 
 const router = useRouter();
 const strategyCatalog = useStrategyCatalogStore();
@@ -120,6 +135,22 @@ const marketDataContracts = ref<MarketDataContractList | null>(null);
 const isLoadingContracts = ref(false);
 /** 取清单这一路自己的失败 (网络 / 鉴权). 组件不在位不走这里, 它是 200 里的一种状态. */
 const contractLoadErrorMessage = ref<string | null>(null);
+
+/**
+ * 可选的手续费组.
+ *
+ * 与合约清单同理: 它是**平台侧**的事实, 与本页选的策略无关, 故跟着页面取一次而不是跟着策略. 这一
+ * 格**不预选**: 只有"上次提交的参数 / 保存过的模板"里带了组号时才回填 (见 `domain/run-form.ts`),
+ * 否则空着等用户选 —— 组号决定这一轮按哪一套费率计费, 替用户认领一个就等于替他选了一套不知道是
+ * 谁的费率.
+ */
+const commissionGroupOptions = ref<CommissionGroupOption[]>([]);
+const isLoadingCommissionGroups = ref(false);
+const commissionGroupLoadErrorMessage = ref<string | null>(null);
+
+/** 下拉里的文案: 组号在前, 因为计费只认组号, 组名只是给人看的. */
+const commissionGroupLabel = (option: CommissionGroupOption): string =>
+  `${option.commission_group_id} · ${option.commission_group_name}`;
 
 /** 提交前的行情预检结果. 只告知, 不挡提交. */
 const coverageNotice = ref<CoverageNotice | null>(null);
@@ -212,6 +243,24 @@ const contractUnavailableReason = computed(
     contractLoadErrorMessage.value ??
     (isContractListAvailable.value ? '' : marketDataContracts.value?.reason ?? ''),
 );
+
+/**
+ * 手续费组下拉被禁用 / 空着时那句原因.
+ *
+ * 两件事合成一句, 因为对用户都是"现在选不了组, 以及为什么": 请求本身失败 (网络 / 鉴权), 与一个组
+ * 都还没建. 加载途中**不出话** —— 那时列表空是暂时的, 说"还没有组"就是在编.
+ */
+const commissionGroupUnavailableReason = computed(() => {
+  if (commissionGroupLoadErrorMessage.value !== null) {
+    return commissionGroupLoadErrorMessage.value;
+  }
+
+  if (isLoadingCommissionGroups.value || commissionGroupOptions.value.length > 0) {
+    return '';
+  }
+
+  return NO_COMMISSION_GROUP_MESSAGE;
+});
 
 /**
  * 下拉框的选中值: 组件主键 (`sh.600519`).
@@ -576,6 +625,32 @@ async function loadMarketDataContracts(): Promise<void> {
   }
 }
 
+/**
+ * 手续费组选项.
+ *
+ * 取的是那条**只要求登录**的投影路由 (`api/reference-data.fetchCommissionGroupOptions`): 普通用户
+ * 要提交回测就得选组, 而"有哪几个组"不是管理面的东西 (要拦的是**改**它们). 一次收全: 下拉框里没有
+ * 翻页这回事.
+ *
+ * 这一路失败只该让这一格换成一句原因, 不该把整张表单挡掉 (同合约清单那一路).
+ */
+async function loadCommissionGroupOptions(): Promise<void> {
+  isLoadingCommissionGroups.value = true;
+  commissionGroupLoadErrorMessage.value = null;
+
+  try {
+    commissionGroupOptions.value = await collectAllPages(fetchCommissionGroupOptions);
+  } catch (error) {
+    commissionGroupOptions.value = [];
+    commissionGroupLoadErrorMessage.value = describeApiFailure(
+      error,
+      '无法读取手续费组',
+    );
+  } finally {
+    isLoadingCommissionGroups.value = false;
+  }
+}
+
 /** 预检的色调. `unknown` 是"没法判" —— 组件不在位、预检请求本身失败, 都落这一档. */
 type CoverageNoticeTone = 'covered' | 'missing' | 'unknown';
 
@@ -647,8 +722,9 @@ function describeCoverage(coverage: MarketDataCoverage): CoverageNotice {
 
 onMounted(() => {
   void strategyCatalog.ensureLoaded();
-  // 合约清单与本页的策略选择无关, 故跟着页面走而不是跟着策略走.
+  // 合约清单与手续费组都跟本页的策略选择无关, 故跟着页面走而不是跟着策略走.
   void loadMarketDataContracts();
+  void loadCommissionGroupOptions();
 });
 </script>
 
@@ -939,6 +1015,40 @@ onMounted(() => {
               v-if="visibleFieldErrors.initial_capital"
               class="text-xs text-rose-600"
             >{{ visibleFieldErrors.initial_capital }}</span>
+          </label>
+
+          <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
+            手续费组
+            <!-- 下拉而不是数字输入: 取值只能是**已登记**的那几组 (后端还要再查一遍"这一组在不在"),
+                 手打一个组号等于让用户凭记忆敲一个必然被拒的数. 默认空着**不预选**: 组号决定这一轮
+                 按哪一套费率计费, 而"没选"与"选了 1 号组"必须是两件可分辨的事 (见 `domain/run-form.ts`). -->
+            <ElSelect
+              id="run-commission-group"
+              v-model="runFields.commissionGroupId"
+              :disabled="commissionGroupOptions.length === 0"
+              :loading="isLoadingCommissionGroups"
+              placeholder="请选择"
+            >
+              <ElOption
+                v-for="option in commissionGroupOptions"
+                :key="option.commission_group_id"
+                :label="commissionGroupLabel(option)"
+                :value="option.commission_group_id"
+              />
+            </ElSelect>
+            <span
+              v-if="visibleFieldErrors.commission_group_id"
+              class="text-xs text-rose-600"
+            >{{ visibleFieldErrors.commission_group_id }}</span>
+            <!-- 一个组都没有时给出**可行动**的那句话, 而不是留一个空下拉 (同合约下拉的形制). -->
+            <span
+              v-else-if="commissionGroupUnavailableReason"
+              class="text-xs text-rose-600"
+            >{{ commissionGroupUnavailableReason }}</span>
+            <span
+              v-else
+              class="text-xs text-slate-400"
+            >决定这一轮按哪一套费率计费, 由管理员在「基础数据」页维护</span>
           </label>
 
           <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">

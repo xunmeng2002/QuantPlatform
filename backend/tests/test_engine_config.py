@@ -26,7 +26,6 @@ import pytest
 from app.catalog.enums import MarketDataType
 from app.config import MARKET_DATA_PRECISION
 from app.scheduler.engine_config import (
-    COMMISSION_GROUP_ID,
     DATABASE_TYPE_FIELD_HINT,
     MATCH_MODE_FIELD_HINT,
     RELATIVE_DATABASE_HOST,
@@ -45,6 +44,11 @@ START_TRADING_DAY = "20241001"
 END_TRADING_DAY = "20241231"
 INITIAL_CAPITAL = 1000000.0
 BAR_MATCH_MODE_VALUE = 3
+
+# **刻意不取 1**: 组号从前是渲染器里的模块常量, 于是"配置里的那一格对不对"这件事, 断言写成
+# `== 1` 与 `== 那个常量` 都对得上, 但两种写法都证明不了参数真的被写进去了 (改坏它、把 1 写死,
+# 用例照样绿). 取一个只可能来自形参的值, 这条断言才有内容.
+RENDERED_COMMISSION_GROUP_ID = 7
 
 ENGINE_CONFIGURATION_KEYS = (
     "RunId",
@@ -72,6 +76,7 @@ RENDERER_PARAMETER_NAMES = (
     "start_trading_day",
     "end_trading_day",
     "initial_capital",
+    "commission_group_id",
     "market_data_path",
     "seed_database_path",
 )
@@ -91,6 +96,7 @@ def rendered_configuration(tmp_path: Path) -> dict[str, object]:
             start_trading_day=START_TRADING_DAY,
             end_trading_day=END_TRADING_DAY,
             initial_capital=INITIAL_CAPITAL,
+            commission_group_id=RENDERED_COMMISSION_GROUP_ID,
             market_data_path=tmp_path / "market-data",
             seed_database_path=tmp_path / "engine" / "BackTestInit.db",
         )
@@ -141,6 +147,7 @@ def test_the_read_paths_are_absolute_and_verbatim(tmp_path: Path) -> None:
             start_trading_day=START_TRADING_DAY,
             end_trading_day=END_TRADING_DAY,
             initial_capital=INITIAL_CAPITAL,
+            commission_group_id=RENDERED_COMMISSION_GROUP_ID,
             market_data_path=market_data_path,
             seed_database_path=seed_database_path,
         )
@@ -202,13 +209,17 @@ def test_the_run_level_values_land_where_the_engine_reads_them(
     """运行级取值逐项落到引擎读它们的键上.
 
     `BarPreces` 不在这里: 它是**平台常量**而不是运行级取值, 单独由下一条钉着.
+
+    `CommissionGroupId` 与 `InitialCapital` 同一档: 它随轮冻结, 引擎按它去查费率. 写死的代价是
+    管理端建的别的组永远不被用到, 而症状是一轮安静地按 0 计费的运行——故这里断言的是那个**只可能
+    来自形参**的组号.
     """
 
     assert rendered_configuration["MatchMode"] == BAR_MATCH_MODE_VALUE
     assert rendered_configuration["StartTradingDay"] == START_TRADING_DAY
     assert rendered_configuration["EndTradingDay"] == END_TRADING_DAY
     assert rendered_configuration["InitialCapital"] == INITIAL_CAPITAL
-    assert rendered_configuration["CommissionGroupId"] == COMMISSION_GROUP_ID
+    assert rendered_configuration["CommissionGroupId"] == RENDERED_COMMISSION_GROUP_ID
 
 
 def test_the_dataset_bar_period_is_a_constant_the_caller_cannot_reach(

@@ -19,6 +19,11 @@ logger = logging.getLogger(__name__)
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PLATFORM_ROOT = BACKEND_ROOT.parent
 
+# 基础数据三表的初始化 CSV 所在目录. 这是**代码资产** (随版本发布, 只在某张表为空时用一次),
+# 不是部署数据, 故不做成可覆盖的设置项: 允许改路径就得允许"这台机器上的初始化内容与那份代码
+# 不一致", 而那种不一致没有任何东西能看出来.
+REFERENCE_SEED_CSV_DIRECTORY = BACKEND_ROOT / "reference_seed"
+
 DEFAULT_MAX_CONCURRENT_RUNS = 1
 DEFAULT_RUN_TIMEOUT_SECONDS = 1800
 DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES = 1440
@@ -38,7 +43,8 @@ DEFAULT_RETAINED_RUNS_PER_USER = 50
 ENVIRONMENT_TRUE_VALUES = frozenset({"true", "1", "yes", "on"})
 ENVIRONMENT_FALSE_VALUES = frozenset({"false", "0", "no", "off"})
 
-# 引擎自己认的文件名, 由引擎写死故为常量: 会话表要复制进每个 job 目录, 种子库是只读输入.
+# 引擎自己认的文件名, 由引擎写死故为常量. 两个都落在每个 job 目录里: 会话表从配置指定的
+# 那份复制过来, 种子库由平台**按轮生成** (见 `reference_data.seed_database`).
 SESSION_FILENAME = "Sessions.json"
 SEED_DATABASE_FILENAME = "BackTestInit.db"
 
@@ -283,7 +289,6 @@ class PlatformSettings:
     http_port: int
     market_data_root: Path
     session_file_path: Path
-    seed_database_path: Path
     maximum_output_tail_bytes: int = DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES
     run_retention_enabled: bool = DEFAULT_RUN_RETENTION_ENABLED
     retained_runs_per_user: int = DEFAULT_RETAINED_RUNS_PER_USER
@@ -319,7 +324,7 @@ class PlatformSettings:
         if not 1 <= self.http_port <= MAXIMUM_PORT:
             raise ValueError(f"http_port 需在 1..{MAXIMUM_PORT} 之间")
 
-        # 这三个引擎侧路径必须绝对: 引擎相对 **job 目录** 解析读路径, 而平台的复制动作相对
+        # 这两个引擎侧路径必须绝对: 引擎相对 **job 目录** 解析读路径, 而平台的复制动作相对
         # **后端进程的 CWD** 解析. 同一个相对值在这两处指向不同的地方, 且都不报错——配置里
         # 留一个相对值, 故障只在作业跑起来之后才以"没有行情数据"的面目出现.
         #
@@ -329,7 +334,6 @@ class PlatformSettings:
         for field_name in (
             "market_data_root",
             "session_file_path",
-            "seed_database_path",
             "quote_hub_root",
         ):
             if not getattr(self, field_name).is_absolute():
@@ -396,9 +400,6 @@ class PlatformSettings:
             ),
             session_file_path=Path(
                 os.getenv("QUANT_SESSION_FILE_PATH", engine_root / SESSION_FILENAME)
-            ),
-            seed_database_path=Path(
-                os.getenv("QUANT_SEED_DATABASE_PATH", engine_root / SEED_DATABASE_FILENAME)
             ),
             maximum_output_tail_bytes=read_integer_environment(
                 "QUANT_MAXIMUM_OUTPUT_TAIL_BYTES", DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES

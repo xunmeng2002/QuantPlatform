@@ -40,7 +40,6 @@ RELATIVE_SESSION_FILE = f"./{SESSION_FILENAME}"
 
 # 引擎侧的 DbType 是 int, 取值即 Spark `DbTypeType` 的枚举值 (对应关系见 DATABASE_TYPE_FIELD_HINT).
 SQLITE_DATABASE_TYPE = 1
-COMMISSION_GROUP_ID = 1
 
 MATCH_MODE_FIELD_HINT = "OrderBook:0, LastPrice:1, OppositePrice:2, Bar:3"
 DATABASE_TYPE_FIELD_HINT = "DuckDB:0, SqliteDB:1, MysqlDB:2, MariaDB:3"
@@ -139,6 +138,7 @@ def render_engine_config(
     start_trading_day: str,
     end_trading_day: str,
     initial_capital: float,
+    commission_group_id: int,
     market_data_path: Path,
     seed_database_path: Path,
 ) -> str:
@@ -153,6 +153,12 @@ def render_engine_config(
     `RunId` 既是目录名也是引擎自己派生结果库名 (`BackTest_<RunId>.db`) 的依据, 故它就是平台
     生成的运行主键; `DbHost` 因此写 `./BackTest.db`, 由引擎拼后缀——平台若自己把 id 拼进去,
     会得到 `BackTest_<RunId>_<RunId>.db`, 不报错, 只是与 `result.json.DbPath` 对不上.
+
+    `CommissionGroupId` 有一个形参而**不是模块常量**: 引擎按
+    `(CommissionGroupId, ExchangeId, InstrumentId, Direction)` 四元组精确查一张费率哈希表, 查不到
+    只累加 `CommissionMissingCount` 而不报错——一个写死的组号会让"管理端建的 2 号、3 号组"永远
+    不被任何一轮用到, 且症状是一轮安静地按 0 计费的运行. 它随轮冻结在**这一份**配置里, 于是
+    提交期的费率校验与调度期按轮生成种子库读的都是同一个值.
     """
 
     configuration = {
@@ -172,7 +178,7 @@ def render_engine_config(
         "DbHost": RELATIVE_DATABASE_HOST,
         "DbInitHost": str(seed_database_path),
         "InitialCapital": float(initial_capital),
-        "CommissionGroupId": COMMISSION_GROUP_ID,
+        "CommissionGroupId": int(commission_group_id),
     }
 
     return serialize_configuration(configuration)

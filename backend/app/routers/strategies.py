@@ -546,6 +546,7 @@ async def read_last_submitted_parameters_handler(
         start_trading_day=last_submitted_parameters.start_trading_day,
         end_trading_day=last_submitted_parameters.end_trading_day,
         initial_capital=last_submitted_parameters.initial_capital,
+        commission_group_id=last_submitted_parameters.commission_group_id,
         params=last_submitted_parameters.params,
     )
 

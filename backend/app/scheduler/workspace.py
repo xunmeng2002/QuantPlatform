@@ -14,11 +14,12 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..config import PlatformSettings
+from ..config import SEED_DATABASE_FILENAME, PlatformSettings
 from ..ids import generate_identifier
 from .engine_config import (
     DUMP_DIRECTORY_NAME,
@@ -38,6 +39,10 @@ class JobFileSet:
 
     两个配置文本由提交侧渲染好并落库 (`BacktestConfigJson` / `ParamsJson`), 调度侧只负责
     写出来: 于是"库里记的"与"盘上写的"永远是同一份, 事后复查不必重新渲染一次来对账.
+
+    `seed_database_source_path` 是调度侧刚给**这一轮**生成的那份种子库 (见
+    `reference_data.seed_database`): 它被**搬**进作业目录而不是复制, 因为里面的费率行是按这一轮
+    的合约展开出来的, 留在别处只会被误当成"下一轮也能用".
     """
 
     run_id: str
@@ -46,6 +51,7 @@ class JobFileSet:
     strategy_configuration_filename: str
     strategy_configuration_text: str
     engine_configuration_text: str
+    seed_database_source_path: Path
 
 
 def build_job_directory(settings: PlatformSettings, job_files: JobFileSet) -> Path:
@@ -85,7 +91,7 @@ def build_job_directory(settings: PlatformSettings, job_files: JobFileSet) -> Pa
 def _write_job_files(
     staging_directory: Path, settings: PlatformSettings, job_files: JobFileSet
 ) -> None:
-    """把四个文件与 `Dump/` 父目录写进临时目录."""
+    """把五个文件与 `Dump/` 父目录写进临时目录."""
 
     (staging_directory / ENGINE_CONFIG_FILENAME).write_text(
         job_files.engine_configuration_text, encoding="utf-8"
@@ -104,6 +110,13 @@ def _write_job_files(
 
     (staging_directory / job_files.strategy_configuration_filename).write_text(
         job_files.strategy_configuration_text, encoding="utf-8"
+    )
+
+    # 种子库**搬**进来 (`os.replace`, 同卷内原子): 它的内容是按这一轮的合约展开出来的, 别处
+    # 再留一份只会被误当成别轮也能用. 临时文件由调度侧建在同一个运行根下, 故这一步不会跨卷.
+    os.replace(
+        job_files.seed_database_source_path,
+        staging_directory / SEED_DATABASE_FILENAME,
     )
 
     # 只建 Dump 这一层: 其下的 <RunId> 由引擎自己建 (它才是决定要不要建的一方).

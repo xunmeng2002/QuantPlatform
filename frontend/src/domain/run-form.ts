@@ -9,7 +9,9 @@
  *   - `exchange_id` / `instrument_id` 恒必填: 平台按固定键名把它们覆写进策略配置, 没有"这个策略
  *     不需要合约"这回事;
  *   - 交易日是 8 位数字串, 且开始不得晚于结束 (等长数字串的字符串比较即为数值比较);
- *   - 初始资金须为大于 0 的有限数值.
+ *   - 初始资金须为大于 0 的有限数值;
+ *   - 手续费组须已选定 —— 它决定这一轮按哪一套费率计费, **不给默认值**, 否则"没选"会被静默当成
+ *     "选了某一组"; 这一格是下拉框选出来的, 选项由提交页从只读的选项路由取来.
  *
  * 纯函数, 故能直接单测: 视图只负责把校验结果画出来.
  */
@@ -35,7 +37,7 @@ const TRADING_DAY_PATTERN = /^\d{8}$/;
 
 const INITIAL_CAPITAL_TEXT = '100000';
 
-/** 表单里六个运行级控件的输入, 键名与 `RunFormInput` 的同名字段一致, 便于整体展开. */
+/** 表单里七个运行级控件的输入, 键名与 `RunFormInput` 的同名字段一致, 便于整体展开. */
 export interface RunFieldInputs {
   barPeriod: string;
   exchangeId: string;
@@ -43,12 +45,19 @@ export interface RunFieldInputs {
   startTradingDay: string;
   endTradingDay: string;
   initialCapitalText: string;
+  /**
+   * 手续费组号, `null` 即**还没选**.
+   *
+   * 与 `initialCapitalText` 不同, 这一格不拿文本承载数值: 它的取值只可能从下拉框里选出来 (界面
+   * 没有给人手打的地方), 于是没有"半成品"要容忍, 也就不必在"文本 ↔ 数值"之间来回翻译.
+   */
+  commissionGroupId: number | null;
 }
 
 /**
  * 一份"填表用的取值集合": 键名与运行记录对齐 (snake_case), 取值全可空.
  *
- * 与 `RunFieldInputs` **不是一回事**: 那个是六个控件里的原始文本 (camelCase, 初始资金还是字符串),
+ * 与 `RunFieldInputs` **不是一回事**: 那个是七个控件里的原始输入 (camelCase, 初始资金还是字符串),
  * 这个是已经过服务端语义的取值. `api/types` 的 `LastSubmittedParameters` (上次提交的记忆) 与
  * `RunTemplate` (保存过的模板) 都满足它, 且字段口径逐字相同 —— 于是"套用模板"与"按上次提交预填"
  * 在下面两个函数眼里是**同一个动作**, 取数路径不必分支.
@@ -60,6 +69,8 @@ export interface RunFormPrefill {
   start_trading_day: string | null;
   end_trading_day: string | null;
   initial_capital: number | null;
+  /** 可空: 读不出来即**不回填**这一格 (见 `rememberedCommissionGroupId`). */
+  commission_group_id: number | null;
   params: Record<string, unknown>;
 }
 
@@ -71,6 +82,9 @@ export const EMPTY_RUN_FIELDS: RunFieldInputs = {
   startTradingDay: '',
   endTradingDay: '',
   initialCapitalText: INITIAL_CAPITAL_TEXT,
+  // 空着, **不预选**某号组: 只有"上次提交的参数 / 保存过的模板"里带了组号时才回填. 这正是"必填、
+  // 不给默认值"那条决定在界面上的样子 —— 哪怕库里此刻只有一个组.
+  commissionGroupId: null,
 };
 
 export interface RunFormInput extends RunFieldInputs {
@@ -124,6 +138,10 @@ export function buildPrefilledRunFields(
     initialCapitalText: rememberedInitialCapitalText(
       prefill?.initial_capital,
       current.initialCapitalText,
+    ),
+    commissionGroupId: rememberedCommissionGroupId(
+      prefill?.commission_group_id,
+      current.commissionGroupId,
     ),
   };
 }
@@ -181,6 +199,22 @@ function rememberedInitialCapitalText(
   return parsedValue === null ? fallbackValue : rememberedText;
 }
 
+/**
+ * 记忆里的手续费组号, 同一套「能用就用」.
+ *
+ * 判据与 `validateRunForm` 共用那个读取器 (`rememberedInitialCapitalText` 也是这个路子): 存进
+ * 记忆里的组号若是坏的, 它就**不该**被填进这一格 —— 填进去等于把一个不可提交的取值摆成"用户已经
+ * 选好了"的样子, 而用户随后看到的提交失败会归因到别处.
+ */
+function rememberedCommissionGroupId(
+  rememberedValue: number | null | undefined,
+  fallbackValue: number | null,
+): number | null {
+  const errors: Record<string, string> = {};
+
+  return readCommissionGroupId(rememberedValue ?? null, errors) ?? fallbackValue;
+}
+
 export function validateRunForm(input: RunFormInput): RunFormValidation {
   const errors: Record<string, string> = {};
 
@@ -204,8 +238,12 @@ export function validateRunForm(input: RunFormInput): RunFormValidation {
   }
 
   const initialCapital = readInitialCapital(input.initialCapitalText, errors);
+  const commissionGroupId = readCommissionGroupId(input.commissionGroupId, errors);
 
-  if (Object.keys(errors).length > 0) {
+  // 多判一次 `null` 是**类型上的必要**, 不是又一道业务闸: 上面那个 `initial_capital ?? 0` 之所以
+  // 敢写, 是因为 0 在服务端必被拒 (它不会变成一个"看起来正常"的取值); 而组号的兜底 0 是**合法的
+  // 0 号组**, 一旦漏到这里, 就会以"用户选了 0 号组"的样子冻进这一轮并按一套查不到的费率计费.
+  if (Object.keys(errors).length > 0 || commissionGroupId === null) {
     return { ok: false, errors };
   }
 
@@ -221,6 +259,7 @@ export function validateRunForm(input: RunFormInput): RunFormValidation {
       start_trading_day: startTradingDay ?? '',
       end_trading_day: endTradingDay ?? '',
       initial_capital: initialCapital ?? 0,
+      commission_group_id: commissionGroupId,
       params: input.parameterValues,
     },
   };
@@ -307,6 +346,7 @@ export function buildTemplateDraft(
       start_trading_day: payload.start_trading_day,
       end_trading_day: payload.end_trading_day,
       initial_capital: payload.initial_capital,
+      commission_group_id: payload.commission_group_id,
       params: payload.params,
     },
   };
@@ -430,6 +470,35 @@ function readInitialCapital(
   }
 
   return parsedValue;
+}
+
+/**
+ * 读手续费组号: 必填.
+ *
+ * 报错键用**后端字段名**, 与上面几个运行级字段同口径 (视图按它定位控件). 两句分开报的理由同
+ * `readBarPeriod`: "还没选"与"选了个坏的"下一步动作不同.
+ *
+ * 第二句防的是**运行时数据**: 这一格在界面上只能选出来, 但预填那一路收的是接口回来的取值, 类型
+ * 标注管不住它 (`RunTemplate.commission_group_id` 声明成 `number`, 而库里的行可以是任何整数).
+ * 判据与后端 `run_configuration.validate_commission_group_id` 一致.
+ */
+function readCommissionGroupId(
+  selectedId: number | null,
+  errors: Record<string, string>,
+): number | null {
+  if (selectedId === null) {
+    errors.commission_group_id = '请选择手续费组';
+
+    return null;
+  }
+
+  if (!Number.isInteger(selectedId) || selectedId < 0) {
+    errors.commission_group_id = '须为不小于 0 的整数';
+
+    return null;
+  }
+
+  return selectedId;
 }
 
 /** 控制字符会让引擎侧的日志与配置解析出问题, 后端也挡 (`RUN_FIELD_INVALID_CHARACTERS_MESSAGE`). */

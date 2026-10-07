@@ -1,4 +1,4 @@
-"""catalog 六张表的 ORM 定义.
+"""catalog 九张表的 ORM 定义.
 
 列名一律 PascalCase (按 database-style.md), Python 属性名 snake_case, 两者由
 mapped_column 的列名参数映射. 约束名不逐个手写, 由 MetaData 的命名约定统一生成.
@@ -33,7 +33,14 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from ..clock import utc_now
-from .enums import GrantPermission, RunStatus, StrategyVisibility, UserStatus, UserType
+from .enums import (
+    GrantPermission,
+    ProductClass,
+    RunStatus,
+    StrategyVisibility,
+    UserStatus,
+    UserType,
+)
 
 
 NAMING_CONVENTION = {
@@ -371,8 +378,8 @@ class RunTemplateModel(Base):
     落在"同一策略下不重名". 重名以这条约束为准 (捕 `IntegrityError`), 不另做"先查后插".
 
     列的可空性与提交契约对齐: 提交时必填的列 (Name / MatchMode / BarPeriod / 两个交易日 /
-    InitialCapital) 一律非空不可省, 只有 `exchange_id` / `instrument_id` 可空——不指名合约是
-    正常的一轮, 它们此时存空串. `ParamsJson` 与 `Runs.ParamsJson` **同形同义** (都是策略配置的
+    InitialCapital / CommissionGroupId) 一律非空不可省, 只有 `exchange_id` / `instrument_id`
+    可空——不指名合约是正常的一轮, 它们此时存空串. `ParamsJson` 与 `Runs.ParamsJson` **同形同义** (都是策略配置的
     那个形状的 `{键: 取值}`, 只是这里不含平台那三个运行级键——它们在表上各有具名列), 故套用时
     可直接喂给参数控件, 不需要再译一遍.
     """
@@ -416,7 +423,178 @@ class RunTemplateModel(Base):
 
     initial_capital: Mapped[float] = mapped_column("InitialCapital", Float)
 
+    # `default=1` **只是迁移回填值**, 不是接口默认值. 既有模板行的组号在库里无从推断, 而它们此前
+    # 实际跑的就是 1 号组 (那时平台侧只有那一个常量), 回填 1 与它们的真实行为一致.
+    # `catalog/migrations.py` 要求 NOT NULL 的新列有一个可渲染的标量默认, 否则这一列根本不会被加上
+    # —— 那个机制决定了这个默认值必须写在这里, 与 `Runs.EngineVersion` 的 `default=""` 同形.
+    # 接口侧这一格**必填**: "没选"与"选了 1 号组"必须是两件能分辨的事, 而一个接口默认值会把前者
+    # 抹成后者.
+    commission_group_id: Mapped[int] = mapped_column(
+        "CommissionGroupId", Integer, default=1
+    )
+
     params_json: Mapped[str] = mapped_column("ParamsJson", Text, default="{}")
+
+    created_at: Mapped[datetime] = mapped_column("CreatedAt", DateTime, default=utc_now)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        "UpdatedAt", DateTime, default=utc_now, onupdate=utc_now
+    )
+
+
+class ProductModel(Base):
+    """品种基本数据: 引擎 `Product` 表在平台侧的宿主.
+
+    **列按引擎列序声明, 平台专有列排在最后**. 这不是排版的讲究: 引擎装载种子库时按列**下标**
+    绑定 (`SELECT *` 的结果直接喂进字段描述数组), 少一列、多一列或换个次序都是静默错位 ——
+    引擎不报错, 只是把 `ExchangeId` 读成 `ProductId`. 种子库文件本身的列序由
+    `reference_data/seed_contract.py` 的显式 DDL 决定 (那里是权威), 这张表保持同序是为了让
+    两处能一眼对上.
+
+    主键是平台自造的 `Id` 而不是自然键: `PATCH /products/{record_id}` 必须允许改
+    `ExchangeId` / `ProductId` (填错重填是常规动作), 而拿自然键当主键的话, 改一次品种代码
+    就等于换掉一行主键, 路径参数得写成复合键. 自然键改由唯一约束守住.
+
+    字段宽度逐列取自引擎的结构体声明 (char[n] → `String(n)`), 越界的字符串在请求层就会被
+    422 拦下, 不会写进库再在装载时被引擎截断.
+    """
+
+    __tablename__ = "Products"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "ExchangeId", "ProductId", name="UqProductsExchangeIdProductId"
+        ),
+    )
+
+    exchange_id: Mapped[str] = mapped_column("ExchangeId", String(8))
+    product_id: Mapped[str] = mapped_column("ProductId", String(32))
+    product_name: Mapped[str] = mapped_column("ProductName", String(32))
+    product_class: Mapped[int] = mapped_column(
+        "ProductClass", Integer, default=ProductClass.STOCK.value
+    )
+    volume_multiple: Mapped[int] = mapped_column("VolumeMultiple", Integer)
+    price_tick: Mapped[float] = mapped_column("PriceTick", Float)
+    max_market_order_volume: Mapped[int] = mapped_column("MaxMarketOrderVolume", Integer)
+    min_market_order_volume: Mapped[int] = mapped_column("MinMarketOrderVolume", Integer)
+    max_limit_order_volume: Mapped[int] = mapped_column("MaxLimitOrderVolume", Integer)
+    min_limit_order_volume: Mapped[int] = mapped_column("MinLimitOrderVolume", Integer)
+    session_name: Mapped[str] = mapped_column("SessionName", String(32), default="")
+
+    id: Mapped[str] = mapped_column("Id", String(32), primary_key=True)
+
+    created_at: Mapped[datetime] = mapped_column("CreatedAt", DateTime, default=utc_now)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        "UpdatedAt", DateTime, default=utc_now, onupdate=utc_now
+    )
+
+
+class CommissionGroupModel(Base):
+    """手续费组: 引擎 `CommissionGroup` 表在平台侧的宿主.
+
+    `CommissionGroupId` 是**人工指定的整数**, 不是自增主键 —— 引擎每轮的 `BackTest.json` 里
+    `CommissionGroupId` 是一个具体的整数, 引擎按它去费率表里找组. 自增的话, 库里"1 号组"是哪
+    一行就由插入次序决定, 而配置认的是数字, 认错了不会报错、只会用另一套费率算钱. 故这里让操作
+    员自己填组号, 并由唯一约束保证不重复.
+
+    建几个组就有几个组可用: 组号随每一轮提交**冻结**进该轮的引擎配置 (见
+    `scheduler/engine_config.render_engine_config`), 提交页选哪个, 那一轮就按哪个组计费. 删组会
+    被两道闸拦住——组下还有费率明细, 或有配置模板正引用它.
+    """
+
+    __tablename__ = "CommissionGroups"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "CommissionGroupId", name="UqCommissionGroupsCommissionGroupId"
+        ),
+    )
+
+    commission_group_id: Mapped[int] = mapped_column("CommissionGroupId", Integer)
+    commission_group_name: Mapped[str] = mapped_column("CommissionGroupName", String(64))
+
+    id: Mapped[str] = mapped_column("Id", String(32), primary_key=True)
+
+    created_at: Mapped[datetime] = mapped_column("CreatedAt", DateTime, default=utc_now)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        "UpdatedAt", DateTime, default=utc_now, onupdate=utc_now
+    )
+
+
+class BaseCommissionModel(Base):
+    """费率明细: 引擎 `BaseCommission` 表在平台侧的宿主.
+
+    一行 = 某个手续费组下的一档费率规则: 某个交易所、某一格合约代码、某一个方向上的费率与税额.
+    后两格都允许写成通配 (见下).
+
+    自然键是四列联合 (`CommissionGroupId` + `ExchangeId` + `InstrumentId` + `Direction`),
+    与引擎的主键索引逐列相同, 而引擎**就是按这四列精确查这一行**的
+    (`CommissionCalculator::Apply` → `PrimaryKey->Select(组号, 交易所, 合约, 方向)`): 没有
+    通配、没有前缀匹配. 键里任一列对不上, 这笔成交就取不到费率, 三列费用按 0 算并计入
+    `CommissionMissingCount` —— 回测照跑完, 只是手续费是零.
+
+    **"没有通配"说的是引擎那一侧, 不是这张表**: 这张表收的是"规则", 它的键里有两处可以写成通配
+    —— 合约格那三级 (合约 / 品种 / 交易所, 由 `InstrumentId` 的取值承载) 与买卖双向
+    (`Direction = -1`). 写种子库之前 `reference_data.rate_expansion` 会把它们摊成具体合约、具体
+    方向的行, 故引擎那条前提逐字不变, 而这两处通配不会漏到它那里去.
+
+    故 `Direction` **是键的一部分, 不是"选哪一列"的开关**: 引擎拿成交方向去取行, 取到之后再
+    按开平标志 (OffsetFlag) 决定用这一行的开仓列还是平仓列. 同一合约的买与卖要各占一行, 正是
+    因为方向在键里 —— 印花税只在卖出侧收, 只写了一行的话另一个方向就整笔取不到费率. 引擎读到
+    的每一行都必须是**具体方向**的那一行; 双向那一档只在这张表里存在.
+
+    `MinCommission` / `MaxCommission` 的 0 (或负值) 表示该侧不设限, 不是"封到 0"; 封顶只作用
+    于佣金, 印花税与过户费按法定费率实收. 见 `CommissionCalculator.cpp` 的 `ClampCommission`.
+
+    `CommissionGroupId` 带**真外键**指向组表: 删掉一个仍被引用的组, 由 SQLite 抛
+    `IntegrityError` 兜底 (逐连接开着 `PRAGMA foreign_keys=ON`), 而不是静默留下悬空引用 ——
+    悬空行的效果是该合约完全匹配不到费率, 回测照跑, 只是手续费按 0 算.
+    """
+
+    __tablename__ = "BaseCommissions"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "CommissionGroupId",
+            "ExchangeId",
+            "InstrumentId",
+            "Direction",
+            name="UqBaseCommissionsCommissionGroupIdExchangeIdInstrumentIdDirection",
+        ),
+    )
+
+    commission_group_id: Mapped[int] = mapped_column(
+        "CommissionGroupId",
+        Integer,
+        ForeignKey("CommissionGroups.CommissionGroupId"),
+        index=True,
+    )
+    exchange_id: Mapped[str] = mapped_column("ExchangeId", String(8))
+    instrument_id: Mapped[str] = mapped_column("InstrumentId", String(32))
+    direction: Mapped[int] = mapped_column("Direction", Integer)
+
+    open_by_money: Mapped[float] = mapped_column("OpenByMoney", Float, default=0.0)
+    close_by_money: Mapped[float] = mapped_column("CloseByMoney", Float, default=0.0)
+    open_by_volume: Mapped[float] = mapped_column("OpenByVolume", Float, default=0.0)
+    close_by_volume: Mapped[float] = mapped_column("CloseByVolume", Float, default=0.0)
+    open_stamp_tax_by_money: Mapped[float] = mapped_column(
+        "OpenStampTaxByMoney", Float, default=0.0
+    )
+    close_stamp_tax_by_money: Mapped[float] = mapped_column(
+        "CloseStampTaxByMoney", Float, default=0.0
+    )
+    open_transfer_fee_by_money: Mapped[float] = mapped_column(
+        "OpenTransferFeeByMoney", Float, default=0.0
+    )
+    close_transfer_fee_by_money: Mapped[float] = mapped_column(
+        "CloseTransferFeeByMoney", Float, default=0.0
+    )
+    min_commission: Mapped[float] = mapped_column("MinCommission", Float, default=0.0)
+    max_commission: Mapped[float] = mapped_column("MaxCommission", Float, default=0.0)
+
+    id: Mapped[str] = mapped_column("Id", String(32), primary_key=True)
 
     created_at: Mapped[datetime] = mapped_column("CreatedAt", DateTime, default=utc_now)
 

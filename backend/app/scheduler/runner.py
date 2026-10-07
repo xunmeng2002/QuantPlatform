@@ -29,6 +29,12 @@ from ..catalog.enums import RunStatus
 from ..catalog.models import RunModel, StrategyVersionModel
 from ..clock import utc_now
 from ..config import PlatformSettings
+from ..reference_data.rate_expansion import RunContract, describe_missing_rates
+from ..reference_data.seed_database import (
+    build_seed_database_staging_path,
+    discard_staged_seed_database,
+    generate_run_seed_database,
+)
 from ..services.engine_probe import is_python_binding_available
 from ..services.market_data_preparation import (
     MarketDataPrepared,
@@ -61,6 +67,16 @@ PUMP_DRAIN_GRACE_SECONDS = 5
 MAXIMUM_ERROR_MESSAGE_LENGTH = 1000
 
 JOB_DIRECTORY_FAILURE_MESSAGE = "作业目录构造失败"
+SEED_DATABASE_FAILURE_MESSAGE = "基本数据种子库生成失败"
+MISSING_RATE_FAILURE_MESSAGE_TEMPLATE = (
+    "{commission_group_id} 号组下没有 {contract_rates} 的费率, 这一轮的费用会全按 0 算, "
+    "故不再跑. 请到「基础数据」页补一条费率后重新提交"
+)
+# 冻结配置里读不出组号: 只可能是那一轮的配置文本被改坏了 (本平台的写路径总会写下它). 说"读不动"
+# 而不是替它认领 1 号组——认领一个组号就是按一套不知道是谁的费率计费, 而这一轮看起来会完全正常.
+UNDECODABLE_COMMISSION_GROUP_MESSAGE = (
+    "这一轮的引擎配置里读不出手续费组号, 无法确定该用哪一套费率, 故不再跑"
+)
 MISSING_VERSION_MESSAGE = "运行引用的策略版本不存在, 无法执行"
 INTERNAL_FAILURE_MESSAGE = "调度器内部异常, 运行被中止"
 
@@ -170,9 +186,12 @@ class LaunchContext:
     两个配置文本取自运行行 (`BacktestConfigJson` / `ParamsJson`): 提交侧渲染时就把它们连同
     运行行一起提交了, 于是调度侧不必回头重算一遍——"库里记的"与"盘上写的"永远是同一份.
 
-    末尾四个行情字段是从那两份文本里**解**出来的, 不是另读一列: 运行行不存它们, 存的就是那两份
-    文本 (见 `run_prefill` 的同一条理由). `exchange_id` / `instrument_id` 为空串是正常的
+    末尾四个行情字段与组号都是从那两份文本里**解**出来的, 不是另读一列: 运行行不存它们, 存的就是
+    那两份文本 (见 `run_prefill` 的同一条理由). `exchange_id` / `instrument_id` 为空串是正常的
     ——那一轮没指名合约, 行情准备会跳过.
+
+    `commission_group_id` 解不出来时**不进这里**: 它是"这一轮按哪套费率计费"的唯一依据, 认一个
+    默认组等于替用户选一套费率, 故构造上下文之前就抛 `UnrunnableJob` (见 `_load_launch_context`).
 
     用户的订阅周期**不在这里**: 它不影响"行情备不备得齐" (那只看数据源精度, 是个平台常量), 故
     起进程前没有任何一处要用到它.
@@ -189,6 +208,7 @@ class LaunchContext:
     instrument_id: str
     start_trading_day: str
     end_trading_day: str
+    commission_group_id: int
 
 
 @dataclass
@@ -267,7 +287,7 @@ class JobRunner:
         await self._finalize(handle, execution)
 
     async def _run_job(self, handle: JobHandle, execution: JobExecution) -> None:
-        """作业体: 读上下文 → 建目录 → 备行情 → 起进程 → 等它退出.
+        """作业体: 读上下文 → 生种子库 → 建目录 → 备行情 → 起进程 → 等它退出.
 
         **作业级超时只包住最后那一段** (`_launch_and_await_exit`), 这是刻意的: 它原先包着整个
         作业体, 而行情下载一旦落进预算里, 一次长下载就会被记成 `timeout` + "运行超出时限", 把
@@ -287,13 +307,31 @@ class JobRunner:
         execution.started_at = launch_context.started_at
 
         try:
+            seed_database_source_path = await self._stage_run_seed_database(launch_context)
+        except UnrunnableJob as error:
+            execution.platform_error_message = error.message
+            return
+        except Exception:
+            # 捕获面与启动期那两步同理 (见 `main.py` 的 `_run_startup_step`): 这一步可能抛磁盘错、
+            # 库错, 也可能抛"契约与模型对不上"那种代码错, 而在**此处**它们都该以同一种方式收场
+            # —— 这一轮失败, 且失败得说得清是哪一步. 截断成 500 只会把它归因成"调度器内部异常".
+            logger.exception("种子库生成失败")
+            execution.platform_error_message = SEED_DATABASE_FAILURE_MESSAGE
+            return
+
+        try:
             job_directory = build_job_directory(
-                self._settings, self._build_job_file_set(launch_context)
+                self._settings,
+                self._build_job_file_set(launch_context, seed_database_source_path),
             )
         except OSError:
             logger.exception("作业目录构造失败")
             execution.platform_error_message = JOB_DIRECTORY_FAILURE_MESSAGE
             return
+        finally:
+            # 成功时那份已经被搬进作业目录 (`os.replace`), 这一句是空动作; 失败时它清掉暂存的
+            # 那一份. 于是无论走哪条路, 运行根里都不会剩下这一轮的种子库.
+            discard_staged_seed_database(seed_database_source_path)
 
         execution.job_directory = job_directory
 
@@ -553,6 +591,9 @@ class JobRunner:
 
             decoded_fields = self._decode_launch_fields(run)
 
+            if decoded_fields.commission_group_id is None:
+                raise UnrunnableJob(UNDECODABLE_COMMISSION_GROUP_MESSAGE)
+
             return LaunchContext(
                 run_id=run.id,
                 engine_configuration_text=run.backtest_config_json,
@@ -571,13 +612,18 @@ class JobRunner:
                 # 结果回写才有值——起进程那一刻它们还是 NULL.
                 start_trading_day=decoded_fields.start_trading_day,
                 end_trading_day=decoded_fields.end_trading_day,
+                commission_group_id=decoded_fields.commission_group_id,
             )
 
     def _decode_launch_fields(self, run: RunModel) -> DecodedRunFields:
-        """从运行行那两份配置文本里解出行情准备要用的那几个取值.
+        """从运行行那两份配置文本里解出起进程前要用的那几个取值.
+
+        解的是行情准备与种子库生成两处要看的字段: 前者看交易对, 后者还看手续费组号.
 
         读不动**不抛**: 配置文本坏掉时引擎侧自会以它的方式失败, 而这里若提前抛, 就会把一个
-        "文本坏了"说成"行情备不齐". 解不出来只表现为空串, 随后由行情准备给出确切文案.
+        "文本坏了"说成"行情备不齐". 行情那两个字段解不出来只表现为空串, 随后由行情准备给出确切
+        文案; 而手续费组号解不出来 (`None`) 会由调用点译成 `UNDECODABLE_COMMISSION_GROUP_MESSAGE`
+        —— 判"要不要因此不跑"是调用点的事, 这个函数只负责如实退回取值.
 
         订阅周期 (`bar_period`) **不在其列**——行情准备只认数据源精度 (平台常量), 用户选的周期
         不改变"这份数据在不在", 故它不参与起进程前的任何判断.
@@ -588,7 +634,9 @@ class JobRunner:
             parse_configuration_object(run.id, run.params_json) or {},
         )
 
-    def _build_job_file_set(self, launch_context: LaunchContext) -> JobFileSet:
+    def _build_job_file_set(
+        self, launch_context: LaunchContext, seed_database_source_path: Path
+    ) -> JobFileSet:
         """作业目录的输入清单."""
 
         return JobFileSet(
@@ -598,7 +646,50 @@ class JobRunner:
             strategy_configuration_filename=launch_context.configuration_filename,
             strategy_configuration_text=launch_context.strategy_configuration_text,
             engine_configuration_text=launch_context.engine_configuration_text,
+            seed_database_source_path=seed_database_source_path,
         )
+
+    async def _stage_run_seed_database(self, launch_context: LaunchContext) -> Path:
+        """给这一轮生成种子库, 返回它的暂存路径 (还没进作业目录).
+
+        内容是按**这一轮那一个合约**展开出来的: 管理端存的是按合约 / 品种 / 交易所三级设置的
+        规则, 而引擎的表里没有"品种"这一档的位置, 通配只能在这里展开掉 (见 `rate_expansion`).
+
+        展开的是**这一轮冻结的那个组** (`launch_context.commission_group_id`), 与提交期那次校验
+        读的是同一个取值——两处各读各的话, 会出现"校验时看 2 号组、跑起来按 1 号组生成种子库", 而
+        那一轮照样跑完, 只是钱算的不是用户选的那套.
+
+        这一格没有费率时抛 `UnrunnableJob` 而不是照跑: 引擎遇到查不到的费率不报错, 它会**跑完**
+        并把缺口记进 `result.json`, 于是用户拿到一个手续费为零的回测 —— 那看起来与"策略真的一分
+        钱没花"没有区别. 提交期已经拦过一次, 走到这里还缺, 只可能是规则在提交之后被改掉了.
+        """
+
+        staging_path = build_seed_database_staging_path(self._settings.runs_root)
+
+        async with self._database.session_scope() as session:
+            expansion = await generate_run_seed_database(
+                session,
+                staging_path,
+                launch_context.commission_group_id,
+                (
+                    RunContract(
+                        exchange_id=launch_context.exchange_id,
+                        instrument_id=launch_context.instrument_id,
+                    ),
+                ),
+            )
+
+        if expansion.missing_rates:
+            discard_staged_seed_database(staging_path)
+
+            raise UnrunnableJob(
+                MISSING_RATE_FAILURE_MESSAGE_TEMPLATE.format(
+                    commission_group_id=launch_context.commission_group_id,
+                    contract_rates=describe_missing_rates(expansion.missing_rates),
+                )
+            )
+
+        return staging_path
 
     async def _record_runner_pid(self, run_id: str, process_id: int) -> None:
         """把宿主进程号写进运行行.

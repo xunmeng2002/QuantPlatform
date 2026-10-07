@@ -43,6 +43,12 @@ EXCHANGE_ID_FIELD_NAME = "exchange_id"
 INSTRUMENT_ID_FIELD_NAME = "instrument_id"
 BAR_PERIOD_FIELD_NAME = "bar_period"
 
+# `commission_group_id` 也是运行级字段 (与上面三个同一个契约、同一张模板表), 但它**不进下面
+# 那个元组**, 因为那个元组的语义是"平台覆写进**策略配置**的三个键"——它的每一个成员都必须在
+# `RUN_FIELD_KEY_NAMES` 里有对应的引擎键, 而这一个只落在**引擎配置** (`BackTest.json`) 里.
+# 混进去的话, 任何按那个元组去索引 `RUN_FIELD_KEY_NAMES` 的调用方都会在运行时撞上 KeyError.
+COMMISSION_GROUP_ID_FIELD_NAME = "commission_group_id"
+
 RUN_LEVEL_FIELD_NAMES = (
     EXCHANGE_ID_FIELD_NAME,
     INSTRUMENT_ID_FIELD_NAME,
@@ -63,6 +69,7 @@ MATCH_MODE_KEY = "MatchMode"
 START_TRADING_DAY_KEY = "StartTradingDay"
 END_TRADING_DAY_KEY = "EndTradingDay"
 INITIAL_CAPITAL_KEY = "InitialCapital"
+COMMISSION_GROUP_ID_KEY = "CommissionGroupId"
 
 
 TRADING_DAY_LENGTH = 8
@@ -79,6 +86,7 @@ RUN_FIELD_TOO_LONG_MESSAGE = "{field} 不得超过 {length} 个字符"
 RUN_FIELD_INVALID_CHARACTERS_MESSAGE = "{field} 不得含控制字符"
 TRADING_DAY_INVALID_MESSAGE = "{field} 须为 8 位数字"
 INITIAL_CAPITAL_INVALID_MESSAGE = "initial_capital 须为大于 0 的有限数值"
+COMMISSION_GROUP_ID_INVALID_MESSAGE = "commission_group_id 须为不小于 0 的整数"
 UNKNOWN_PARAMETER_MESSAGE = "params 含该版本配置里没有的键: {keys}"
 PLATFORM_PARAMETER_MESSAGE = "params 不得含平台按运行级字段写入的键: {keys}"
 TRUNCATED_KEY_LIST_SUFFIX = " 等"
@@ -138,6 +146,22 @@ def validate_initial_capital(raw_value: float) -> float:
         raise InvalidRequestError(INITIAL_CAPITAL_INVALID_MESSAGE)
 
     return float(raw_value)
+
+
+def validate_commission_group_id(raw_value: int) -> int:
+    """手续费组号须为不小于 0 的整数.
+
+    上界**不在这里判**: 组号认的是"库里有没有这个组", 那是要查库的一问 (见
+    `services.run_submission`), 不是取值形状的问题. 这里挡的是形状本身.
+
+    `bool` 单独挡: pydantic 的 `int` 收得下 `true`, 而 `true` 就是 1 —— 少这一句, 一个写错的
+    布尔值会安静地变成"1 号组", 正是本批要消掉的那类静默.
+    """
+
+    if isinstance(raw_value, bool) or not isinstance(raw_value, int) or raw_value < 0:
+        raise InvalidRequestError(COMMISSION_GROUP_ID_INVALID_MESSAGE)
+
+    return int(raw_value)
 
 
 def validate_trading_day_range(
@@ -295,6 +319,7 @@ class DecodedRunFields:
     start_trading_day: str
     end_trading_day: str
     initial_capital: float | None
+    commission_group_id: int | None
     parameter_values: dict[str, object]
 
 
@@ -304,7 +329,7 @@ def decode_run_fields(
 ) -> DecodedRunFields:
     """把渲染好的两份配置文本读回取值. 它是 `build_strategy_configuration` 的逆.
 
-    **两个来源不能互换**: 撮合模式与两个交易日在引擎那份里, 合约与订阅周期在策略那份里.
+    **两个来源不能互换**: 撮合模式、两个交易日与手续费组在引擎那份里, 合约与订阅周期在策略那份里.
     尤其 `bar_period` 只能从**策略配置**取——引擎那份的 `BarPreces` 是平台常量 (落盘精度),
     从那里读会让每一次预填都报 `5m`, 无论用户当初选的是什么.
 
@@ -320,6 +345,7 @@ def decode_run_fields(
         start_trading_day=_read_text(engine_configuration, START_TRADING_DAY_KEY),
         end_trading_day=_read_text(engine_configuration, END_TRADING_DAY_KEY),
         initial_capital=_read_finite_number(engine_configuration, INITIAL_CAPITAL_KEY),
+        commission_group_id=_read_integer(engine_configuration, COMMISSION_GROUP_ID_KEY),
         parameter_values={
             key_name: value
             for key_name, value in strategy_configuration.items()
@@ -348,3 +374,19 @@ def _read_finite_number(
         return None
 
     return float(value)
+
+
+def _read_integer(configuration: Mapping[str, object], key_name: str) -> int | None:
+    """取一个整数; 类型不符时回 `None`.
+
+    `bool` **不算整数**: `true` 是 1, 但一个写错的布尔值不该被读成"1 号组"——回 `None` 让调用方
+    看见"这一格读不动", 好过去猜一个组号并按它计费. 浮点也不收 (`2.0` 是数值上相等, 但配置里
+    出现它说明写配置的那一步已经不按契约了), 与写路径 `validate_commission_group_id` 同一口径.
+    """
+
+    value = configuration.get(key_name)
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+
+    return int(value)

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 
 
 class UserType(StrEnum):
@@ -79,6 +79,61 @@ class RunStatus(StrEnum):
     FAILED = "failed"
     INTERRUPTED = "interrupted"
     TIMEOUT = "timeout"
+
+
+class ProductClass(IntEnum):
+    """品种类型. 取值逐值对齐引擎 `ProductClassType` (`Spark/Types.h`), 以 `.value` 落盘.
+
+    与上面几个 StrEnum 不同, 这个枚举的取值是**数字**: 引擎的 `Product` 表用 `Int32` 存它,
+    且该列是整数, 故落盘时取 `.value` 而不是成员本身——直接写成员会让 SQLAlchemy 把枚举成员
+    当参数绑, 而 `IntEnum` 是 `int` 子类, 二者的差别在写库那一刻才显形.
+
+    这份取值表是平台侧**唯一**的副本, 来源是引擎头文件; 引擎侧改了它, 这里必须跟着改, 否则
+    管理端录入的品种类型在回测里会落成另一种品种. 仓内 `QuantTrading/makeseeddb.py` 里的
+    `PRODUCT_CLASS_STOCK = 6` 是同一件事的旁证.
+    """
+
+    FUTURE = 0
+    FUTURE_OPTION = 1
+    COMBINATION = 2
+    SPOT = 3
+    EFP = 4
+    INDEX = 5
+    STOCK = 6
+    STOCK_OPTION = 7
+    ETF = 8
+
+
+class CommissionDirection(IntEnum):
+    """买卖方向. 取值对齐引擎 `DirectionType` 的 Buy / Sell 两档.
+
+    引擎的费率表按方向分行 (同一合约的买与卖是两条记录), 故这一列是 `BaseCommission` 主键的
+    一部分: 引擎拿成交方向去查行, 再按开平标志决定用行里的开仓列还是平仓列.
+    `result.json` 的 `MissingRateKeys` 报的正是这套 0/1, 形如 `1|SSE|600519|0`.
+    """
+
+    BUY = 0
+    SELL = 1
+
+
+class RateDirection(IntEnum):
+    """一条费率规则**管哪个方向**: 引擎那两档, 加上平台自己的通配档「双向」.
+
+    `BOTH` **只在平台这一侧存在**. 引擎的费率表按方向分行, `Direction` 是它查找键的一部分
+    (`CommissionCalculator::Apply` 对四列做一次精确匹配), 多一个取值就等于那一格**永远查不到**
+    —— 那一笔成交的三列费用静默按 0 算, 回测照常"成功". 故写种子库时它必须先被摊成 `BUY` 与
+    `SELL` 两行 (`reference_data.rate_expansion`), 与合约 / 品种 / 交易所三级作用域是同一套路子.
+
+    两个引擎取值**取自 `CommissionDirection`** 而不是在这里重写一遍: 它们是与引擎对齐的那部分,
+    两处各写一份迟早在漂移里分叉.
+
+    注意 `list(RateDirection)` 是 `[BOTH, BUY, SELL]` —— 遍历它去写种子库会把 `BOTH` 一起写进去.
+    要遍历"引擎的两档"就用 `rate_expansion.RESOLUTION_DIRECTIONS`.
+    """
+
+    BOTH = -1
+    BUY = int(CommissionDirection.BUY)
+    SELL = int(CommissionDirection.SELL)
 
 
 TERMINAL_RUN_STATUSES = frozenset(

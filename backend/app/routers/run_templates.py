@@ -40,11 +40,13 @@ from ..dependencies import SessionDependency
 from ..errors import ConflictError, InvalidRequestError
 from ..ids import generate_identifier
 from ..scheduler.engine_config import parse_configuration_object, serialize_configuration
+from ..services.commission_group import ensure_commission_group_exists
 from ..services.run_configuration import (
     BAR_PERIOD_FIELD_NAME,
     EXCHANGE_ID_FIELD_NAME,
     INSTRUMENT_ID_FIELD_NAME,
     resolve_run_field_values,
+    validate_commission_group_id,
     validate_initial_capital,
     validate_match_mode,
     validate_submitted_parameters,
@@ -102,6 +104,7 @@ def _build_template_response(template: RunTemplateModel) -> RunTemplateResponse:
         start_trading_day=template.start_trading_day,
         end_trading_day=template.end_trading_day,
         initial_capital=template.initial_capital,
+        commission_group_id=template.commission_group_id,
         params=parse_configuration_object(template.id, template.params_json) or {},
         created_at=template.created_at,
         updated_at=template.updated_at,
@@ -180,8 +183,16 @@ async def create_run_template_handler(
     之后仍应可用. 代价是"某个参数在新版本里被删掉了"这件事要等到套用或提交时才暴露——那是
     版本迭代的固有代价, 绑版本换来的"存模板时就报错"会让每一次正常迭代作废全部旧模板.
 
-    落库前一次校验都不省的顺序与提交侧逐条相同 (模式 → 运行级字段 → 交易日 → 资金 → 参数):
-    同一个取值在两处被拒的理由该是同一句文案, 顺序不同就会给出不同的那一句.
+    落库前一次校验都不省的顺序与提交侧逐条相同 (模式 → 运行级字段 → 手续费组 → 交易日 → 资金 →
+    参数): 同一个取值在两处被拒的理由该是同一句文案, 顺序不同就会给出不同的那一句.
+
+    手续费组也要**在这里**验一遍"它存在": 模板若引用一个不存在的组, 就成了"删组时拦掉被模板引用的
+    组"那条规则的反面——一条存得下、却永远提交不出去的模板.
+
+    与提交侧**唯一**一处不对称是费率那一闸: 提交时还要查"这个合约在所选组下有费率", 存模板时不查.
+    费率是管理端随时在改的基础数据, 而模板是"以后再用的那一套取值"——今天齐、明天未必, 故那一闸只
+    能在"这一轮真要跑"的那一刻落下. 代价是模板可能存成一份到提交时才被拒的取值, 而那时的文案点名
+    缺哪个组下哪个合约的哪一侧, 补完再提交即可.
     """
 
     strategy = await load_visible_strategy(session, current_user, strategy_id)
@@ -193,6 +204,8 @@ async def create_run_template_handler(
 
     match_mode = validate_match_mode(request_body.match_mode)
     run_field_values = resolve_run_field_values(request_body)
+    commission_group_id = validate_commission_group_id(request_body.commission_group_id)
+    await ensure_commission_group_exists(session, commission_group_id)
     start_trading_day, end_trading_day = validate_trading_day_range(
         request_body.start_trading_day, request_body.end_trading_day
     )
@@ -217,6 +230,7 @@ async def create_run_template_handler(
         start_trading_day=start_trading_day,
         end_trading_day=end_trading_day,
         initial_capital=initial_capital,
+        commission_group_id=commission_group_id,
         # 只存参数, 不重复存运行级字段: 它们在这张表上各有具名列, 再写进这里就有了两份真相.
         params_json=serialize_configuration(submitted_parameters),
     )

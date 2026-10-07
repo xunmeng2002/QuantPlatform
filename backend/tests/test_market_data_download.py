@@ -100,7 +100,6 @@ def _build_settings(
         http_port=8000,
         market_data_root=tmp_path / "market-data",
         session_file_path=tmp_path / "engine" / "Sessions.json",
-        seed_database_path=tmp_path / "engine" / "BackTestInit.db",
         quote_hub_root=quote_hub_root,
         **overrides,
     )

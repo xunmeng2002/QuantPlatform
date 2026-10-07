@@ -87,6 +87,12 @@ export const router = createRouter({
       props: true,
     },
     {
+      path: '/reference-data',
+      name: 'reference-data',
+      component: () => import('../views/ReferenceDataView.vue'),
+      meta: { requiresAdmin: true },
+    },
+    {
       path: '/users',
       name: 'users',
       component: () => import('../views/UserAdminView.vue'),

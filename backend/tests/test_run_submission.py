@@ -17,6 +17,7 @@ from httpx import AsyncClient, Response
 
 from app.catalog.database import PlatformDatabase
 from app.catalog.enums import (
+    CommissionDirection,
     GrantPermission,
     MarketDataType,
     RunStatus,
@@ -24,14 +25,17 @@ from app.catalog.enums import (
 )
 from app.catalog.models import RunModel
 from app.config import PlatformSettings
+from app.reference_data.rate_expansion import BOTH_DIRECTIONS
 from app.scheduler.runner import (
     HOST_STARTUP_FAILURE_MESSAGE,
     MAXIMUM_ERROR_MESSAGE_LENGTH,
 )
 from app.services.engine_probe import ENGINE_VERSION_FILENAME, read_engine_version
+from app.services.commission_group import UNKNOWN_COMMISSION_GROUP_MESSAGE_TEMPLATE
 from app.services.run_configuration import (
     BAR_PERIOD_FIELD_NAME,
     BAR_PERIOD_INVALID_MESSAGE,
+    COMMISSION_GROUP_ID_INVALID_MESSAGE,
     MATCH_MODE_NOT_SUBMITTABLE_MESSAGE,
     PLATFORM_PARAMETER_MESSAGE,
     RUN_FIELD_REQUIRED_MESSAGE,
@@ -40,6 +44,7 @@ from app.services.run_configuration import (
 from app.services.run_submission import (
     CONFIGURATION_UNREADABLE_MESSAGE,
     MARKET_DATA_MISSING_MESSAGE,
+    MISSING_RATE_MESSAGE_TEMPLATE,
     NO_VERSION_MESSAGE,
     SESSION_FILE_MISSING_MESSAGE,
     VERSION_NOT_FOUND_MESSAGE,
@@ -47,6 +52,7 @@ from app.services.run_submission import (
 from app.strategy_configuration import BAR_PERIOD_KEY_NAME
 
 from .helpers import (
+    DEFAULT_COMMISSION_GROUP_ID,
     SignedInAccount,
     assert_rejected,
     bearer_headers,
@@ -57,7 +63,10 @@ from .helpers import (
 )
 from .run_helpers import (
     BEHAVIOR_PARAMETER_KEY,
+    DEFAULT_EXCHANGE_ID,
+    DEFAULT_INSTRUMENT_ID,
     FLOOD_BYTES_PARAMETER_KEY,
+    RATE_READY_EXCHANGE_IDS,
     RESULT_FILENAME,
     RUNS_PATH,
     SLEEP_SECONDS_PARAMETER_KEY,
@@ -66,12 +75,15 @@ from .run_helpers import (
     build_run_request,
     count_run_rows,
     create_runnable_strategy,
+    drop_contract_rates,
+    ensure_contract_rates,
     post_run,
     read_job_json,
     read_run_record,
     run_directory_names,
     running_client,
     settings_with,
+    staging_seed_database_names,
     submit_run,
     await_run_terminal,
 )
@@ -99,6 +111,12 @@ NEGATIVE_FLOOD_BYTES = -1
 SUBMITTED_PERIOD = "60m"
 ABSENT_MARKET_DATA_DIRECTORY_NAME = "absent-market-data"
 ABSENT_SESSION_FILENAME = "AbsentSessions.json"
+
+# 第二个组: 用来造"同一个合约在别的组有费率、在这一组没有"这种局面 —— 组号现在逐轮可选, 而那种
+# 局面正是"选的组真的被用到了"的唯一证据.
+SECOND_COMMISSION_GROUP_ID = 2
+ABSENT_COMMISSION_GROUP_ID = 99
+NEGATIVE_COMMISSION_GROUP_ID = -1
 
 # 引擎包自己带的版本号长这样; 测试里给出一个具体取值, 好让"行里那一列究竟来自哪里"无可
 # 抵赖——而非与一个同样恒为空串的取值相比.
@@ -557,6 +575,304 @@ async def test_a_pre_change_version_cannot_be_submitted(
 
     assert_rejected(response, CONFIGURATION_UNREADABLE_MESSAGE)
     assert await count_run_rows(database) == rows_before
+
+
+async def test_a_contract_without_any_rate_rule_is_rejected_naming_both_directions(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    run_owner: SignedInAccount,
+) -> None:
+    """三级规则一条都没有时提交 → 400, 库里无新行, 运行根下无新目录.
+
+    这是把"静默按 0 计费"变成"提交被拦"的那一步: 引擎查不到费率不报错, 它照跑完, 只把一个计数
+    写进结果文件 —— 用户手上那份回测的手续费是零, 而报告里没有一处说明为什么.
+
+    **文案里点名了合约与方向**, 这是本条与"被拒请求不回显"那条既有规则的分界: 那边防的是把调用方
+    送来的非法取值原样放大回去 (未知参数名、非法字符), 而这里那个合约是**合法输入**, 缺的只是
+    它的配置 —— 不点名, 用户就不知道该去补哪一条. 故本条不共用 `assert_rejected`.
+    """
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    await drop_contract_rates(database)
+
+    rows_before = await count_run_rows(database)
+
+    response = await post_run(
+        client, run_owner.token, build_run_request(runnable.strategy.id)
+    )
+
+    assert response.status_code == 400, response.text
+
+    assert response.json()["detail"] == MISSING_RATE_MESSAGE_TEMPLATE.format(
+        commission_group_id=DEFAULT_COMMISSION_GROUP_ID,
+        contract_rates=(
+            f"{DEFAULT_EXCHANGE_ID} / {DEFAULT_INSTRUMENT_ID} 买、"
+            f"{DEFAULT_EXCHANGE_ID} / {DEFAULT_INSTRUMENT_ID} 卖"
+        ),
+    )
+
+    assert await count_run_rows(database) == rows_before
+    assert run_directory_names(platform_settings) == set()
+    assert staging_seed_database_names(platform_settings) == set()
+
+
+async def test_a_contract_missing_only_one_direction_names_only_that_direction(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    run_owner: SignedInAccount,
+) -> None:
+    """只有买那一侧缺时, 文案里只有买 —— 方向不回退, 故缺口必须点得准.
+
+    两句都报的实现在这里照样通过 (它报的是超集), 故断言用**相等**: "卖"那一侧明明有费率却被报
+    成缺, 用户会去补一条已经存在的规则, 而补进去还会撞上"已有一条费率".
+    """
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    await drop_contract_rates(database, direction=CommissionDirection.BUY)
+
+    response = await post_run(
+        client, run_owner.token, build_run_request(runnable.strategy.id)
+    )
+
+    assert response.status_code == 400, response.text
+
+    assert response.json()["detail"] == MISSING_RATE_MESSAGE_TEMPLATE.format(
+        commission_group_id=DEFAULT_COMMISSION_GROUP_ID,
+        contract_rates=f"{DEFAULT_EXCHANGE_ID} / {DEFAULT_INSTRUMENT_ID} 买",
+    )
+
+
+async def test_adding_the_missing_rate_lets_the_same_submission_through(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    run_owner: SignedInAccount,
+) -> None:
+    """拦下来之后按文案补一条交易所级费率, 同一次提交就过了.
+
+    这一条与上面那条合起来才是"拦得住、也解得开": 只验拦的话, 一个把**所有**提交都拦掉的实现
+    照样全绿.
+    """
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    await drop_contract_rates(database)
+
+    for exchange_id in RATE_READY_EXCHANGE_IDS:
+        await ensure_contract_rates(database, exchange_id)
+
+    submitted = await submit_run(client, run_owner.token, runnable.strategy.id)
+
+    assert submitted.status == RunStatus.QUEUED
+
+
+async def test_a_single_both_directions_rule_is_enough_to_submit(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    run_owner: SignedInAccount,
+) -> None:
+    """整组只录**一条双向**的费率 → 提交照样过.
+
+    双向那一条管的是买卖两侧 (`Direction = -1`, 展开时摊成 0 与 1 两行), 故"缺费率"那道拦截不该
+    把它读成"只有买有、卖没有". 展开那一步若漏掉另一侧, 这里收到的会是点名"卖"的 400 —— 断言
+    201 就把那条路径钉住了.
+    """
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    await drop_contract_rates(database)
+
+    await ensure_contract_rates(
+        database, DEFAULT_EXCHANGE_ID, directions=(BOTH_DIRECTIONS,)
+    )
+
+    submitted = await submit_run(client, run_owner.token, runnable.strategy.id)
+
+    assert submitted.status == RunStatus.QUEUED
+
+
+async def test_a_commission_group_that_does_not_exist_is_rejected(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    run_owner: SignedInAccount,
+) -> None:
+    """选一个没登记过的组 → 400, 库里无新行, 运行根下无新目录.
+
+    引擎对一个不存在的组**不报错**: 它拿那个组号去费率哈希表里查, 一条都不命中, 于是照跑完一场
+    费用全按 0 计的回测. 平台侧先拦下它, 用户拿到的是一句"几号组不存在", 而不是一轮金额不对的结果.
+
+    文案点名组号: 库里有好几个组时, 一句"某个组不存在"没法行动.
+    """
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    rows_before = await count_run_rows(database)
+
+    response = await post_run(
+        client,
+        run_owner.token,
+        build_run_request(
+            runnable.strategy.id, commission_group_id=ABSENT_COMMISSION_GROUP_ID
+        ),
+    )
+
+    assert response.status_code == 400, response.text
+
+    assert response.json()["detail"] == UNKNOWN_COMMISSION_GROUP_MESSAGE_TEMPLATE.format(
+        commission_group_id=ABSENT_COMMISSION_GROUP_ID
+    )
+
+    assert await count_run_rows(database) == rows_before
+    assert run_directory_names(platform_settings) == set()
+
+
+async def test_an_unknown_group_is_reported_before_the_missing_rates(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    run_owner: SignedInAccount,
+) -> None:
+    """组不存在**且**该合约没有费率时, 报的是"组不存在".
+
+    两句话都成立时先说哪一句, 决定了用户接下来去做什么: 说"这个组下没有 600519 的费率", 用户会去
+    补一条费率 —— 而补进去的费率挂在一个不存在的组上, 下一次提交照样被拒. 正确的动作只有一个:
+    先把组建出来.
+    """
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    await drop_contract_rates(database)
+
+    response = await post_run(
+        client,
+        run_owner.token,
+        build_run_request(
+            runnable.strategy.id, commission_group_id=ABSENT_COMMISSION_GROUP_ID
+        ),
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == UNKNOWN_COMMISSION_GROUP_MESSAGE_TEMPLATE.format(
+        commission_group_id=ABSENT_COMMISSION_GROUP_ID
+    )
+
+
+async def test_a_negative_commission_group_id_is_rejected(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    run_owner: SignedInAccount,
+) -> None:
+    """负数组号 → 400, 且不去查库 —— 它是取值形状的问题, 不是"库里有没有"的问题."""
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    rows_before = await count_run_rows(database)
+
+    response = await post_run(
+        client,
+        run_owner.token,
+        build_run_request(
+            runnable.strategy.id, commission_group_id=NEGATIVE_COMMISSION_GROUP_ID
+        ),
+    )
+
+    assert_rejected(response, COMMISSION_GROUP_ID_INVALID_MESSAGE)
+    assert await count_run_rows(database) == rows_before
+
+
+async def test_the_rates_of_another_group_do_not_count_for_this_run(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    run_owner: SignedInAccount,
+) -> None:
+    """2 号组有费率、1 号组没有时, 用 1 号组提交 → 400, 且文案点的是 1 号组.
+
+    这条是把前一批留下的常量彻底拿掉之后才可能成立的局面: 从前组号写死, "别的组"这种取值在库里
+    根本不存在, "校验读的是哪一组"也就无从验证 —— 一个永远读 1 号组的实现照样全绿.
+    """
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    await ensure_contract_rates(
+        database, DEFAULT_EXCHANGE_ID, commission_group_id=SECOND_COMMISSION_GROUP_ID
+    )
+    await drop_contract_rates(database)
+
+    response = await post_run(
+        client,
+        run_owner.token,
+        build_run_request(runnable.strategy.id),
+    )
+
+    assert response.status_code == 400, response.text
+
+    assert response.json()["detail"] == MISSING_RATE_MESSAGE_TEMPLATE.format(
+        commission_group_id=DEFAULT_COMMISSION_GROUP_ID,
+        contract_rates=(
+            f"{DEFAULT_EXCHANGE_ID} / {DEFAULT_INSTRUMENT_ID} 买、"
+            f"{DEFAULT_EXCHANGE_ID} / {DEFAULT_INSTRUMENT_ID} 卖"
+        ),
+    )
+
+
+async def test_a_run_freezes_the_commission_group_it_was_submitted_with(
+    client: AsyncClient,
+    database: PlatformDatabase,
+    platform_settings: PlatformSettings,
+    run_owner: SignedInAccount,
+) -> None:
+    """用 2 号组提交 (它才有费率) → 201, 且冻结进这一轮配置的就是 2.
+
+    断言落在**落库的引擎配置文本**上而不是响应体上: 起进程时引擎读的是那一份, 组号若不在这里,
+    调度侧按轮生成种子库时就只能回头去猜一个组.
+    """
+
+    runnable = await create_runnable_strategy(
+        database, platform_settings, run_owner.user, STRATEGY_NAME
+    )
+
+    await ensure_contract_rates(
+        database, DEFAULT_EXCHANGE_ID, commission_group_id=SECOND_COMMISSION_GROUP_ID
+    )
+    await drop_contract_rates(database)
+
+    submitted = await submit_run(
+        client,
+        run_owner.token,
+        runnable.strategy.id,
+        commission_group_id=SECOND_COMMISSION_GROUP_ID,
+    )
+
+    run_record = await read_run_record(database, submitted.id)
+
+    assert (
+        json.loads(run_record.backtest_config_json)["CommissionGroupId"]
+        == SECOND_COMMISSION_GROUP_ID
+    )
 
 
 async def test_a_missing_market_data_root_is_rejected_pointing_at_the_input(
