@@ -1,31 +1,33 @@
-"""引擎版本标识的取数.
+"""引擎版本标识的取数, 以及扩展模块的跨平台认法.
 
 两层口径 (版本文件 / 内容摘要) 的优先级与各自边界, 以及"取不到"这一档的取值. 这里的每一条
 都是一个**不可见**的行为: 版本号不会让任何东西报错, 取错了只会让库里多一批分不出来源的轮.
+`find_python_binding` 另占一节: 它认不出扩展模块时, 现象与"引擎包整个坏了"长得一样.
 """
 
 from __future__ import annotations
 
+from importlib.machinery import EXTENSION_SUFFIXES
 from pathlib import Path
+
+import pytest
 
 from app.services.engine_probe import (
     ENGINE_RUNTIME_FILENAMES,
     ENGINE_VERSION_FILENAME,
     MAXIMUM_ENGINE_VERSION_LENGTH,
     PYTHON_BINDING_FILENAME_PREFIX,
-    PYTHON_BINDING_FILENAME_SUFFIX,
     VERSION_DIGEST_PREFIX,
-    interpreter_tag,
+    find_python_binding,
     read_engine_version,
 )
 
 
-# 扩展模块名里的 ABI 标签**必须跟着跑测试的那个解释器走**: 探针正是按 `interpreter_tag()` 去比
-# 文件名的, 写死成某个 `cp3xx` 就是把这个用例绑死在作者的机器上 —— 换个 Python 版本跑, 探针找不到
-# 那个文件, 于是四条摘要用例一起红, 而红的理由是测试自己造了一份当前解释器永不认识的假引擎.
+# 扩展模块的后缀**必须跟着跑测试的那个解释器走**: 探针按 `EXTENSION_SUFFIXES` 判文件名, 写死成
+# `.pyd` 就是把这个用例绑死在 Windows 上 —— 换到 Linux 跑, 探针找不到那个文件, 于是四条摘要用例
+# 一起红, 而红的理由是测试自己造了一份当前解释器永不认识的假引擎.
 BINDING_FILENAME = (
-    f"{PYTHON_BINDING_FILENAME_PREFIX}{interpreter_tag()}-win_amd64"
-    f"{PYTHON_BINDING_FILENAME_SUFFIX}"
+    f"{PYTHON_BINDING_FILENAME_PREFIX}{EXTENSION_SUFFIXES[0].removeprefix('.')}"
 )
 DIGEST_HEX_LENGTH = 12
 OVERLONG_VERSION_LENGTH = 200
@@ -186,3 +188,53 @@ def test_an_undecodable_version_file_falls_back_to_the_digest(tmp_path: Path) ->
     (engine_root / ENGINE_VERSION_FILENAME).write_bytes(b"\xff\xfe\x00not-utf8")
 
     assert read_engine_version(engine_root).startswith(VERSION_DIGEST_PREFIX)
+
+
+def test_the_binding_is_found_under_this_platforms_own_suffix(tmp_path: Path) -> None:
+    """判据跨平台: Windows 认 `.cp314-win_amd64.pyd`, Linux 认 `.cpython-314-...so`."""
+
+    engine_root = _engine_root(tmp_path)
+    _write_binding(engine_root)
+
+    assert find_python_binding(engine_root) == engine_root / BINDING_FILENAME
+
+
+def test_a_binding_built_for_another_interpreter_is_not_the_engine_binding(
+    tmp_path: Path,
+) -> None:
+    """别的 ABI 编出来的扩展模块不是引擎绑定, 即便它的名字很像.
+
+    `QuantTrading.cp39-win_amd64.pyd` 不等于"模块名 + 本平台允许的后缀"中的任何一个 —— 这与
+    import 机制拒绝它的理由同一个, 故这条也钉住了"不靠 import 试错"这个选择.
+    """
+
+    engine_root = _engine_root(tmp_path)
+    engine_root.mkdir(parents=True, exist_ok=True)
+    foreign_binding_name = f"{PYTHON_BINDING_FILENAME_PREFIX}cp39-win_amd64.pyd"
+    (engine_root / foreign_binding_name).write_bytes(b"foreign")
+
+    assert find_python_binding(engine_root) is None
+
+
+def test_the_most_specific_suffix_wins_over_the_generic_one(tmp_path: Path) -> None:
+    """目录里同时躺着带 ABI 标签的与通用的两份时, 取带标签的那个.
+
+    次序由 `EXTENSION_SUFFIXES` 给出 (最具体在前). 这条钉住"次序有意义": 换成"随便挑一个命中"
+    的实现在这里会红.
+    """
+
+    tagged_suffix = EXTENSION_SUFFIXES[0]
+    generic_suffix = EXTENSION_SUFFIXES[-1]
+
+    if tagged_suffix == generic_suffix:
+        pytest.skip("本平台只给了一个扩展后缀, 没有可比的次序")
+
+    engine_root = _engine_root(tmp_path)
+    engine_root.mkdir(parents=True, exist_ok=True)
+    generic_binding_name = (
+        f"{PYTHON_BINDING_FILENAME_PREFIX}{generic_suffix.removeprefix('.')}"
+    )
+    (engine_root / generic_binding_name).write_bytes(b"generic")
+    _write_binding(engine_root)
+
+    assert find_python_binding(engine_root) == engine_root / BINDING_FILENAME

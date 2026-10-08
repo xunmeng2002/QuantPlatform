@@ -13,11 +13,18 @@ from __future__ import annotations
 
 import hashlib
 import sys
+from importlib.machinery import EXTENSION_SUFFIXES
 from pathlib import Path
 
 
 PYTHON_BINDING_FILENAME_PREFIX = "QuantTrading."
-PYTHON_BINDING_FILENAME_SUFFIX = ".pyd"
+
+# 扩展模块允许叫什么后缀, 由**解释器**说了算, 不在这里写死: Windows 是 `.cp314-win_amd64.pyd` /
+# `.pyd`, Linux 是 `.cpython-314-x86_64-linux-gnu.so` / `.abi3.so` / `.so`. 这份表就是 import
+# 机制自己用的那一份, 故跨平台不必分档; 次序"最具体在前", 按序取首个命中即得 ABI 最贴的那个
+# (目录里同时躺着通用的与带 ABI 标签的两份时, 选带标签的).
+PYTHON_BINDING_FILENAME_SUFFIXES: tuple[str, ...] = tuple(EXTENSION_SUFFIXES)
+
 ENGINE_RUNTIME_FILENAMES = ("BackTest.dll", "Core.dll", "Network.dll")
 
 # 平台侧为引擎包约定的版本文件, 不是引擎自己认的文件名 (与 `Sessions.json` 那类不同):
@@ -44,20 +51,22 @@ def interpreter_tag() -> str:
 def find_python_binding(engine_root: Path) -> Path | None:
     """找与当前解释器 ABI 匹配的扩展模块.
 
-    扩展模块名形如 `QuantTrading.cp314-win_amd64.pyd`, 其中的 cp314 即 ABI 标签, 故按解释器
-    版本派生出标签再比对文件名, 不靠 import 试错——试错失败时拿不到原因.
+    判据与 import 机制**同源**: 文件名必须是"模块名 + 本平台允许的一个扩展后缀", 而那份后缀表由
+    解释器给出 (`EXTENSION_SUFFIXES`). 于是 Windows 命中 `QuantTrading.cp314-win_amd64.pyd`、
+    Linux 命中 `QuantTrading.cpython-314-x86_64-linux-gnu.so`; 而为别的 ABI 编出来的
+    `QuantTrading.cp39-win_amd64.pyd` **不命中** —— 它不等于"模块名 + 允许的后缀"中的任何一个,
+    这正是 import 机制也拒绝它的理由. 不靠 import 试错: 试错失败时拿不到原因.
     """
 
     if not engine_root.is_dir():
         return None
 
-    current_tag = interpreter_tag()
+    module_name = PYTHON_BINDING_FILENAME_PREFIX.removesuffix(".")
 
-    for candidate in sorted(engine_root.glob(f"{PYTHON_BINDING_FILENAME_PREFIX}*")):
-        if (
-            candidate.name.endswith(PYTHON_BINDING_FILENAME_SUFFIX)
-            and current_tag in candidate.name
-        ):
+    for suffix in PYTHON_BINDING_FILENAME_SUFFIXES:
+        candidate = engine_root / f"{module_name}{suffix}"
+
+        if candidate.is_file():
             return candidate
 
     return None
@@ -90,7 +99,7 @@ def read_engine_version(engine_root: Path) -> str:
 
     1. `<engine_root>/engine-version.txt` 的内容 —— 人可读, 精确, 但要 QuantTrading 的发布
        流程产出它. 引擎的依赖闭包只有它自己知道, 故完整口径只能由它给出.
-    2. `.pyd` + 三个运行时 DLL 的**内容摘要** —— 不依赖任何人配合, 对"这四个文件变了"敏感.
+    2. 扩展模块 + 三个运行时 DLL 的**内容摘要** —— 不依赖任何人配合, 对"这四个文件变了"敏感.
        它盖不住引擎包里别的文件, 这只是兜底而不是等价替代.
     3. 两者都取不到时回空串: "不知道"是一个诚实的取值, 与 `Hostname` / `DbPath` 的空串同形.
        此时引擎类策略本来也起不来 (退出码 1), 不必另造一个哨兵值.

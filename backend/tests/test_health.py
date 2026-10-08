@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from importlib.machinery import EXTENSION_SUFFIXES
 from pathlib import Path
 
 import pytest
@@ -37,7 +38,10 @@ from .helpers import (
 
 HEALTH_PATH = "/api/health"
 BINDING_FILENAME_PREFIX = "QuantTrading."
-BINDING_FILENAME_SUFFIX = ".pyd"
+# 后缀取**本平台**解释器允许的那一份, 不写死 `.pyd`: 探针按 `EXTENSION_SUFFIXES` 判文件名, 写死
+# 就等于把这些用例绑死在 Windows 上 —— 换到 Linux 跑, 探针找不到夹具造出来的那个文件, 于是
+# "引擎齐备 → ready" 之类的正向用例全红, 而红的理由是夹具自己造了一份假引擎.
+BINDING_FILENAME = f"{BINDING_FILENAME_PREFIX}{EXTENSION_SUFFIXES[0].removeprefix('.')}"
 HEALTH_MEMBER_USERNAME = "health-probing-member"
 
 
@@ -61,10 +65,13 @@ def _settings(application: FastAPI) -> PlatformSettings:
     return application.state.settings
 
 
-def _write_binding(engine_root: Path, abi_tag: str) -> str:
-    """放一个 ABI 标签匹配的扩展模块空文件, 并返回其文件名."""
+def _write_binding(engine_root: Path, filename: str) -> str:
+    """放一个扩展模块空文件, 并返回其文件名.
 
-    filename = f"{BINDING_FILENAME_PREFIX}{abi_tag}-win_amd64{BINDING_FILENAME_SUFFIX}"
+    文件名由调用方给全: 默认那个是**本平台**的形态, 而"别的 ABI"与"少了后缀"正是几条反向用例
+    要造的东西, 故不在这里替调用方拼后缀.
+    """
+
     engine_root.mkdir(parents=True, exist_ok=True)
     (engine_root / filename).touch()
 
@@ -112,7 +119,7 @@ async def test_health_reports_ready_when_engine_is_complete(
 ) -> None:
     settings = _settings(application)
 
-    _write_binding(settings.engine_root, interpreter_tag())
+    _write_binding(settings.engine_root, BINDING_FILENAME)
     _write_runtime_libraries(settings.engine_root)
 
     health = await _read_health(client, health_token)
@@ -131,7 +138,7 @@ async def test_health_reports_the_engine_version_it_will_launch(
 
     settings = _settings(application)
 
-    _write_binding(settings.engine_root, interpreter_tag())
+    _write_binding(settings.engine_root, BINDING_FILENAME)
     _write_runtime_libraries(settings.engine_root)
 
     health = await _read_health(client, health_token)
@@ -147,7 +154,7 @@ async def test_health_prefers_a_declared_engine_version_over_the_digest(
 
     settings = _settings(application)
 
-    _write_binding(settings.engine_root, interpreter_tag())
+    _write_binding(settings.engine_root, BINDING_FILENAME)
     _write_runtime_libraries(settings.engine_root)
     (settings.engine_root / ENGINE_VERSION_FILENAME).write_text(
         "build-2026.09.26\n", encoding="utf-8"
@@ -190,11 +197,14 @@ async def test_health_rejects_a_binding_built_for_another_interpreter(
     health_token: str,
     foreign_interpreter_tag: str,
 ) -> None:
-    """扩展模块是 `cp314-win_amd64`, 解释器 ABI 不匹配即不可用; 按标签判, 不靠 import 试错."""
+    """扩展模块带的是**本平台本解释器**的 ABI 标签, 别的标签一律不可用; 按文件名判, 不靠 import 试错."""
 
     settings = _settings(application)
 
-    _write_binding(settings.engine_root, foreign_interpreter_tag)
+    # 这里刻意造一个 Windows 形态的假模块: 它只是"不是本解释器 ABI"的一个具体样本, 判据是"名字
+    # 落不进本平台的 `EXTENSION_SUFFIXES`", 故这条在 Linux 上跑同样成立.
+    foreign_binding_name = f"{BINDING_FILENAME_PREFIX}{foreign_interpreter_tag}-win_amd64.pyd"
+    _write_binding(settings.engine_root, foreign_binding_name)
     _write_runtime_libraries(settings.engine_root)
 
     health = await _read_health(client, health_token)
@@ -221,7 +231,7 @@ async def test_health_lists_every_missing_runtime_library(
 ) -> None:
     settings = _settings(application)
 
-    _write_binding(settings.engine_root, interpreter_tag())
+    _write_binding(settings.engine_root, BINDING_FILENAME)
     settings.engine_root.mkdir(parents=True, exist_ok=True)
     (settings.engine_root / ENGINE_RUNTIME_FILENAMES[0]).touch()
 
@@ -238,7 +248,7 @@ async def test_health_reports_a_runs_root_that_cannot_be_created(
 
     settings = _settings(application)
 
-    _write_binding(settings.engine_root, interpreter_tag())
+    _write_binding(settings.engine_root, BINDING_FILENAME)
     _write_runtime_libraries(settings.engine_root)
     settings.runs_root.parent.mkdir(parents=True, exist_ok=True)
     settings.runs_root.touch()
