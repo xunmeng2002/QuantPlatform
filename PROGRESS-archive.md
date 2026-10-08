@@ -1752,6 +1752,126 @@
 
 > 归档于 2026-10-07（D.31 拆分时 ✅ 区超出 5 批；**短版留在 `PROGRESS.md`**，含仍未决的手工验收 §15 与那条内生风险）。下列全文取自 `git show 438f199:PROGRESS.md`，一字未改。
 
+## D.31 · 2026-10-07 （第三十一批） 回测基础数据管理端：引擎种子库由平台生成
+
+> 归档于 2026-10-08（D.36 拆分时 ✅ 区超出 5 批；**短版留在 `PROGRESS.md`**，含那半被 D.32 推翻的指针、手工验收 §16 与两条已接受的风险）。
+> 下列原文为 2026-10-08 工作区版本（`f32ac48` 之后仅订正过「提交状态」一行），其余一字未改。
+
+> ⚠️ **本条有一半当日即被 `D.32` 推翻**（2026-10-07，同一批工作的后半段）：**拍板 ①「种子库
+> 全局共享一份、不做 per-job」已反转**为**按轮生成、落在作业目录里**；随之撤掉"保存即重写全局
+> 文件"那条路径（`commit_and_export_seed_database`）、`SeedDatabaseUnavailableError` → 503
+> **映射与 `app.state` 那把锁**；`settings.seed_database_path` / `QUANT_SEED_DATABASE_PATH`
+> **已删**。下文的正文是 D.31 当时的原文，**以 `D.32` 为准**（种子库落点、页面上的状态卡与
+> 「重新生成」按钮、费率三级与提交侧缺口校验都在 `D.32`）。这一批的另一半（三表 CRUD、
+> 引擎列序硬契约、品种码三位、`MinCommission` 0 语义）**未被推翻**。
+
+- **触发**：用户「管理端就是在 QuantPlatform 里面做，可以开始了」。引擎启动时读的三张表
+  （`Product` / `CommissionGroup` / `BaseCommission`）此前**没有任何自动生产方**——
+  `SimExchangeInit` 从 CTP 拉行情但不产费率、`Product` 只有期货档，运行的组号是硬编码常量
+  `COMMISSION_GROUP_ID = 1`。唯一路径是手工跑 `makeseeddb.py`。
+- **推翻一条已记录的决策**：`platform-plan.md` §12.14 与拍板表里的「**种子库不重建**」已显式改写
+  （原文保留并标注订正）。那一条的前提是"盘上没有它、也没有生产方"——**2026-10-07 起生产方就是
+  本平台**。它钉的四条断言（`BasicDataLoaded` / `CommissionMissingCount` / 费用三项）
+  **期望值翻面**：从「缺失」翻成「在位」，见 §16。
+- **用户中途纠正过一次方向**：先前设想的"权威源"不成立——CSV **不是**日常维护的入口，只承担
+  **建表播种**（某张表为空时读一次，此后再不相干）。故**不提供通用 CSV 导入**：数据住在 catalog，
+  日常维护走管理页，引擎读的那个文件是派生物。
+- **四条拍板（2026-10-07 用户定，不再重议）**：① 种子库**全局共享一份**
+  （`settings.seed_database_path`，不做 per-job）；② 本期**只做三表 CRUD + 生成种子库**，
+  提交前缺口校验留下一期；③ **catalog 为准**，`makeseeddb.py` 与 `Configs/SeedCsv/`
+  退役为历史遗留（**文件保留、不再执行**）；④ 种子库落点跟引擎同目录，**不动 `.env`**。
+- **落点**：后端新包 `app/reference_data/`（契约 / 生成器 / 播种三块）、新路由
+  `app/routers/reference_data.py`（九个写端点 + 状态与重生成，全套 `AdminUserDependency`）、
+  随代码发布的 `backend/reference_seed/` 三份 CSV、`errors.py` 新增
+  `SeedDatabaseUnavailableError` → **503**、lifespan 两步接线（播种 → **仅缺文件时**补生成）；
+  前端 `/reference-data`（一页 + 三面板 + `use-reference-table` 组合式）与导航、路由。
+- **几处非显然的判断**：① **引擎按下标读**那个文件（`SELECT *` 喂进字段描述数组），故**列名 /
+  列序 / 列数**是硬契约，唯一声明处是 `seed_contract.py`，生成器**自己写显式 DDL**——用
+  `create_all` 会把九张平台表一并写进种子库、且 `Id` 落在首列就是静默错位；② 九个写端点与
+  「重新生成」**共用** `commit_and_export_seed_database()`（`flush` → 建临时文件 → `commit` →
+  原子发布），次序要排掉的是"库新文件旧"那种**没有接口能观测到**的状态；③ 那把 `asyncio.Lock`
+  挂在 `app.state` 而不是模块全局（pytest-asyncio 每用例一个新事件循环）；④ **品种代码是三位**
+  （`600` / `000`）——它是引擎从行情数据里取到的那个 `ProductId`，填成 `600519` 就一个品种都
+  匹配不上，静默走 `VolumeMultiple = 1` 兜底并计入 `VolumeMultipleFallbackProductCount`；
+  ⑤ 改一个**被引用的组号**改为"先数引用行再拒"（外键没有 `ON UPDATE`，否则 SQLite 抛的
+  `IntegrityError` 会被译成误导性的「该组号已存在」）。
+- **一条旧风险销账**：`MinCommission` / `MaxCommission` 的 0 语义已在
+  `CommissionCalculator.cpp::CalcTradeFee` 查证——**0 表示这一侧不设限**（不是封到 0），
+  且封底封顶**只作用于佣金**，印花税与过户费按成交金额实收。
+- **验收**：后端 `pytest` **700 项全过**（基线 656 + 新增 44）；
+  前端 `type-check` 干净 + `vitest` **220 项 / 28 文件全绿**。
+- **仍未决 —— 待用户手工验收**：页面走查（权限、三表 CRUD、删被引用的组、状态卡与重新生成）、
+  `sqlite3` 的三条判据（**恰好三表 / 列序对齐 / 无平台列**）、真引擎一轮看那四个计数、以及
+  **与 `MdbStructs.cpp` 的列序人工对照**（引擎侧模板生成、会漂移）。清单见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §16。
+- **已知风险（已接受）**：平台**接管了** `bin/Release/BackTestInit.db`（手工造的那份会在第一次
+  保存时被覆盖）；那把锁只在单 worker 内有效，多 worker 部署需换文件锁。
+- **提交状态**：**已提交**（`f32ac48`，后端 9 改 + 新包 4 文件 + 新路由 + 4 个新测试文件 + 3 份
+  CSV；前端 6 改 + 8 个新文件；四份文档 + 本文件与归档层两文件）。
+
+## D.32 · 2026-10-07 （第三十二批） 费率三级设置 + 种子库改按轮生成
+
+> 归档于 2026-10-08（D.36 拆分时 ✅ 区超出 5 批；**短版留在 `PROGRESS.md`**，含手工验收 §16、三条已接受的风险与五处计划外改动的报备）。
+> 下列原文为 2026-10-08 工作区版本（`f32ac48` 之后仅订正过「提交状态」一行），其余一字未改。
+
+- **触发**：用户「费率怎么没有通配方案？这样得对每个合约都设一遍。我要按**合约 / 品种 /
+  交易所**三级来设」。D.31 的费率明细只能逐合约录，扩到全市场不可维护。
+- **引擎侧的硬约束（已核实，决定了做法）**：`CommissionCalculator::Apply` 对
+  `(CommissionGroupId, ExchangeId, InstrumentId, Direction)` 只做**一次精确哈希查找**，
+  `BaseCommission` 表里没有"品种"这一档、`Trade` 也不带 `ProductId`。所以通配**不可能只靠
+  数据表达**，只能二选一：改引擎加回退链，或平台侧把通配**展开**成具体合约行。
+- **用户拍板**：**平台侧展开，引擎零改动**——三级规则存 catalog，**每一轮开始前**按该轮用到的
+  合约摊成合约级行，写进作业目录里的 `BackTestInit.db`；引擎读到的永远是一份只有该轮合约的小库。
+- **反转了 D.31 的拍板 ①**（全局共享一份种子库 → 按轮生成）。**显式改写、不静默覆盖**：
+  `platform-plan.md` §14 起首加同日订正块、§14.2 重写、§14.4 重写、拍板表与 §12.14 各加指针；
+  `acceptance-checklist.md` §16 全节改写；`job-workspace.md` §1 加第五个输入与 §1.1。
+  **撤掉的实现**：`commit_and_export_seed_database`（保存即重写全局文件）、状态端点
+  `GET/POST /api/reference-data/seed-database`、`SeedDatabaseUnavailableError` + 503 映射、
+  `app.state.seed_database_lock`、`settings.seed_database_path` / `QUANT_SEED_DATABASE_PATH`。
+  **保留**：`SEED_DATABASE_FILENAME` 常量（作业目录里仍用）、启动期"空表播种"（`initial_rows`）。
+- **三级作用域不加列**，由 `InstrumentId` 那一格的取值承载：空串 = 交易所级；≤ 4 字符且**已在
+  `Products` 表登记**的短码 = 品种级；其余 = 合约级。不另存一列，免得"作用域写着品种、合约格
+  写着 `600519`"那种自相矛盾的行。
+- **落点**：后端新增 `reference_data/rate_expansion.py`（纯函数展开器：精确 → 品种前缀 →
+  交易所空串，**方向不回退**、**整行替换**）；`seed_database.py` 改为 `write_seed_database`
+  写**指定行集合**（`generate_run_seed_database` / `build_seed_database_staging_path` /
+  `discard_staged_seed_database`）；
+  `services/run_submission.py` 加 `_ensure_run_rates_available`（**提交就拦**，缺任一格 400，
+  文案点名合约与方向）并把 `DbInitHost` 从全局路径改为 `runs/<RunId>/BackTestInit.db`；
+  `scheduler/workspace.py` 的 `JobFileSet` 多一个 `seed_database_source_path`（**搬**进作业目录、
+  随其余文件一起 `rename` 原子发布）、`runner.py` 的 `_stage_run_seed_database` 在起进程前生成、
+  失败则 `discard_staged_seed_database` 让该轮失败；
+  `routers/reference_data.py` 加**品种级守门**（未登记的短码 → 400）。
+  前端：`api/types.ts` 加 `RATE_SCOPES` / `RateScope` / `MAXIMUM_PRODUCT_CODE_LENGTH`、
+  删 `SeedDatabaseStatus`；新 `domain/rate-scope.ts`（`resolveRateScope` / `describeRateScope` /
+  `describeRateScopeTarget`）；新 `api/pagination.ts`（`collectAllPages`，从 `strategy-catalog`
+  抽出，DRY）；`ReferenceBaseCommissionPanel.vue` 换**作用域选择器** + 条件输入 + 作用域徽章列；
+  `ReferenceDataView.vue` 删状态卡与「重新生成」。
+- **几处非显然的判断**：① **前端认作用域不用抓品种目录**——后端守门使"非空且 ≤ 4 字符 ⇒ 必然
+  已登记"成立，故长度规则**精确复现**后端分类，`resolveRateScope` 是纯函数（已写了边界测试）；
+  ② 品种下拉**不建 Pinia store**（单一消费者、跨测试串状态），改为面板内 `collectAllPages` 取数，
+  抽取到 `api/pagination.ts` 供 `strategy-catalog` 复用；③ 品种级时**锁住交易所那一格**，让
+  "交易所与品种对不上"在结构上造不出来；④ 展开器**整行替换**（含 `MinCommission` /
+  `MaxCommission`），不做"合约级只覆盖佣金、印花税从交易所级继承"那种部分覆盖。
+- **验收**：后端 `pytest` **722 项全过**（基线 700 + 本节新增）；
+  前端 `type-check` 干净 + `vitest` **231 项 / 30 文件全绿**。
+- **仍未决 —— 待用户手工验收**：费率三级走查（含未登记短码被 400 拦、换作用域清空代码）、
+  该轮作业目录 `sqlite3` 三条判据（**恰好三表 / 列序对齐 / `BaseCommission` 只有该轮合约的行**）、
+  真引擎一轮四个计数、**三级全删则提交被 400 拦**、以及**与 `MdbStructs.cpp` 的列序人工对照**
+  （每一轮都新造一份，漂移暴露面更大）。清单见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §16。
+- **已知风险（已接受）**：`bin/*/BackTestInit.db` **从此无人维护**（WSL 手工跑 `TestBackTest`
+  时费率会缺，用户已确认）；**启发式守门 ≤ 4 字符**是近似；**策略自订别的合约**不在本期扫描范围。
+- **提交状态**：**已提交**（`f32ac48`，与 D.31 / D.33 / D.34 同一棵树一并入库；无法按批切成
+  几个提交——同一批文件被四批都动过）。
+- **几处计划外的额外改动（报备）**：① `get_database` / `DatabaseDependency` 再次被删（等于恢复
+  D.29 的清理——中途临时加回过，最终不留）；② `/api/health` 响应去掉两个字段；③ 品种级守门返回
+  **400**（计划写的是 422）；④ **D.03 的无回显规则**有意收窄："缺费率"文案点名的是一个**合法
+  输入**（缺哪个合约、哪个方向），不按 `assert_rejected` 的无回显口径路由；⑤ 费率面板十项费率的
+  `ElInputNumber` 步进由 `0.0001` 放到 **`0.000001`**（用户当场指出"四位不够"）——步进只管键盘上
+  下键，但它同时是"这一格认到第几位小数"的下限；显示 (`formatDecimal` 默认 6 位) 与后端 (`Float`)
+  本来就是六位 / 不限，故这一改只是把三者对齐，`最小变动价位` 那格（`0.01`，两位）未动。
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型

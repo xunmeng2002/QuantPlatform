@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.exc import SQLAlchemyError
@@ -228,15 +229,20 @@ def _register_exception_handlers(application: FastAPI) -> None:
     async def _handle_validation_error(
         request: Request, error: RequestValidationError
     ) -> JSONResponse:
-        """把校验失败回执里的敏感字段值抹掉后再回."""
+        """把校验失败回执里的敏感字段值抹掉后再回.
+
+        收尾那道 `jsonable_encoder` 不能省: 错误的 `ctx` 里可能躺着**异常对象本身**
+        (`UploadFile` 的校验器正是抛 `ValueError` 拒收普通字段). 原样交给 `JSONResponse`
+        会在 `json.dumps` 那里抛 `TypeError`, 于是 422 变成 500、真实原因被兜底文案盖掉.
+        """
+
+        redacted_errors = [
+            _redact_validation_error(item) for item in error.errors()
+        ]
 
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={
-                "detail": [
-                    _redact_validation_error(item) for item in error.errors()
-                ]
-            },
+            content={"detail": jsonable_encoder(redacted_errors)},
         )
 
     @application.exception_handler(Exception)

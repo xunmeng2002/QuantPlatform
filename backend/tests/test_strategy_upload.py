@@ -220,13 +220,17 @@ async def post_raw_upload(
     client: AsyncClient,
     token: str,
     *,
-    entry_filename: str,
+    entry_filename: str | None,
     configuration_filename: str,
 ) -> Response:
     """按**线上原样的字节**发一次上传, 绕开 `httpx` 的 multipart 编码器.
 
     编码器会替客户端"规整"文件名: 空名降级成普通字段, 引号与控制字符被抹掉. 于是它写不出的那些
     体, 恰恰是最该测的那些. 体的拼法见 `build_multipart_body`.
+
+    `entry_filename=None` 与空串在**拼出来的那几个字节**里是两件事: 空串仍是"带了 `filename`
+    项、只是值为空", Starlette 照样把该分部按**文件**解析; 整个 `filename` 项缺失时, 它才降级成
+    **普通字段**, 于是作为 `str` 撞上 `UploadFile` 的注解, 在框架层就被拒——轮不到处理函数.
     """
 
     body = build_multipart_body(
@@ -665,6 +669,28 @@ async def test_an_upload_part_without_a_filename_is_rejected(
 
     assert response.status_code == 400, response.text
     assert response.json()["detail"] == MISSING_UPLOAD_FILENAME_MESSAGE
+
+
+async def test_a_part_that_is_not_a_file_still_gets_a_json_422(
+    client: AsyncClient, owner_account: SignedInAccount
+) -> None:
+    """分部不带 `filename` 时框架回 422, 而那条回执**必须是 JSON**.
+
+    `UploadFile` 的校验器对收到的普通字段抛 `ValueError`, 该异常对象会原样躺进校验错误的 `ctx`;
+    处理器直接 `JSONResponse(content=...)` 的话, 序列化在 `json.dumps` 那里抛 `TypeError`, 于是
+    用户拿到 500, 且真实原因被一句"服务器内部错误"盖掉.
+    """
+
+    response = await post_raw_upload(
+        client,
+        owner_account.token,
+        entry_filename=None,
+        configuration_filename=CONFIG_FILENAME,
+    )
+
+    assert response.status_code == 422, response.text
+    assert "ValueError" not in response.text
+    assert response.json()["detail"]
 
 
 @pytest.mark.parametrize(

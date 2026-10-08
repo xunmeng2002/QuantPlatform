@@ -39,6 +39,57 @@ Python 策略**。
 
 ## ✅ 已完成
 
+### D.36 · 2026-10-08 （第三十六批） 422 回执走 `jsonable_encoder`：修掉异常对象导致的 500
+
+> **本批原编号 D.35**：2026-10-08 两台电脑各做了一批，**各自认领了同一个批次号 D.35**（同一天、
+> 同一批号、两件无关的事）。另一台那批先落进 `origin` / `github` 两个远程，故 2026-10-09 合流时
+> **本批让号改 D.36**，条目原文一字未动；`PROGRESS-archive.md` 两处"归档于"脚注与
+> `✅` 区的降序位置随后一并订正。
+
+- **触发**：D.25 实施中记下的那条既有缺陷（2026-10-01 起挂在 ❓ 区，本批结清后移出）。当时以
+  "改动面横跨八段"为由没顺手修，并写明"另起一批改，判据也更好写"——本批即那一批。
+- **根因**：`UploadFile` 的 pydantic 校验器（`fastapi/datastructures.py` 的 `_validate`）对
+  收到的普通字段**抛 `ValueError`**，该异常对象原样躺进校验错误的 `ctx`；处理器直接把
+  `error.errors()` 交给 `JSONResponse`，序列化在 `json.dumps` 那里抛
+  `TypeError: Object of type ValueError is not JSON serializable` —— 422 变 500，真实原因被
+  兜底文案盖掉。修法是补一道 `jsonable_encoder`（**框架自带的那个处理器本来就这么做**）。
+  **`msg` 与 `input` 一字未动**：它们承载的是可读原因。
+- **订正 D.25 记的可达路径（那条写错了）**：原记"已认证客户端 POST 一个 `filename=""` 的 part
+  即可"。**空串不是它** —— Starlette 只要看到 `filename` 这个项名就按**文件**解析
+  （`formparsers.py` 判的是 `b"filename" in options`），空串照样生成 `UploadFile`，于是被应用
+  自己那条 400 拦下（`filename` 是载荷的一部分）。真正触发的是 **`filename` 整个缺失**的分部：
+  它在 Starlette 那里降级成普通字段，作为 `str` 撞上 `UploadFile` 注解，**在框架层就被拒**，
+  根本轮不到处理函数。
+- **落点**：`backend/app/main.py` **一处** —— 加 `from fastapi.encoders import jsonable_encoder`；
+  处理器内先算出 `redacted_errors`（抹敏感值的**次序不变**），再整体编码；docstring 补上"这道
+  编码不能省"的理由。**不改状态码、不改文案、不加新常量**。
+- **验收**：新增
+  `tests/test_strategy_upload.py::test_a_part_that_is_not_a_file_still_gets_a_json_422` ——
+  **先复现**（`TypeError` 从处理器里抛出，`ctx.error` 就是那个 `ValueError`），修复后回 **422**
+  且响应体是 JSON、不含 `ValueError`。后端 `pytest` **741 项全过**（D.34 基线 740 + 本节 1）。
+  测试助手 `post_raw_upload` 的 `entry_filename` 放宽为 `str | None`（`None` = 分部不带
+  `filename`），与既有那条空串用例并列。
+- **已知外观（有意与框架默认一致）**：`ctx` 编码后是 `{"error": {}}` —— 异常对象被 `vars()`
+  编成空字典（框架自带的处理器同样如此），可读原因在 `msg` 里。
+- **顺带订正一条、问明一条**：① D.31–D.34 的"提交状态"当时都写着**未提交**，实际已由
+  **`f32ac48`** 一并提交（同一棵树），四条已改写为"已提交"；② 备注里那条 **Python 3.11.1 /
+  `cp311`** 与本机实测（**3.14.5 + `cp314`**，平台自己的探针量为可用）看似冲突，**已问明成因：
+  那是另一台电脑**（那台 Windows 3.11 / WSL 3.12），两台各自与自己的 `.pyd` 自洽、**都维持现状
+  不升级**；原文保留，备注「环境锁定」里补了归属说明，并把"**云主机那台的 Python 要与包内
+  `.pyd` 的 ABI 对上**"补进 ❓ 的"引擎发布包"那条（P8 前置）。
+- **顺带做了一次归档滚动（同日）**：`PROGRESS.md` 当时 67.2 KB（目标 ≤ 50 KB）。查账后
+  **D.23–D.30 那七条早就滚过了**（全条在归档，主文件里只有 §8.1 要求留下的未决短版），真正
+  占地方的是最近几批的**全条**。故按 §8.1「保留最近 3–5 批」的口径把**最旧的 D.31 / D.32
+  两条全条搬进归档**（升序落在 D.30 之后，各加"归档于"脚注 + 短版指针），主文件
+  67.2 → **57.7 KB**（记完本段后是 **59.3 KB** —— 这 1.5 KB 是本节自己）。
+  搬移用脚本对条目边界取原文（不手抄，可重入），并给 [`PROGRESS-index.md`](PROGRESS-index.md)
+  补了两行索引。**剩下的 7.7 KB 缺口是有意不补的**：能再砍的只有备注区（17.3 KB）与 R.01
+  （10.8 KB）里的**活规则**，砍了就是把跨批约定埋掉，与 §8.1 的立意相反。
+  **2026-10-09 合流补记**：并入另一台那批的 D.35 全条后为 **62.9 KB**（含本 D.36 全条），
+  缺口从 7.7 变为 12.9 KB；滚动的取舍不变，仍待用户定夺。
+- **提交状态**：本批 5 个文件（`app/main.py` + 该用例 + 本文件 + `PROGRESS-archive.md` +
+  `PROGRESS-index.md`）。**未提交**（按惯例由用户执行）。
+
 ### D.35 · 2026-10-08 （第三十五批） `DbInitHost` 改常量相对路径 + 策略脚本删「`__file__` 反推仓根」
 
 - **触发**：用户看了一个真实作业目录（`runs/3d79c4b1…`）后问「里面没有 `.pyd`，而脚本靠
@@ -146,8 +197,7 @@ Python 策略**。
   `CommissionGroupNotExist` 是死代码）—— 靠提交期那两道校验兜住，两者都点名组号与合约；
   ② **队列里的轮不受删组拦截保护** —— 它们会在起跑前以 `UnrunnableJob` 失败，文案点名缺哪个
   合约、哪个方向（**不是静默降级**）。
-- **提交状态**：**与 D.31 / D.32 / D.33 的改动同一棵未提交树**（同一批文件被四批都动过，
-  清单见 `git status`）。**未提交**（按惯例由用户执行）。
+- **提交状态**：**已提交**（`f32ac48`，与 D.31–D.33 同一棵树一并入库）。
 
 ### D.33 · 2026-10-07 （第三十三批） 费率方向加「双向」通配 + 展开时摊成两行
 
@@ -185,122 +235,35 @@ Python 策略**。
   §16.3 加的第 4 条判据（**产物 `Direction` 只有 0 与 1，绝不出现 `-1`**）。
 - **已知风险（已接受）**：**双向会把印花税收进买入侧** —— 界面提示里明说了这件事，但**不拦**
   （别的市场确实两侧都收），要不要拆成买 / 卖两行由用户定。
-- **提交状态**：**与 D.31 / D.32 的改动同一棵未提交树**（同一批文件被三批都动过，清单见
-  `git status`）。**未提交**（按惯例由用户执行）。
+- **提交状态**：**已提交**（`f32ac48`，与 D.31 / D.32 / D.34 同一棵树一并入库）。
 
 ### D.32 · 2026-10-07 （第三十二批） 费率三级设置 + 种子库改按轮生成
 
-- **触发**：用户「费率怎么没有通配方案？这样得对每个合约都设一遍。我要按**合约 / 品种 /
-  交易所**三级来设」。D.31 的费率明细只能逐合约录，扩到全市场不可维护。
-- **引擎侧的硬约束（已核实，决定了做法）**：`CommissionCalculator::Apply` 对
-  `(CommissionGroupId, ExchangeId, InstrumentId, Direction)` 只做**一次精确哈希查找**，
-  `BaseCommission` 表里没有"品种"这一档、`Trade` 也不带 `ProductId`。所以通配**不可能只靠
-  数据表达**，只能二选一：改引擎加回退链，或平台侧把通配**展开**成具体合约行。
-- **用户拍板**：**平台侧展开，引擎零改动**——三级规则存 catalog，**每一轮开始前**按该轮用到的
-  合约摊成合约级行，写进作业目录里的 `BackTestInit.db`；引擎读到的永远是一份只有该轮合约的小库。
-- **反转了 D.31 的拍板 ①**（全局共享一份种子库 → 按轮生成）。**显式改写、不静默覆盖**：
-  `platform-plan.md` §14 起首加同日订正块、§14.2 重写、§14.4 重写、拍板表与 §12.14 各加指针；
-  `acceptance-checklist.md` §16 全节改写；`job-workspace.md` §1 加第五个输入与 §1.1。
-  **撤掉的实现**：`commit_and_export_seed_database`（保存即重写全局文件）、状态端点
-  `GET/POST /api/reference-data/seed-database`、`SeedDatabaseUnavailableError` + 503 映射、
-  `app.state.seed_database_lock`、`settings.seed_database_path` / `QUANT_SEED_DATABASE_PATH`。
-  **保留**：`SEED_DATABASE_FILENAME` 常量（作业目录里仍用）、启动期"空表播种"（`initial_rows`）。
-- **三级作用域不加列**，由 `InstrumentId` 那一格的取值承载：空串 = 交易所级；≤ 4 字符且**已在
-  `Products` 表登记**的短码 = 品种级；其余 = 合约级。不另存一列，免得"作用域写着品种、合约格
-  写着 `600519`"那种自相矛盾的行。
-- **落点**：后端新增 `reference_data/rate_expansion.py`（纯函数展开器：精确 → 品种前缀 →
-  交易所空串，**方向不回退**、**整行替换**）；`seed_database.py` 改为 `write_seed_database`
-  写**指定行集合**（`generate_run_seed_database` / `build_seed_database_staging_path` /
-  `discard_staged_seed_database`）；
-  `services/run_submission.py` 加 `_ensure_run_rates_available`（**提交就拦**，缺任一格 400，
-  文案点名合约与方向）并把 `DbInitHost` 从全局路径改为 `runs/<RunId>/BackTestInit.db`；
-  `scheduler/workspace.py` 的 `JobFileSet` 多一个 `seed_database_source_path`（**搬**进作业目录、
-  随其余文件一起 `rename` 原子发布）、`runner.py` 的 `_stage_run_seed_database` 在起进程前生成、
-  失败则 `discard_staged_seed_database` 让该轮失败；
-  `routers/reference_data.py` 加**品种级守门**（未登记的短码 → 400）。
-  前端：`api/types.ts` 加 `RATE_SCOPES` / `RateScope` / `MAXIMUM_PRODUCT_CODE_LENGTH`、
-  删 `SeedDatabaseStatus`；新 `domain/rate-scope.ts`（`resolveRateScope` / `describeRateScope` /
-  `describeRateScopeTarget`）；新 `api/pagination.ts`（`collectAllPages`，从 `strategy-catalog`
-  抽出，DRY）；`ReferenceBaseCommissionPanel.vue` 换**作用域选择器** + 条件输入 + 作用域徽章列；
-  `ReferenceDataView.vue` 删状态卡与「重新生成」。
-- **几处非显然的判断**：① **前端认作用域不用抓品种目录**——后端守门使"非空且 ≤ 4 字符 ⇒ 必然
-  已登记"成立，故长度规则**精确复现**后端分类，`resolveRateScope` 是纯函数（已写了边界测试）；
-  ② 品种下拉**不建 Pinia store**（单一消费者、跨测试串状态），改为面板内 `collectAllPages` 取数，
-  抽取到 `api/pagination.ts` 供 `strategy-catalog` 复用；③ 品种级时**锁住交易所那一格**，让
-  "交易所与品种对不上"在结构上造不出来；④ 展开器**整行替换**（含 `MinCommission` /
-  `MaxCommission`），不做"合约级只覆盖佣金、印花税从交易所级继承"那种部分覆盖。
-- **验收**：后端 `pytest` **722 项全过**（基线 700 + 本节新增）；
-  前端 `type-check` 干净 + `vitest` **231 项 / 30 文件全绿**。
+> **全条见归档 D.32**。一段话：引擎对费率只做一次精确哈希查找、表里又没有"品种"这一档，
+> 故通配**不可能只靠数据表达**；用户拍板**平台侧把三级规则摊成合约级行、每轮写进作业目录里
+> 的种子库**，**引擎零改动**（反转了 D.31 的拍板 ①，那条的原文已标订正）。三条已知风险与
+> 五处计划外改动的报备随原文入归档。
+
 - **仍未决 —— 待用户手工验收**：费率三级走查（含未登记短码被 400 拦、换作用域清空代码）、
-  该轮作业目录 `sqlite3` 三条判据（**恰好三表 / 列序对齐 / `BaseCommission` 只有该轮合约的行**）、
-  真引擎一轮四个计数、**三级全删则提交被 400 拦**、以及**与 `MdbStructs.cpp` 的列序人工对照**
-  （每一轮都新造一份，漂移暴露面更大）。清单见
-  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §16。
-- **已知风险（已接受）**：`bin/*/BackTestInit.db` **从此无人维护**（WSL 手工跑 `TestBackTest`
-  时费率会缺，用户已确认）；**启发式守门 ≤ 4 字符**是近似；**策略自订别的合约**不在本期扫描范围。
-- **提交状态**：**与 D.31 的改动同一棵未提交树**，无法按批切成两个提交（同一批文件被两边都动过，
-  清单见 `git status`）。**未提交**（按惯例由用户执行）。
-- **几处计划外的额外改动（报备）**：① `get_database` / `DatabaseDependency` 再次被删（等于恢复
-  D.29 的清理——中途临时加回过，最终不留）；② `/api/health` 响应去掉两个字段；③ 品种级守门返回
-  **400**（计划写的是 422）；④ **D.03 的无回显规则**有意收窄："缺费率"文案点名的是一个**合法
-  输入**（缺哪个合约、哪个方向），不按 `assert_rejected` 的无回显口径路由；⑤ 费率面板十项费率的
-  `ElInputNumber` 步进由 `0.0001` 放到 **`0.000001`**（用户当场指出"四位不够"）——步进只管键盘上
-  下键，但它同时是"这一格认到第几位小数"的下限；显示 (`formatDecimal` 默认 6 位) 与后端 (`Float`)
-  本来就是六位 / 不限，故这一改只是把三者对齐，`最小变动价位` 那格（`0.01`，两位）未动。
+  该轮作业目录 `sqlite3` 三条判据（**恰好三表 / 列序对齐 / `BaseCommission` 只有该轮合约的
+  行**）、真引擎一轮四个计数、三级全删则提交被 400 拦、**与 `MdbStructs.cpp` 的列序人工对照**。
+  清单见 [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §16。
+- **已接受的风险（仍生效）**：`bin/*/BackTestInit.db` 从此**无人维护**（手工跑
+  `TestBackTest` 时费率会缺）；品种级那条 **≤ 4 字符**的守门是近似；**策略自订别的合约**
+  不在本期扫描范围。
 
 ### D.31 · 2026-10-07 （第三十一批） 回测基础数据管理端：引擎种子库由平台生成
 
-> ⚠️ **本条有一半当日即被 `D.32` 推翻**（2026-10-07，同一批工作的后半段）：**拍板 ①「种子库
-> 全局共享一份、不做 per-job」已反转**为**按轮生成、落在作业目录里**；随之撤掉"保存即重写全局
-> 文件"那条路径（`commit_and_export_seed_database`）、`SeedDatabaseUnavailableError` → 503
-> **映射与 `app.state` 那把锁**；`settings.seed_database_path` / `QUANT_SEED_DATABASE_PATH`
-> **已删**。下文的正文是 D.31 当时的原文，**以 `D.32` 为准**（种子库落点、页面上的状态卡与
-> 「重新生成」按钮、费率三级与提交侧缺口校验都在 `D.32`）。这一批的另一半（三表 CRUD、
-> 引擎列序硬契约、品种码三位、`MinCommission` 0 语义）**未被推翻**。
+> **全条见归档 D.31**（含"本条有一半当日即被 D.32 推翻"那个订正块）。**仍在生效的是未被
+> 推翻的那半**：三表 CRUD、**引擎列序硬契约**（`seed_contract.py` 是唯一声明处）、**品种码
+> 是三位**、以及 `MinCommission` 的 0 语义（0 = 该侧不设限，且封底封顶只管佣金）。被推翻的
+> 那半见 D.32。
 
-- **触发**：用户「管理端就是在 QuantPlatform 里面做，可以开始了」。引擎启动时读的三张表
-  （`Product` / `CommissionGroup` / `BaseCommission`）此前**没有任何自动生产方**——
-  `SimExchangeInit` 从 CTP 拉行情但不产费率、`Product` 只有期货档，运行的组号是硬编码常量
-  `COMMISSION_GROUP_ID = 1`。唯一路径是手工跑 `makeseeddb.py`。
-- **推翻一条已记录的决策**：`platform-plan.md` §12.14 与拍板表里的「**种子库不重建**」已显式改写
-  （原文保留并标注订正）。那一条的前提是"盘上没有它、也没有生产方"——**2026-10-07 起生产方就是
-  本平台**。它钉的四条断言（`BasicDataLoaded` / `CommissionMissingCount` / 费用三项）
-  **期望值翻面**：从「缺失」翻成「在位」，见 §16。
-- **用户中途纠正过一次方向**：先前设想的"权威源"不成立——CSV **不是**日常维护的入口，只承担
-  **建表播种**（某张表为空时读一次，此后再不相干）。故**不提供通用 CSV 导入**：数据住在 catalog，
-  日常维护走管理页，引擎读的那个文件是派生物。
-- **四条拍板（2026-10-07 用户定，不再重议）**：① 种子库**全局共享一份**
-  （`settings.seed_database_path`，不做 per-job）；② 本期**只做三表 CRUD + 生成种子库**，
-  提交前缺口校验留下一期；③ **catalog 为准**，`makeseeddb.py` 与 `Configs/SeedCsv/`
-  退役为历史遗留（**文件保留、不再执行**）；④ 种子库落点跟引擎同目录，**不动 `.env`**。
-- **落点**：后端新包 `app/reference_data/`（契约 / 生成器 / 播种三块）、新路由
-  `app/routers/reference_data.py`（九个写端点 + 状态与重生成，全套 `AdminUserDependency`）、
-  随代码发布的 `backend/reference_seed/` 三份 CSV、`errors.py` 新增
-  `SeedDatabaseUnavailableError` → **503**、lifespan 两步接线（播种 → **仅缺文件时**补生成）；
-  前端 `/reference-data`（一页 + 三面板 + `use-reference-table` 组合式）与导航、路由。
-- **几处非显然的判断**：① **引擎按下标读**那个文件（`SELECT *` 喂进字段描述数组），故**列名 /
-  列序 / 列数**是硬契约，唯一声明处是 `seed_contract.py`，生成器**自己写显式 DDL**——用
-  `create_all` 会把九张平台表一并写进种子库、且 `Id` 落在首列就是静默错位；② 九个写端点与
-  「重新生成」**共用** `commit_and_export_seed_database()`（`flush` → 建临时文件 → `commit` →
-  原子发布），次序要排掉的是"库新文件旧"那种**没有接口能观测到**的状态；③ 那把 `asyncio.Lock`
-  挂在 `app.state` 而不是模块全局（pytest-asyncio 每用例一个新事件循环）；④ **品种代码是三位**
-  （`600` / `000`）——它是引擎从行情数据里取到的那个 `ProductId`，填成 `600519` 就一个品种都
-  匹配不上，静默走 `VolumeMultiple = 1` 兜底并计入 `VolumeMultipleFallbackProductCount`；
-  ⑤ 改一个**被引用的组号**改为"先数引用行再拒"（外键没有 `ON UPDATE`，否则 SQLite 抛的
-  `IntegrityError` 会被译成误导性的「该组号已存在」）。
-- **一条旧风险销账**：`MinCommission` / `MaxCommission` 的 0 语义已在
-  `CommissionCalculator.cpp::CalcTradeFee` 查证——**0 表示这一侧不设限**（不是封到 0），
-  且封底封顶**只作用于佣金**，印花税与过户费按成交金额实收。
-- **验收**：后端 `pytest` **700 项全过**（基线 656 + 新增 44）；
-  前端 `type-check` 干净 + `vitest` **220 项 / 28 文件全绿**。
 - **仍未决 —— 待用户手工验收**：页面走查（权限、三表 CRUD、删被引用的组、状态卡与重新生成）、
-  `sqlite3` 的三条判据（**恰好三表 / 列序对齐 / 无平台列**）、真引擎一轮看那四个计数、以及
-  **与 `MdbStructs.cpp` 的列序人工对照**（引擎侧模板生成、会漂移）。清单见
-  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §16。
-- **已知风险（已接受）**：平台**接管了** `bin/Release/BackTestInit.db`（手工造的那份会在第一次
-  保存时被覆盖）；那把锁只在单 worker 内有效，多 worker 部署需换文件锁。
-- **提交状态**：本批（后端 9 改 + 新包 4 文件 + 新路由 + 4 个新测试文件 + 3 份 CSV；前端 6 改 +
-  8 个新文件；四份文档 + 本文件与归档层两文件）。**未提交**（按惯例由用户执行）。
+  `sqlite3` 的三条判据、真引擎一轮看那四个计数、**与 `MdbStructs.cpp` 的列序人工对照**。
+  清单见 [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §16。
+- **已接受的风险（仍生效）**：平台**接管了** `bin/Release/BackTestInit.db`（手工造的那份会在
+  第一次保存时被覆盖）；那把锁**只在单 worker 内有效**，多 worker 部署需换文件锁。
 
 ### D.30 · 2026-10-02 （第三十批） 登录失败节流 + 可信代理白名单
 
@@ -516,13 +479,6 @@ Python 策略**。
   **仍未决**：三档怎么映射（加一个提交字段？还是按 manifest 声明？）、
   行情数据从哪儿来——行情根 `market-data/` 下**只有 `Bar/`**，tick 数据目录不存在，
   从未跑过。**有 tick 行情可跑之前不必定**。
-- **`_handle_validation_error` 遇到 `ValueError` 会二次抛错**（2026-10-01，D.25 实施中发现的
-  **既有缺陷**，本批**未修**）：`app/main.py` 的校验错误处理器直接 `json.dumps` 错误的
-  `ctx`，而 `ctx` 里可能躺着**异常对象本身**，于是抛 `TypeError: Object of type ValueError is
-  not JSON serializable` —— 500，且真实原因被盖掉。可达路径：已认证客户端 POST 一个
-  `filename=""` 的 part 即可（前端不会这么发，但接口是公开的）。**为什么本批不顺手修**：本批
-  的护栏是"最小改动 + 一个横跨八段的改动面"，动公共错误处理器会把每一类 422 的响应体都牵进来；
-  另起一批改，判据也更好写（断言响应体是 JSON、且不含异常对象）。
 - **系统级隔离的具体实现未定**（2026-09-25）：Windows 下的"每用户独立低权
   OS 账号"vs 每用户容器，两条路的实现与运维代价差别很大。**P8 上云前必须定**。
 - **行情数据上云的同步方式未定**（2026-09-25）：现约 1.2 MB/年/板块，
@@ -538,9 +494,11 @@ Python 策略**。
 - **上云前要由用户给出 clean 的引擎发布包**（2026-09-27，D.19 引出）：用户原话是
   「B的话，等后面上云前我会给出来的」。平台侧**不做引擎包管理**（理由见
   `platform-plan.md` §12.23），故"哪一版引擎干净、可发布"这个判断留在引擎仓。
-  **给出时须一并落实两件**：① 包内带 `engine-version.txt`（D.19 的标识优先取它；
+  **给出时须一并落实三件**：① 包内带 `engine-version.txt`（D.19 的标识优先取它；
   没有则退化为 `.pyd` + 三个 DLL 的内容摘要，两者**不可比**）；② 换版按版本留目录
-  而非原地覆盖（`platform-plan.md` §5.1 的约定）。**上云前定**。
+  而非原地覆盖（`platform-plan.md` §5.1 的约定）；③ **云主机那台的 Python 版本要与包内 `.pyd`
+  的 ABI 对上**（2026-10-08 补，成因见备注「环境锁定」：本机是 3.14/`cp314`，另一台是 3.11/
+  `cp311`，`.pyd` 与解释器绑死，装错了是启动期就装不起来）。**上云前定**。
 - **引擎发布包要含哪些数据库适配器**（2026-09-27，D.20 引出）：MySQL / MariaDB 两系现在
   **可以不随包发运**，但"要发运时装到哪"尚未定。装载器按两步找：先"调用方模块所在目录 + 文件名"
   （Windows），再裸文件名（Windows 走标准搜索序，Linux 走**调用方 `RUNPATH`**，与链结期 `DT_NEEDED` 规则逐字相同）。
@@ -563,6 +521,21 @@ Python 策略**。
   `test_engine_probe.py` 把 `.pyd` 名硬编码成 `cp314` 时 4 项断言恒失败，而
   `../QuantTrading/bin/Release` 里**只有 `cp311` 那个文件**；改成从探针自己的常量推导后 12 项
   全绿。故 **3.14.5 / `cp314` 不描述这台机器**（"在另一台机器上记的"仍未排除），别当本机事实。
+  **⚠️ 2026-10-08 复测并问明成因：上面那段与下面这段不是"谁错"，是两台机器 —— 以本段为准。**
+  用户 2026-10-08 说明：**上面那段量的是另一台电脑**（那台的 Windows 上是 Python **3.11**，
+  它 WSL 里是 **3.12**），并**已定：两台都不升级**。本机（当前开发机）是 **3.14.5 + `cp314`**，
+  三条独立证据：① `py -0p` 在本机只有一个解释器 **3.14.5**（PATH 上那个 `python` 就是它，
+  本会话跑 pytest 的也是它）；② 引擎侧由**平台自己的探针**量出 ——
+  `PlatformSettings.from_environment().engine_root` 是 `D:\Gitee\QuantTrading\bin\Release`，
+  在那里 `find_python_binding()` 找到 `QuantTrading.cp314-win_amd64.pyd` 且
+  `is_python_binding_available()` 为 **True**；③ `sys.implementation.cache_tag` 是 `cpython-314`，
+  `backend/**/__pycache__` 里的 pyc 也全是 `cpython-314`。
+  **两台各自自洽**（3.11 ↔ `cp311` / 3.14 ↔ `cp314`），探针那条"按当前解释器求 ABI 标签"的写法
+  （`engine_probe.py:39`）本来就同时描述得了两者，**代码不必改**。上面那句"3.14.5 / `cp314`
+  不描述这台机器"里的"这台"指的是**另一台** —— 主语没写明才读成了矛盾。同样地，
+  `strategy_store.py:171` 的注释写"Python 3.14（`.pyd` 是 `cp314-win_amd64`）"说的是**本机**，
+  并不冲突。**对上云的含义**：`.pyd` 与解释器绑死，云主机那台的 Python 版本必须与随包发运的
+  `.pyd` 的 ABI 对上（已补进下方 ❓ 的"引擎发布包"那条）。
 - **`market-data/` 是可丢的运行数据, 丢了只在提交时报一句 400（2026-10-07 实测重建）**：仓根
   `market-data/` 被 `.gitignore` 的 `/market-data/` 锚定,**不进版本库、`git status` 里也不显示**。
   它一旦不在盘上（本机 2026-10-07 就是这样, 同批不见的还有 `backend/_acc_tmp_old/`）, 提交回测
