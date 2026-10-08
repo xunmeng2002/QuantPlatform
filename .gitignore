@@ -163,3 +163,4 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+/backend/_acc_tmp_relative_dbinit
