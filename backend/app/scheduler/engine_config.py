@@ -7,8 +7,12 @@
 隔离的暴露条件是并发 (两个作业写同一个库且不报错), 而测试默认并发为 1——靠测试盯不住它, 把它
 变成"写不出来"才是可靠防线.
 
-两个只读输入 (`MdDataPath` / `DbInitHost`) 反过来必须显式传入并保留绝对形态: 引擎相对**job
-目录**解析它们, 写成相对值会立刻指到 job 目录里去.
+唯一的绝对只读输入是 `MdDataPath`: 历史行情是只读的, 但它**不在 job 目录里** (在部署配置给出的
+行情根下), 故只能显式传入并原样保留. `DbInitHost` **不在此列**——种子库由平台按轮生成并**放进
+job 目录** (见 `workspace.py`), 于是它是一条活在 job 目录里的路径, 与两条写路径同形, 也是常量
+`./BackTestInit.db`. 写成提交时算出的绝对路径同样跑得动, 但那条路径由**提交侧**拼、文件由**调度
+侧**放, 两处各算一次迟早会分叉, 症状是引擎读不到种子库而整轮照跑完: 费用三项恒为 0、合约乘数全部
+退化, 而 `result.json` 仍报 `Success: true`.
 
 渲染结果照抄引擎自带模板 `bin/Release/BackTest.json` 的键与次序, 含两个纯注释键
 (`MatchModeType` / `DBTypeType`) 与两个空串 (`DbUser` / `DbPassword`): 成本为零, 收益是不必
@@ -23,7 +27,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from ..catalog.enums import MarketDataType
-from ..config import MARKET_DATA_PRECISION
+from ..config import MARKET_DATA_PRECISION, SEED_DATABASE_FILENAME
 from ..errors import InvalidRequestError
 
 
@@ -37,6 +41,9 @@ DUMP_DIRECTORY_NAME = "Dump"
 RELATIVE_DATABASE_HOST = "./BackTest.db"
 RELATIVE_DUMP_PATH = f"./{DUMP_DIRECTORY_NAME}"
 RELATIVE_SESSION_FILE = f"./{SESSION_FILENAME}"
+# 种子库是**读**路径, 但它活在 job 目录里, 故与上面三条同形: 相对值恰好指对, 而绝对路径会把
+# "文件放哪"这件事从调度侧复制一份到提交侧 (见模块 docstring).
+RELATIVE_SEED_DATABASE_HOST = f"./{SEED_DATABASE_FILENAME}"
 
 # 引擎侧的 DbType 是 int, 取值即 Spark `DbTypeType` 的枚举值 (对应关系见 DATABASE_TYPE_FIELD_HINT).
 SQLITE_DATABASE_TYPE = 1
@@ -140,7 +147,6 @@ def render_engine_config(
     initial_capital: float,
     commission_group_id: int,
     market_data_path: Path,
-    seed_database_path: Path,
 ) -> str:
     """渲染 `BackTest.json`.
 
@@ -159,6 +165,9 @@ def render_engine_config(
     只累加 `CommissionMissingCount` 而不报错——一个写死的组号会让"管理端建的 2 号、3 号组"永远
     不被任何一轮用到, 且症状是一轮安静地按 0 计费的运行. 它随轮冻结在**这一份**配置里, 于是
     提交期的费率校验与调度期按轮生成种子库读的都是同一个值.
+
+    `DbInitHost` 没有形参, 与 `DbHost` 同理: 它是一条活在 job 目录里的路径 (见模块 docstring),
+    调用点传进来的任何取值都只会是"另一处算出来的同一个位置".
     """
 
     configuration = {
@@ -176,7 +185,7 @@ def render_engine_config(
         "DbUser": "",
         "DbPassword": "",
         "DbHost": RELATIVE_DATABASE_HOST,
-        "DbInitHost": str(seed_database_path),
+        "DbInitHost": RELATIVE_SEED_DATABASE_HOST,
         "InitialCapital": float(initial_capital),
         "CommissionGroupId": int(commission_group_id),
     }

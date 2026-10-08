@@ -32,6 +32,7 @@ from app.services.market_data_preparation import (
 from app.scheduler.engine_config import (
     RELATIVE_DATABASE_HOST,
     RELATIVE_DUMP_PATH,
+    RELATIVE_SEED_DATABASE_HOST,
     SQLITE_DATABASE_TYPE,
 )
 from app.scheduler.result import RESULT_MIRROR_COLUMN_NAMES
@@ -388,11 +389,9 @@ async def test_the_job_directory_matches_the_launch_contract(
     assert engine_configuration["EndTradingDay"] == DEFAULT_END_TRADING_DAY
     assert engine_configuration["InitialCapital"] == DEFAULT_INITIAL_CAPITAL
     assert engine_configuration["MdDataPath"] == str(platform_settings.market_data_root)
-    assert engine_configuration["DbInitHost"] == str(
-        platform_settings.runs_root / run.id / SEED_DATABASE_FILENAME
-    )
+    assert engine_configuration["DbInitHost"] == RELATIVE_SEED_DATABASE_HOST
 
-    for relative_path_key in ("DbHost", "DumpPath"):
+    for relative_path_key in ("DbHost", "DumpPath", "DbInitHost"):
         written_path = engine_configuration[relative_path_key]
 
         assert not Path(written_path).is_absolute(), relative_path_key

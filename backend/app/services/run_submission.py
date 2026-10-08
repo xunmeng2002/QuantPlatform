@@ -27,7 +27,7 @@ from ..catalog.enums import MarketDataType, RunStatus
 from ..catalog.models import RunModel, StrategyVersionModel, UserModel
 from ..catalog.schemas import RunSubmitRequest
 from ..catalog.visibility import load_visible_strategy
-from ..config import SEED_DATABASE_FILENAME, PlatformSettings
+from ..config import PlatformSettings
 from ..errors import InvalidRequestError
 from ..ids import generate_identifier
 from ..reference_data.rate_expansion import (
@@ -118,9 +118,6 @@ async def submit_run(
         initial_capital=validate_initial_capital(request_body.initial_capital),
         commission_group_id=commission_group_id,
         market_data_path=settings.market_data_root,
-        # 种子库**按轮生成**, 落在这轮自己的作业目录里 (见 `reference_data.seed_database`), 故这里
-        # 写的是一个提交时就确定的绝对路径: 目录名就是运行主键, 调度侧起进程前把它填上.
-        seed_database_path=settings.runs_root / run_id / SEED_DATABASE_FILENAME,
     )
 
     strategy_configuration_text = serialize_configuration(

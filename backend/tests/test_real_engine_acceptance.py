@@ -60,7 +60,12 @@ from httpx import AsyncClient
 
 from app.catalog.database import PlatformDatabase
 from app.catalog.enums import RunStatus
-from app.config import MARKET_DATA_PRECISION, SUBSCRIPTION_BAR_PERIODS, PlatformSettings
+from app.config import (
+    MARKET_DATA_PRECISION,
+    SEED_DATABASE_FILENAME,
+    SUBSCRIPTION_BAR_PERIODS,
+    PlatformSettings,
+)
 
 from .helpers import SignedInAccount, bearer_headers, create_signed_in_account
 from .quote_hub_stub import build_covered_component
@@ -331,14 +336,21 @@ async def upload_real_strategy(
 
 
 def engine_database_filenames(settings: PlatformSettings, run_id: str) -> set[str]:
-    """作业目录里的 `.db` 文件名.
+    """作业目录里**引擎产出**的 `.db` 文件名.
 
-    作业目录里**只应**有引擎自己派生出来的那一个库: 种子库是按绝对路径引用的、不会被复制进来,
-    而渲染器在类型上就传不进绝对写路径. 于是多出一个 `.db` 就是"某个写入者跑到了作业目录之外"
-    或"两个作业写了同一个库"的证据——那正是相对路径失效时的样子.
+    种子库按名排除: 它是作业的**输入**, 由调度器在建作业目录时就搬进来 (`workspace.py` 的
+    `os.replace`), 自 2026-10-07 起就躺在这份 `*.db` 里——此前它在引擎根下、按绝对路径引用,
+    那时"作业目录里只应有一个库"成立, 这条 docstring 就是那会儿写的. 不排除它, 这一问恒红.
+
+    排除之后, 多出一个名字就是"某个写入者跑到了作业目录之外"或"两个作业写了同一个库"的证据
+    ——那正是相对路径失效时的样子.
     """
 
-    return {path.name for path in job_directory(settings, run_id).glob("*.db")}
+    return {
+        produced_path.name
+        for produced_path in job_directory(settings, run_id).glob("*.db")
+        if produced_path.name != SEED_DATABASE_FILENAME
+    }
 
 
 def engine_report_exists(settings: PlatformSettings, run_id: str) -> bool:

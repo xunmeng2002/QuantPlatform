@@ -1,13 +1,18 @@
-"""`BackTest.json` 的渲染: 写路径必须相对, 读路径必须绝对.
+"""`BackTest.json` 的渲染: 作业目录内的路径必须相对, 行情根必须绝对.
 
 这两条约束的暴露条件不对称. 读路径写错会**当场**失败 (`MdDataPath` 相对时引擎在 job 目录里找
 不到行情, 一轮跑完 `BarMarketDataCount == 0`), 用例与真引擎验收都盯得住. 写路径写错则只在并发
 下显形: 两个作业各写自己的作业目录、却指向同一个 `BackTest.db`, **谁都不报错**, 只是两份结果互相
 覆盖——而测试默认并发为 1, 天然的用例覆盖不到它.
 
+`DbInitHost` 是第三种: 它**读**、但读的是 job 目录里的文件, 故也必须是相对值. 写错它的症状比
+写路径更安静——引擎读不到种子库时整轮照跑完, 只是费用三项恒为 0、合约乘数全部退化, 而
+`result.json` 仍报成功 (见 `engine_config` 模块 docstring).
+
 故这里对写路径的断言不止于"渲染结果是相对值", 还包含"调用点根本没有传入绝对写路径的机会":
 `DbHost` / `DumpPath` 在函数里是常量, 形参表里没有对应入口. 少了这一条, 日后有人为了"让库文件
-可配置"加一个形参, 上面那条渲染断言会跟着形参一起被改绿.
+可配置"加一个形参, 上面那条渲染断言会跟着形参一起被改绿. `DbInitHost` 同理——它现在也是无形参
+的常量, 由 `test_the_renderer_takes_no_write_path_parameter` 一并罩住.
 
 `BarPreces` 走的是同一条思路, 也是这个模块的第三条不变式: 它是**落盘精度** (平台常量), 而用户选
 的那个周期是**策略的订阅目标**, 由引擎在读到 bar 之后自己聚合. 两者混为一个的症状不在渲染结果里
@@ -30,6 +35,7 @@ from app.scheduler.engine_config import (
     MATCH_MODE_FIELD_HINT,
     RELATIVE_DATABASE_HOST,
     RELATIVE_DUMP_PATH,
+    RELATIVE_SEED_DATABASE_HOST,
     RELATIVE_SESSION_FILE,
     SQLITE_DATABASE_TYPE,
     SUBMITTABLE_MATCH_MODES,
@@ -78,7 +84,6 @@ RENDERER_PARAMETER_NAMES = (
     "initial_capital",
     "commission_group_id",
     "market_data_path",
-    "seed_database_path",
 )
 
 WINDOWS_DRIVE_SEPARATOR = ":"
@@ -98,47 +103,53 @@ def rendered_configuration(tmp_path: Path) -> dict[str, object]:
             initial_capital=INITIAL_CAPITAL,
             commission_group_id=RENDERED_COMMISSION_GROUP_ID,
             market_data_path=tmp_path / "market-data",
-            seed_database_path=tmp_path / "engine" / "BackTestInit.db",
         )
     )
 
 
-def assert_is_a_relative_path(written_path: str) -> None:
-    """写路径不许是绝对路径, 也不许带卷标或前导分隔符.
+def assert_is_a_relative_path(job_directory_path: str) -> None:
+    """作业目录内的路径不许是绝对路径, 也不许带卷标或前导分隔符.
 
     逐项判而不是只判 `is_absolute()`: `"C:BackTest.db"` (盘符相对) 与 `"\\BackTest.db"` (根相对)
     在某些拼接方式下都会被引擎解析到作业目录之外, 而 `is_absolute()` 对前者为假.
     """
 
-    assert written_path.startswith("./"), written_path
-    assert not Path(written_path).is_absolute(), written_path
-    assert WINDOWS_DRIVE_SEPARATOR not in written_path, written_path
-    assert not written_path.startswith(PATH_SEPARATORS), written_path
+    assert job_directory_path.startswith("./"), job_directory_path
+    assert not Path(job_directory_path).is_absolute(), job_directory_path
+    assert WINDOWS_DRIVE_SEPARATOR not in job_directory_path, job_directory_path
+    assert not job_directory_path.startswith(PATH_SEPARATORS), job_directory_path
 
 
-def test_the_write_paths_are_relative(
+def test_the_job_directory_paths_are_relative(
     rendered_configuration: dict[str, object],
 ) -> None:
-    """库、转储、会话表三处写路径 (或相对引用) 都落在作业目录之内."""
+    """库、转储、会话表、种子库四处都落在作业目录之内.
+
+    `DbInitHost` 与另外三条同判: 它是读数, 但读的正是平台**放进作业目录**的那份种子库, 故相对值
+    才是对的形态. 它若被写成提交时算出的绝对路径, 这里会转红——那条路径在测试里指向一个不存在
+    的位置, 而真跑起来会指向"提交侧以为文件该在的地方".
+    """
 
     assert rendered_configuration["DbHost"] == RELATIVE_DATABASE_HOST
     assert rendered_configuration["DumpPath"] == RELATIVE_DUMP_PATH
     assert rendered_configuration["SessionFile"] == RELATIVE_SESSION_FILE
+    assert rendered_configuration["DbInitHost"] == RELATIVE_SEED_DATABASE_HOST
 
-    for written_key in ("DbHost", "DumpPath", "SessionFile"):
-        assert_is_a_relative_path(str(rendered_configuration[written_key]))
+    for job_directory_path_key in ("DbHost", "DumpPath", "SessionFile", "DbInitHost"):
+        assert_is_a_relative_path(
+            str(rendered_configuration[job_directory_path_key])
+        )
 
 
-def test_the_read_paths_are_absolute_and_verbatim(tmp_path: Path) -> None:
-    """两个只读输入原样保留绝对形态.
+def test_the_market_data_path_is_absolute_and_verbatim(tmp_path: Path) -> None:
+    """行情根原样保留绝对形态.
 
-    引擎相对 **job 目录** 解析 `MdDataPath` / `DbInitHost`, 写成相对值会立刻指到作业目录里去
-    (那里只有作业自己那几个文件), 而引擎对"行情目录不存在"是安静降级. 故这两个值既不许被改写,
-    也不许被规范化成别的形态.
+    它是唯一一个**不在**作业目录里的输入: 引擎相对 job 目录解析它, 写成相对值会立刻指到作业
+    目录里去 (那里没有行情), 而引擎对"行情目录不存在"是安静降级. 故这个值既不许被改写, 也不许
+    被规范化成别的形态.
     """
 
     market_data_path = tmp_path / "market-data"
-    seed_database_path = tmp_path / "engine" / "BackTestInit.db"
 
     rendered_configuration = json.loads(
         render_engine_config(
@@ -149,14 +160,11 @@ def test_the_read_paths_are_absolute_and_verbatim(tmp_path: Path) -> None:
             initial_capital=INITIAL_CAPITAL,
             commission_group_id=RENDERED_COMMISSION_GROUP_ID,
             market_data_path=market_data_path,
-            seed_database_path=seed_database_path,
         )
     )
 
     assert rendered_configuration["MdDataPath"] == str(market_data_path)
-    assert rendered_configuration["DbInitHost"] == str(seed_database_path)
     assert Path(str(rendered_configuration["MdDataPath"])).is_absolute()
-    assert Path(str(rendered_configuration["DbInitHost"])).is_absolute()
 
 
 def test_the_renderer_takes_no_write_path_parameter() -> None:

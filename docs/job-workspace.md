@@ -61,17 +61,24 @@ P3 实测（2026-09-25，目录里只有那四个输入文件）引擎会自己�
 | ---- | ---- | ---- |
 | `DbHost` | **写** | **必须相对** |
 | `DumpPath` | **写** | **必须相对** |
-| `MdDataPath` | 读 | 允许绝对 |
-| `DbInitHost` | 读 | 允许绝对 |
+| `MdDataPath` | 读（**job 目录之外**） | 允许绝对 |
+| `DbInitHost` | 读（**job 目录之内**） | **必须相对** |
 | `SessionFile` | 读 | `./Sessions.json` |
 
 > **警告**：把 `DbHost` 或 `DumpPath` 写成绝对路径，会让「每 job 独立工作目录」
 > 的隔离**静默失效**——两个并发 job 会写同一个库且不报错。
 
+`DbInitHost` 与上一行的 `SessionFile` 同类：**读**，但读的文件就在作业目录里（种子库由
+调度器按轮生成后**搬进作业目录**，见 §1.1）。故相对值恰好指对，而绝对路径是把"文件放哪"
+这件事从调度侧复制一份到提交侧——两处各算一次迟早会分叉，症状是引擎读不到种子库而整轮照
+跑完（费用三项恒为 0、合约乘数全部退化），`result.json` 仍报成功。2026-10-08 由绝对路径
+改为常量 `./BackTestInit.db`（此前它是唯一一处被写成绝对的 job 目录内路径）。
+
 **这条约束在渲染器里是结构性的**（P3，2026-09-25）：`render_engine_config()` 的形参
-只有运行级字段与两个**读**路径（`market_data_path` / `seed_database_path`），
-写路径在函数体内是常量 `./BackTest.db` 与 `./Dump`。调用点**没有入口**能传入绝对写
-路径，故"隔离静默失效"从"靠测试发现"变成"写不出来"。判据落在
+只有运行级字段与**唯一一个** job 目录之外的**读**路径（`market_data_path`），
+写路径与 `DbInitHost` 在函数体内是常量 `./BackTest.db` / `./Dump` /
+`./BackTestInit.db`。调用点**没有入口**能传入绝对路径，故"隔离静默失效"从"靠测试发现"
+变成"写不出来"。判据落在
 `tests/test_engine_config.py::test_the_renderer_takes_no_write_path_parameter`。
 
 **派生行为**：`DbHost` 恒写 `./BackTest.db`，引擎自己派生成
