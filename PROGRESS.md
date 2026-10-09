@@ -39,6 +39,67 @@ Python 策略**。
 
 ## ✅ 已完成
 
+### D.38 · 2026-10-09 （第三十八批） 引擎 Linux 包改用 `RUNPATH: $ORIGIN`：家规进 `CMakeCommon` + 《引擎 Linux 发布包要求》
+
+- **触发**：用户问「离正式发布和上云还差什么」，一路追到「云主机是 Linux，Windows 做服务不太行」
+  → 审 `.pyd` 硬编码（见 D.37）→ 追问引擎 `.so` 里那把 RUNPATH 怎么办 → 最后问到点子上：
+  「既然是 `$ORIGIN` 方案，不是应该这些项目都改成这种吗……从整体来说，还是要统一的吧？」
+- **实测（WSL，`QuantTrading.cpython-312-x86_64-linux-gnu.so`）**：Linux 产物落在
+  `bin/$<CONFIG>`（扩展模块）与 `lib/$<CONFIG>`（7 个 `.so` + 15 个 `.a`）两处
+  （`QuantTrading/CMakeLists.txt:59-61`）。引擎那个 `lib/$<CONFIG>` 里**只有引擎自己的
+  7 个 `.so`**，Spark / DbAdapters 的库不在其中。各 `.so` 现有的 RUNPATH 是 **CMake 默认的
+  build RPATH**，即**构建机绝对路径**（`/home/xunmeng/.vs/...`），换机即废。四家仓
+  （QuantTrading / Spark / DbAdapters / CMakeCommon）**此前没有任何 RPATH 策略**——源码侧
+  一处都没有，`grep` 命中全来自生成的 `CMakeCache.txt` 默认值。
+- **改动①（引擎同族仓）**：`../CMakeCommon/CMakeCommon.cmake` 顶部加家规
+  `set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)`（需 CMake ≥ 3.14，三家现状 3.20 / 3.25）。三家产品仓
+  都在各自 `CMakeLists.txt` **第 2 行** include 它，故此开关对**全部 target** 一体生效——
+  这正是「统一」的落点：**一处改，三家下次构建全带**。**不需要重新打 tag**：`RUNPATH` 是
+  链接期写进 ELF 的字段，随各自**下一次构建**生效（是重链接而非重编译，`.o` 复用）。
+- **改动②（引擎仓）**：新增 `../QuantTrading/docs/engine-linux-release-package.md`
+  《引擎 Linux 发布包要求》——平台对上游引擎包的**验收契约**：扁平单目录 + 12 个文件、
+  **每个 `.so` 必自带 `RUNPATH: $ORIGIN`**（`RUNPATH` 不传递，故必须逐个设）、`bin/`+`lib/`
+  合一的一行改法、`engine-version.txt` 在 Linux 侧缺失的排查、以及「`ldd ./*.so` + 已知
+  dlopen 名单」的四条自检。
+- **三条硬结论**（**2026-10-09 当场订正过**：初稿据 `NEEDED` 表**误推**「Spark / DbAdapters
+  静态链入」，用户指出「我编的都是动态库」后重测，那条被推翻——记此以防复犯）：
+  ① **Spark / DbAdapters 是动态库，且正是引擎的运行时闭包**——`libBackTest.so` 直接
+  `NEEDED` 了 `libAsyncDbWriter` / `libDuckdbWrapper` / `libSerialization` / `libNetwork` /
+  `libCore` 五个；引擎 `lib/Release` 里**根本没有**这些 `.so`，它们靠**绝对 `RUNPATH`** 指到
+  `~/.vs/Libs/{Spark,DbAdapters}/x64-linux/lib` 加载。**带绝对 RUNPATH 的全是引擎自己的产物**
+  （扩展模块 + 7 个 `.so`），故本次 Release 只需重建引擎。
+  ② **「无需重打 tag」仍成立，但理由不同**：Spark / DbAdapters 的 ship 库要么**无**
+  `RUNPATH`，要么已自带正确的 `$ORIGIN`（`libDuckdbWrapper.so` 找 `libduckdb.so`）；其唯一的
+  非系统依赖 `libCore.so` 又恰好是**扩展模块的直接 `NEEDED`**、必先映射。这是**加载顺序的
+  巧合**，统一 `$ORIGIN` 后即消除。
+  ③ **`libSqliteWrapper.so` 与 6 个 API 中间层 `.so` 是 dyld 盲区**——按名 `dlopen`，
+  `ldd` **看不见**；清单须「`ldd` 结果 + 手工补的 dlopen 名单」两者合并。
+- **提交状态**：本批 3 个文件（`../CMakeCommon/CMakeCommon.cmake` +
+  `../QuantTrading/docs/engine-linux-release-package.md` + 本文件）。**未提交**（按惯例由用户执行）。
+  **2026-10-09 追记**：文档初稿误放在本仓 `docs/`（未提交），用户指出「我以为是放到
+  QuantTrading 里面去呢」后**迁到引擎仓**——`QuantTrading/docs/` 里已有
+  `backtest-run-contract.md`，跨仓契约本就住那儿。
+
+### D.37 · 2026-10-09 （第三十七批） 引擎探针改按解释器后缀表认扩展模块：迁 Linux 的前置
+
+> **本条为补记**：改动由 `17012ca` 落地（提交信息里写明「PROGRESS.md 的 D.37 条目待补」），
+> 2026-10-09 本次会话据提交原文补写。
+
+- **触发**：云主机定为 **Linux** 后回头审「有没有硬编码 `.pyd`」，`engine_probe` 是第一处：
+  它把后缀写死成 `.pyd`、并要求文件名里含 `cpXXX`，在 Linux 上**永远**找不到
+  `QuantTrading.cpython-314-x86_64-linux-gnu.so`——`.pyd` 那关就过不去，`cpython-314` 也不含
+  `cp314` 子串。
+- **改法**：后缀表改由**解释器**给出（`importlib.machinery.EXTENSION_SUFFIXES`），逐个试
+  「模块名 + 后缀」，取首个存在者。那份表就是 import 机制自己用的，判据因此与它**同源**，
+  跨平台不必分档。刻意**不**用 `endswith`：`QuantTrading.cp39-win_amd64.pyd` 同样以 `.pyd`
+  结尾，用后缀匹配会把它当成合法绑定——而这正是 import 机制拒收它、也是 `test_health` 三条
+  反向用例要钉住的。`PYTHON_BINDING_FILENAME_SUFFIX` 随之退役（全仓无引用点）。
+- **夹具一并改**：测试夹具里的 `BINDING_FILENAME` 改为按平台派生，否则两个测试文件被绑死在
+  Windows 上，换到 Linux 跑时红的理由是「夹具自己造了一份当前解释器永不认识的假引擎」。
+- **验收**：Windows 上 `test_engine_probe` + `test_health` **31 全过**，后端全量 **744 全过**；
+  WSL 里用真 Python 3.14.4 单独加载本模块跑真引擎目录，binding 命中。
+- **提交状态**：**已提交**（`17012ca`）。
+
 ### D.36 · 2026-10-08 （第三十六批） 422 回执走 `jsonable_encoder`：修掉异常对象导致的 500
 
 > **本批原编号 D.35**：2026-10-08 两台电脑各做了一批，**各自认领了同一个批次号 D.35**（同一天、
@@ -88,7 +149,7 @@ Python 策略**。
   **2026-10-09 合流补记**：并入另一台那批的 D.35 全条后为 **62.9 KB**（含本 D.36 全条），
   缺口从 7.7 变为 12.9 KB；滚动的取舍不变，仍待用户定夺。
 - **提交状态**：本批 5 个文件（`app/main.py` + 该用例 + 本文件 + `PROGRESS-archive.md` +
-  `PROGRESS-index.md`）。**未提交**（按惯例由用户执行）。
+  `PROGRESS-index.md`）。**已提交**（`1606b97`）。
 
 ### D.35 · 2026-10-08 （第三十五批） `DbInitHost` 改常量相对路径 + 策略脚本删「`__file__` 反推仓根」
 
@@ -130,7 +191,7 @@ Python 策略**。
 - **遗留**：真引擎验收留下的 `backend/_acc_tmp_relative_dbinit/`（未跟踪，且不在 `.gitignore`
   覆盖的 `_acc_tmp/` 之内）**未删**——Harness §1 禁止 AI 递归删除仓外/未跟踪对象，待用户处置
   （删掉，或把 `.gitignore` 的 `backend/_acc_tmp/` 放宽成 `backend/_acc_tmp*/`）。
-- **提交状态**：**未提交**（按惯例由用户执行）。
+- **提交状态**：**已提交**（`4ed9dec`）。
 
 ### D.34 · 2026-10-07 （第三十四批） 手续费组随轮冻结：提交页选组 + 删组两道闸
 
@@ -471,6 +532,26 @@ Python 策略**。
 
 ## ❓ 待讨论 / 待决策
 
+- **云主机定为 Linux，牵动一串旧前提**（2026-10-09 用户拍板：「云主机是 linux，windows 做服务
+  不太行」）。本条**不改写**上面诸条的历史结论，只标出哪些前提作废、哪些要跟着改：
+  - 下面「**系统级隔离的具体实现未定**」那条的「**Windows 下**」前提作废，须按 Linux 重议
+    （低权账号 / 容器 / cgroup 诸路）。
+  - [`docs/platform-plan.md`](docs/platform-plan.md) §5.1、§12.1 断言「**Linux 不可能**」，
+    与今日定案直接冲突，**待订正**（未改，留待与 §5.1 的部署方案一并重写）。
+  - **引擎 Linux 发布包要求已落地**（见 D.38 与
+    `../QuantTrading/docs/engine-linux-release-package.md`）：扁平单目录 +
+    `RUNPATH: $ORIGIN` 家规（已进 `../CMakeCommon`）。**待引擎侧落实**：把 `bin/` 与 `lib/` 输出
+    合一的那个一行改动、以及 `engine-version.txt` 在 Linux 侧的产出、以及确认 §2.1 那 6 个
+    API 中间层 `.so` 是否随包发运。**要不要重发 Spark / DbAdapters 已定：不用**（它们是动态库
+    但无绝对 RUNPATH，理由见 D.38 —— 别记成「静态链入」）。
+  - **平台侧尚有两处 Linux 残留待改**：① `engine_probe.ENGINE_RUNTIME_FILENAMES` 写死三个
+    `.dll`（Linux 上是 `.so`，须按平台分档）；② `strategy_store.py:97` 的版本占用依赖 Windows
+    `rename` 语义——POSIX `rename(2)` 会**静默覆盖空目录**，须改成显式占位（既有 docstring
+    已预警）。
+  - **Python 3.14 统一**：用户 2026-10-09 表示要把两台机统一升到 3.14。**现状归属**：本机
+    3.14/`cp314`，另一台 3.11/`cp311`（详见备注「环境锁定」）。引擎 `CMakePresets.json` 的
+    `linux-base` 仍写 `QUANTTRADING_PYTHON_VERSION: "3.12"`，须一并对齐；**云主机那台的
+    Python 要与包内扩展模块的 ABI 对上**（同下面「clean 的引擎发布包」那条的第 ③ 点）。
 - **Tick 模式的三档撮合语义未定**（2026-09-25，D.06 引入，半关闭；
   **表单侧已定部分见归档 `Q.06`**）：引擎侧 tick 撮合有 `OrderBook:0` /
   `LastPrice:1` / `OppositePrice:2` 三档，`SimExchange.cpp` 按"是不是 Bar"
