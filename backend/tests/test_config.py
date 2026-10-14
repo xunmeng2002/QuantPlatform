@@ -12,6 +12,7 @@ import pytest
 
 from app.config import (
     DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES,
+    DEFAULT_FRONTEND_DIST_ROOT,
     DEFAULT_HTTP_PORT,
     DEFAULT_LOGIN_THROTTLE_LOCK_MINUTES,
     DEFAULT_LOGIN_THROTTLE_MAXIMUM_FAILURES,
@@ -298,6 +299,7 @@ def test_from_environment_applies_documented_defaults(monkeypatch: pytest.Monkey
         "QUANT_HTTP_PORT",
         "QUANT_MARKET_DATA_ROOT",
         "QUANT_SESSION_FILE_PATH",
+        "QUANT_FRONTEND_DIST_ROOT",
         "QUANT_MAXIMUM_OUTPUT_TAIL_BYTES",
         "QUANT_RUN_RETENTION_ENABLED",
         "QUANT_RETAINED_RUNS_PER_USER",
@@ -321,6 +323,7 @@ def test_from_environment_applies_documented_defaults(monkeypatch: pytest.Monkey
     assert settings.login_throttle_maximum_failures == DEFAULT_LOGIN_THROTTLE_MAXIMUM_FAILURES
     assert settings.login_throttle_lock_minutes == DEFAULT_LOGIN_THROTTLE_LOCK_MINUTES
     assert settings.trusted_proxy_addresses == ()
+    assert settings.frontend_dist_root == DEFAULT_FRONTEND_DIST_ROOT
 
 
 def test_from_environment_reads_the_login_throttle_settings(monkeypatch: pytest.MonkeyPatch) -> None:

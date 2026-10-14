@@ -9,6 +9,7 @@
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import PurePath
 from typing import Any
 
 import uvicorn
@@ -16,7 +17,10 @@ from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import Scope
 
 from .auth.login_throttle import LoginAttemptThrottle
 from .bootstrap import ensure_initial_admin
@@ -306,6 +310,68 @@ def _register_routers(application: FastAPI) -> None:
     )
 
 
+FRONTEND_INDEX_FILENAME = "index.html"
+API_PATH_SEGMENT = "api"
+
+
+class SinglePageApplicationFiles(StaticFiles):
+    """认不出的**无扩展名**路径一律交回 `index.html`, 其余照常 404.
+
+    前端的路由是 `createWebHistory` (HTML5 history): `/runs/<id>` 这类地址在盘上没有对应文件,
+    直开地址栏或按 F5 时静态挂载只会给 404 —— 深链接与刷新于是全打不开. 回退只对无扩展名的路径
+    生效: 认不出 `/assets/index-3f2a.js` 说明那份构建产物真的不在, 此时回一页 HTML 会把
+    "静态资源 404" 变成浏览器里一句莫名其妙的 MIME 报错, 排查方向整个跑偏.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as error:
+            if error.status_code == status.HTTP_404_NOT_FOUND and _is_frontend_route(path):
+                return await super().get_response(FRONTEND_INDEX_FILENAME, scope)
+
+            raise
+
+
+def _is_frontend_route(path: str) -> bool:
+    """该路径是不是一条"该由前端路由接"的地址.
+
+    `/api` 那一段单独排除: 路由先匹配, 落到这里的 `/api/...` 全是**没有这个端点**, 它该回
+    JSON 404 而不是一页 200 的前端——否则打错的 API 地址会让调用方拿着一段 HTML 当数据解析.
+
+    按 `PurePath` 的**部件**判、不按 `/` 切: 交过来的路径已被 `StaticFiles.get_path` 按平台
+    归一化过, Windows 上分隔符是 `\\`, 用 `split("/")` 取不到 `api` 那一段, 于是 Windows 上
+    打错的 API 地址会拿到一页 200 的前端, 而 Linux 上一切正常——两边行为不同, 且错的那边不报错.
+
+    扩展名同理按平台判 (`PurePosixPath` 认不出 `assets\\index-3f2a.js` 的后缀, 一条只错在
+    Windows 上的路径). `path` 是挂载点**之内**的相对路径, 根路径归一化后可能没有部件.
+    """
+
+    requested_path = PurePath(path)
+    first_segment = requested_path.parts[0] if requested_path.parts else ""
+
+    return first_segment != API_PATH_SEGMENT and not requested_path.suffix
+
+
+def _register_frontend_static_assets(application: FastAPI, settings: PlatformSettings) -> None:
+    """构建产物在位时由本进程同源托管它; 不在位就只提供 API.
+
+    **必须在 `_register_routers` 之后调用**: 路由按注册次序匹配, 挂在 `/` 上的这一条会吞下所有
+    路径, 排在前面的话 `/api/...` 一个都到不了路由.
+    """
+
+    dist_root = settings.frontend_dist_root
+
+    if not (dist_root / FRONTEND_INDEX_FILENAME).is_file():
+        logger.info("前端构建产物不在 %s, 本次只提供 API", dist_root)
+        return
+
+    application.mount(
+        "/", SinglePageApplicationFiles(directory=dist_root, html=True), name="frontend"
+    )
+    logger.info("前端构建产物在 %s, 由本进程同源托管", dist_root)
+
+
 def create_application(settings: PlatformSettings | None = None) -> FastAPI:
     """构造应用. 未传配置时读环境文件再按环境变量解析."""
 
@@ -335,6 +401,7 @@ def create_application(settings: PlatformSettings | None = None) -> FastAPI:
     _register_exception_handlers(application)
     _register_request_size_guard(application)
     _register_routers(application)
+    _register_frontend_static_assets(application, resolved_settings)
 
     return application
 

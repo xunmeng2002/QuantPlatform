@@ -50,6 +50,12 @@ SEED_DATABASE_FILENAME = "BackTestInit.db"
 # 行情根落在**仓内**: 它是平台自己的数据产物 (由 QuoteHub 组件按需下载落地), 与 runs/ users/
 # 同类, 故也由仓根 .gitignore 覆盖.
 DEFAULT_MARKET_DATA_ROOT = PLATFORM_ROOT / "market-data"
+
+# 前端构建产物 (Vite `npm run build` 的输出). 它是**发布包的一部分**, 故默认也落在仓内.
+# 它在位时后端同源托管前端, 生产形态因此是一个进程、一个端口: 不需要 CORS, 也不需要反向代理.
+# 开发期没有它 (前端跑在 5173), 挂载点自动跳过, 两条形态共用一份装配代码.
+DEFAULT_FRONTEND_DIST_ROOT = PLATFORM_ROOT / "frontend" / "dist"
+
 DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES = 8 * 1024
 
 # 行情组件 (QuoteHub). 平台**读它的数据库、跑它的命令行**, 但不 import 它、也不写它的任何
@@ -287,6 +293,7 @@ class PlatformSettings:
     http_port: int
     market_data_root: Path
     session_file_path: Path
+    frontend_dist_root: Path = DEFAULT_FRONTEND_DIST_ROOT
     maximum_output_tail_bytes: int = DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES
     run_retention_enabled: bool = DEFAULT_RUN_RETENTION_ENABLED
     retained_runs_per_user: int = DEFAULT_RETAINED_RUNS_PER_USER
@@ -394,6 +401,9 @@ class PlatformSettings:
             http_port=read_integer_environment("QUANT_HTTP_PORT", DEFAULT_HTTP_PORT),
             market_data_root=Path(
                 os.getenv("QUANT_MARKET_DATA_ROOT", DEFAULT_MARKET_DATA_ROOT)
+            ),
+            frontend_dist_root=Path(
+                os.getenv("QUANT_FRONTEND_DIST_ROOT", DEFAULT_FRONTEND_DIST_ROOT)
             ),
             session_file_path=Path(
                 os.getenv("QUANT_SESSION_FILE_PATH", engine_root / SESSION_FILENAME)

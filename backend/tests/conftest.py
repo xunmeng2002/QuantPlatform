@@ -92,6 +92,10 @@ def platform_settings(tmp_path: Path, engine_inputs: tuple[Path, Path], quote_hu
         http_port=TEST_HTTP_PORT,
         market_data_root=market_data_root,
         session_file_path=session_file_path,
+        # 前端构建产物在不在, 决定应用是否同源托管前端. 钉到一个**不存在**的目录: 否则
+        # "跑测试的这台机器恰好在 frontend/ 下 build 过" 会让整套用例的行为随机器变, 而那种
+        # 偏差只会在别人机器上以路由被吞掉的面目出现.
+        frontend_dist_root=tmp_path / "frontend-dist",
         quote_hub_root=quote_hub_root,
     )
 
