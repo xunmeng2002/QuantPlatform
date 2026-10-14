@@ -39,6 +39,41 @@ Python 策略**。
 
 ## ✅ 已完成
 
+### D.40 · 2026-10-14 （第四十批） 编码规范基线自查：Python 3.14 收口 + 前端 kebab-case 与版本钉死
+
+> **本批无功能改动**：用户更新了全局 `~/.claude/rules/` 下的三份规范，要求本仓按新规范自查。
+> 下面只记「按规范动了什么」与「查了但**有意没动**」两类，后者按 Harness §1「禁止擅自重构」待用户点名。
+
+- **Python 侧四笔**（`641d84f` / `5d72b8a` / `bddeb98` / `b11759a`，均**纯格式与类型**改动）：
+  - **3.14 语法基线**（`641d84f`，92 文件 +24/−228）：删掉**全部** `from __future__ import annotations`
+    （3.14 起 PEP 649 延迟注解是默认行为）；`typing.List/Dict/Optional/Tuple/Set/Type` 换内置泛型与
+    `X | None`；一处类型别名改 `type` 语句（PEP 695）。
+  - **`Any` 收窄 + `@override` + 解释器基线**（`5d72b8a`，5 文件）：新增 `backend/pyproject.toml`，
+    **只声明 `requires-python = ">=3.14"`**（有意不写 `build-system`、不搬 `pytest.ini`，本仓非可安装包）；
+    两处 `Any` 收窄；两处补 `@override`（PEP 698）。
+  - **签名换行 + 类内 0 空行**（`bddeb98`，74 文件 +921/−2887）：签名按「整行（含缩进）≤150 单行、超出
+    则横向填至 ≤120、**严禁**每参数一行」重排；类内方法之间空行收成 **0**。**类定义之间 / 模块级函数
+    之间保留 PEP 8 的 2 空行**（用户拍板，那两行不动）。
+  - **测试补注解 + 成员次序 + import 次序**（`b11759a`，8 文件）：补全 27 个函数的注解（`dict[str, Any]`
+    而非 `object` —— `json.load` 返回 `Any`，收窄会打断下游每一处下标与 `.get`，那是把类型噪声从一处
+    搬成十处）；类内次序统一为 `__init__` → 特殊方法 → 公有方法 → `@property` → 私有方法；
+    `app/main.py` 的 `import uvicorn` 与模块级 logger 各自归位。**模块级「常量在类之后」那几处是
+    依赖倒逼**（常量要引用类），不是违规，未动。
+- **前端侧一笔（`aaacdbe`）**：两个 composable 文件名改 kebab-case（函数名仍按 §1 保持 `use` +
+  PascalCase）、`package.json` 补 `engines.node` 与新增 `.nvmrc`、三个组件改 `defineModel()`。
+- **验收**：后端 **747 全过**；前端 `npm run type-check` 通过、`npm test` **30 文件 / 238 项全过**。
+  Python 侧另机扫「星号导入 / 函数内导入 / 可变默认参 / 生产 `assert` / `global` / 裸 `except` /
+  `eval`·`pickle`·`shell=True` / 未 await 的 `create_task` / 手写 `super(Class, self)`」诸项无命中；
+  最长行恰为 150。
+- **查了但有意没动的前端六处**（Harness §1 未授权，**不擅自重构**）：① `@/` 路径别名未配 —— §2 要求
+  跨目录用别名、禁 `../../`，而本仓 204 处相对导入**全是单层 `../x`**，故那块禁令本身未被违反，
+  配别名属一次性大改（`vite.config.ts` + `tsconfig.app.json` + 62 文件）；② `src/components/AppLayout.vue`
+  不在 `src/layouts/`；③ 未分 `components/common` 与 `business/`；④ **20 个模板事件处理函数**不是
+  `handle` + 动宾短语（§1，散在 10 个文件）；⑤ `src/style.css` 不在 `src/styles/`；⑥ `main.ts` 两处
+  `console.error`（§5 禁 `console.*`，但这两处正是 §9 要求的全局兜底，本仓无日志通道，**有意保留**）。
+  **`strict: true` 已由 `@vue/tsconfig` 基座开启**，非缺失。
+- **已提交、未推送**：五笔都在 `master` 上，推送按既定分工由用户做。
+
 ### D.39 · 2026-10-14 （第三十九批） 同步上游两处契约：引擎表名一律复数 + QuoteHub 入口改名与建库前置
 
 - **触发**：用户「QuantTrading 做了较大的调整、尤其是数据库表名的变化，配置变化。另外就是
@@ -194,45 +229,19 @@ Python 策略**。
 
 ### D.35 · 2026-10-08 （第三十五批） `DbInitHost` 改常量相对路径 + 策略脚本删「`__file__` 反推仓根」
 
-- **触发**：用户看了一个真实作业目录（`runs/3d79c4b1…`）后问「里面没有 `.pyd`，而脚本靠
-  `__file__` 反推 `bin/Release` 找它，不是该 import 失败吗」。查证结论两条：
-  ① **平台侧早已解决**——`runner.py` 的 `_build_child_environment()` 把引擎根**前置**进子进程的
-  `PYTHONPATH`，`import QuantTrading` 由它解析（`job-workspace.md` §3.2 早已写死这条口径）；
-  故 `QuantTrading/PROGRESS.md` 里挂着「未开工·硬钉子」的那条**是记录落后于事实**，已订正。
-  ② 真要处置的是**脚本里那两行死代码**：作业目录里 `__file__` 指向作业目录，往上三层算出
-  `D:\Gitee\bin\Release`（不存在，眼下无害），但 `sys.path[0]` 优先级**高于** `PYTHONPATH`，
-  那条路径一旦存在就会**静默盖掉平台指定的引擎根**——跑的是另一版 `.pyd`，症状是"数字不对、
-  版本对不上"而无任何报错。
-- **改动①（引擎仓）**：`test/PythonStrategyGrid/grid_strategy.py` 删掉 `REPO_ROOT` +
-  `sys.path.insert` 两行（`os` / `sys` 两个 import **保留**，别处仍用 `sys.float_info.max`、
-  `sys.argv[0]`、`os.remove`、`sys.exit`），docstring 改为「本地调试在 `bin/<CONFIG>` 下跑
-  （脚本与配置随构建拷过去）／平台上由平台注入 `PYTHONPATH`／不得再按 `__file__` 反推」。
-- **改动②（本仓）**：`render_engine_config()` 的 `DbInitHost` 由「提交时算出的绝对路径」改为
-  常量 `RELATIVE_SEED_DATABASE_HOST = "./BackTestInit.db"`，并**删掉 `seed_database_path` 形参**
-  （这是刻意的：删掉"能传入绝对路径"这个入口，与 `DbHost` / `DumpPath` 同形，`run_submission.py`
-  侧随之少算一次路径）。
-- **为什么相对才是对的**：种子库由调度器按轮生成后**搬进作业目录**（`workspace.py` 的
-  `os.replace`），相对值恰好指对；而绝对路径把「文件放哪」这件事从调度侧复制一份到**提交侧**，
-  两处各算一次迟早分叉——症状是引擎读不到种子库而整轮照跑完（费用三项恒为 0、合约乘数全部退化），
-  `result.json` 仍报成功。**本次其实是把实现对齐回引擎契约**：
-  `QuantTrading/docs/backtest-run-contract.md` §1 本来就要求该键留 CWD，引擎自带模板
-  `bin/Release/BackTest.json` 也写 `./BackTestInit.db`，此前平台写绝对路径反而是违规形态。
-- **验收**：非真引擎用例 `pytest -q` → **740 全过**；真引擎验收 → **5 全过**，且 stdout 实证引擎
-  按相对路径读到了种子库：`BasicData Loaded, DbInitHost:./BackTestInit.db, ProductCount:2,
-  BaseCommissionCount:2`。引擎仓 `cd bin/Release && python -c "import grid_strategy"` 通过。
-- **顺带修掉一个既有红（与本次改动无关）**：真引擎验收的
-  `test_two_real_runs_at_once_keep_their_databases_apart` 自 **2026-10-07**（种子库改按轮生成
-  并搬进作业目录）起**必红**——`engine_database_filenames()` 断言作业目录里只该有一个 `.db`，
-  而种子库就躺在那份 `*.db` 里，那句 docstring 是种子库还在引擎根下时写的。该套件手动跑
-  （`-m real_engine`）故一直没人发现。已用 `git stash` 在**未改动树**上单独复现确认归属，再按名
-  排除种子库并订正 docstring。
-- **代码审查**：`code-reviewer` 报 **0 严重 / 1 高 / 2 中 / 4 可选**；高与两条中全是
-  **文档与记忆层未同步**（本文件备注区「读路径允许绝对」、`job-workspace.md` §2 的「唯一一个」、
-  引擎仓 `PROGRESS.md` 的「硬钉子未开工」），已一并改掉；可选里 docstring 与循环变量命名两处已改。
-- **遗留**：真引擎验收留下的 `backend/_acc_tmp_relative_dbinit/`（未跟踪，且不在 `.gitignore`
-  覆盖的 `_acc_tmp/` 之内）**未删**——Harness §1 禁止 AI 递归删除仓外/未跟踪对象，待用户处置
-  （删掉，或把 `.gitignore` 的 `backend/_acc_tmp/` 放宽成 `backend/_acc_tmp*/`）。
-- **提交状态**：**已提交**（`4ed9dec`）。
+> **全条见归档 D.35**。一段话：作业目录 `BackTest.json` 的 `DbInitHost` 由「提交时算出的**绝对路径**」
+> 改成常量 `./BackTestInit.db` 并**删掉 `seed_database_path` 形参** —— 种子库由调度器按轮生成后**搬进**
+> 作业目录（`workspace.py` 的 `os.replace`），相对值恰好指对；绝对路径把「文件放哪」这件事从调度侧复制
+> 一份到**提交侧**，两处各算一次迟早分叉，症状是引擎读不到种子库而**整轮照跑完**、`result.json` 仍报成功。
+> 本次其实是把实现**对齐回引擎契约**（`backtest-run-contract.md` §1 本来就要求该键留 CWD）。引擎仓同步
+> 删掉 `grid_strategy.py` 里靠 `__file__` 反推 `bin/Release` 的两行 —— `sys.path[0]` 优先级**高于**
+> `PYTHONPATH`，那条路径一旦存在就会**静默盖掉平台指定的引擎根**。后端 740 全过 + 真引擎 5 全过。
+> **已提交**（`4ed9dec`）。
+
+**仍未决（本条的未决部分，原文在归档 D.35 末）**：真引擎验收留下的
+`backend/_acc_tmp_relative_dbinit/`（未跟踪，且不在 `.gitignore` 覆盖的 `_acc_tmp/` 之内）**未删**
+—— Harness §1 禁止 AI 递归删除仓外 / 未跟踪对象，待用户处置（删掉，或把 `.gitignore` 的
+`backend/_acc_tmp/` 放宽成 `backend/_acc_tmp*/`）。
 
 ### D.34 · 2026-10-07 （第三十四批） 手续费组随轮冻结：提交页选组 + 删组两道闸
 
@@ -563,7 +572,10 @@ Python 策略**。
 ## 备注
 
 - **环境锁定**：Windows + 后端与引擎同机；前端 **Node 24.16.0 + npm 11.13.0**（原记 24.15，
-  归档 D.07 实测订正）。**"上云"等于一台 Windows 云主机，横向扩展无余地。**
+  归档 D.07 实测订正）。**2026-10-14 补记**：本机实测 Node `24.15.0` + npm `12.2.0`，与上行
+  **不一致**（两台机？还是 npm 记错？**未核实，故上行的数一字未改**）；钉版本的文件取本机实测值，
+  即 `frontend/package.json` 的 `engines.node = ">=24.15.0"` 与 `frontend/.nvmrc` 的 `24.15.0`。
+  **"上云"等于一台 Windows 云主机，横向扩展无余地。**
   **Python 版本（2026-10-14 收口）**：本机 `python --version` = **3.14.7**
   （`sys.implementation.cache_tag` = `cpython-314`），引擎 `CMakePresets.json` 的 windows-base
   与 linux-base 两档 preset 皆 `QUANTTRADING_PYTHON_VERSION: "3.14"`（引擎侧 `09bf7f6` 把
@@ -591,6 +603,14 @@ Python 策略**。
   ——`D:/Md` 是 2025-04/05 的旧档（`Preces` 只有 `1m`/`1d`/`1h`, 而平台渲染的 `BarPreces` 是常量
   `5m`）, `D:/MdBaoStock` 正是 D.24 当初**拷进仓内**的那份（14 文件 / `Preces=5m`）, 想省下载就
   从它拷, 别改配置指过去（那会偏离 D.24「行情根进仓」的决定）。
+- **`python-style.md` §10「禁止在函数体内写注释来解释逻辑」在本仓有意不适用**（2026-10-14 用户裁定）：
+  该条与 Harness §4「workaround / 外部库的坑 / 非常规性能技巧可加注释」相冲，**以 Harness 为准**，
+  用户选择**保留现状** —— 既有的函数体内说明性注释与那批「为什么」型 docstring 一概不动，后续照旧写。
+  **不要再拿 §10 来删它们**，也不必重新议这一条。
+
+- **`PROGRESS*.md` 三份台账是 CRLF 行尾**（2026-10-14 记）：全仓 229 个跟踪文件里只有 5 个不是 LF
+  （这三份 + `.gitignore` + `views/RunSubmitView.spec.ts`），而 `.editorconfig` 写的是 `end_of_line = lf`。
+  改这三份时若不按原样写回 CRLF，diff 会从几十行涨到四千行。**要么照原样保留，要么单独开一笔统一归 LF。**
 - **本地开发要两个终端**（P4 起，见 `platform-plan.md` §8.1）：一个跑
   `cd backend && python -m app.main`，一个跑 `cd frontend && npm run dev`。
   前端**没有 CORS 中间件**，靠 Vite 的 `/api` 代理（**不重写路径**）打到

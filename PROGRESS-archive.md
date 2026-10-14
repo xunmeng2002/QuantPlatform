@@ -1981,6 +1981,52 @@
   合约、哪个方向（**不是静默降级**）。
 - **提交状态**：**已提交**（`f32ac48`，与 D.31–D.33 同一棵树一并入库）。
 
+## D.35 · 2026-10-08 （第三十五批） `DbInitHost` 改常量相对路径 + 策略脚本删「`__file__` 反推仓根」
+
+> 归档于 2026-10-14（D.40 拆分时 ✅ 区超出 5 批；**短版留在 `PROGRESS.md`**，含那件待用户处置的未跟踪目录）。
+> 下列原文取 `4ed9dec` 之后的主文件版本（其后一字未改）。
+
+
+- **触发**：用户看了一个真实作业目录（`runs/3d79c4b1…`）后问「里面没有 `.pyd`，而脚本靠
+  `__file__` 反推 `bin/Release` 找它，不是该 import 失败吗」。查证结论两条：
+  ① **平台侧早已解决**——`runner.py` 的 `_build_child_environment()` 把引擎根**前置**进子进程的
+  `PYTHONPATH`，`import QuantTrading` 由它解析（`job-workspace.md` §3.2 早已写死这条口径）；
+  故 `QuantTrading/PROGRESS.md` 里挂着「未开工·硬钉子」的那条**是记录落后于事实**，已订正。
+  ② 真要处置的是**脚本里那两行死代码**：作业目录里 `__file__` 指向作业目录，往上三层算出
+  `D:\Gitee\bin\Release`（不存在，眼下无害），但 `sys.path[0]` 优先级**高于** `PYTHONPATH`，
+  那条路径一旦存在就会**静默盖掉平台指定的引擎根**——跑的是另一版 `.pyd`，症状是"数字不对、
+  版本对不上"而无任何报错。
+- **改动①（引擎仓）**：`test/PythonStrategyGrid/grid_strategy.py` 删掉 `REPO_ROOT` +
+  `sys.path.insert` 两行（`os` / `sys` 两个 import **保留**，别处仍用 `sys.float_info.max`、
+  `sys.argv[0]`、`os.remove`、`sys.exit`），docstring 改为「本地调试在 `bin/<CONFIG>` 下跑
+  （脚本与配置随构建拷过去）／平台上由平台注入 `PYTHONPATH`／不得再按 `__file__` 反推」。
+- **改动②（本仓）**：`render_engine_config()` 的 `DbInitHost` 由「提交时算出的绝对路径」改为
+  常量 `RELATIVE_SEED_DATABASE_HOST = "./BackTestInit.db"`，并**删掉 `seed_database_path` 形参**
+  （这是刻意的：删掉"能传入绝对路径"这个入口，与 `DbHost` / `DumpPath` 同形，`run_submission.py`
+  侧随之少算一次路径）。
+- **为什么相对才是对的**：种子库由调度器按轮生成后**搬进作业目录**（`workspace.py` 的
+  `os.replace`），相对值恰好指对；而绝对路径把「文件放哪」这件事从调度侧复制一份到**提交侧**，
+  两处各算一次迟早分叉——症状是引擎读不到种子库而整轮照跑完（费用三项恒为 0、合约乘数全部退化），
+  `result.json` 仍报成功。**本次其实是把实现对齐回引擎契约**：
+  `QuantTrading/docs/backtest-run-contract.md` §1 本来就要求该键留 CWD，引擎自带模板
+  `bin/Release/BackTest.json` 也写 `./BackTestInit.db`，此前平台写绝对路径反而是违规形态。
+- **验收**：非真引擎用例 `pytest -q` → **740 全过**；真引擎验收 → **5 全过**，且 stdout 实证引擎
+  按相对路径读到了种子库：`BasicData Loaded, DbInitHost:./BackTestInit.db, ProductCount:2,
+  BaseCommissionCount:2`。引擎仓 `cd bin/Release && python -c "import grid_strategy"` 通过。
+- **顺带修掉一个既有红（与本次改动无关）**：真引擎验收的
+  `test_two_real_runs_at_once_keep_their_databases_apart` 自 **2026-10-07**（种子库改按轮生成
+  并搬进作业目录）起**必红**——`engine_database_filenames()` 断言作业目录里只该有一个 `.db`，
+  而种子库就躺在那份 `*.db` 里，那句 docstring 是种子库还在引擎根下时写的。该套件手动跑
+  （`-m real_engine`）故一直没人发现。已用 `git stash` 在**未改动树**上单独复现确认归属，再按名
+  排除种子库并订正 docstring。
+- **代码审查**：`code-reviewer` 报 **0 严重 / 1 高 / 2 中 / 4 可选**；高与两条中全是
+  **文档与记忆层未同步**（本文件备注区「读路径允许绝对」、`job-workspace.md` §2 的「唯一一个」、
+  引擎仓 `PROGRESS.md` 的「硬钉子未开工」），已一并改掉；可选里 docstring 与循环变量命名两处已改。
+- **遗留**：真引擎验收留下的 `backend/_acc_tmp_relative_dbinit/`（未跟踪，且不在 `.gitignore`
+  覆盖的 `_acc_tmp/` 之内）**未删**——Harness §1 禁止 AI 递归删除仓外/未跟踪对象，待用户处置
+  （删掉，或把 `.gitignore` 的 `backend/_acc_tmp/` 放宽成 `backend/_acc_tmp*/`）。
+- **提交状态**：**已提交**（`4ed9dec`）。
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型
