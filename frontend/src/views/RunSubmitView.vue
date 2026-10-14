@@ -47,11 +47,11 @@ import { createRunTemplate, fetchRunTemplates } from '@/api/run-templates';
 import { fetchLastSubmittedParameters, fetchStrategyDetail } from '@/api/strategies';
 import { SUBMITTABLE_MATCH_MODE } from '@/api/types';
 import type { CommissionGroupOption, LastSubmittedParameters, MarketDataContractList, MarketDataCoverage, MarketDataType, RunSubmitPayload, RunTemplate, StrategyDetail } from '@/api/types';
-import EmptyNotice from '@/components/EmptyNotice.vue';
-import ErrorBanner from '@/components/ErrorBanner.vue';
-import PageHeader from '@/components/PageHeader.vue';
-import ParameterForm from '@/components/ParameterForm.vue';
-import SurfaceCard from '@/components/SurfaceCard.vue';
+import EmptyNotice from '@/components/common/EmptyNotice.vue';
+import ErrorBanner from '@/components/common/ErrorBanner.vue';
+import PageHeader from '@/components/common/PageHeader.vue';
+import ParameterForm from '@/components/business/ParameterForm.vue';
+import SurfaceCard from '@/components/common/SurfaceCard.vue';
 import { describeApiFailure, showSuccessToast } from '@/composables/use-feedback';
 import { buildContractCode, buildContractOptions, SUBSCRIPTION_BAR_PERIODS } from '@/domain/market-data';
 import {

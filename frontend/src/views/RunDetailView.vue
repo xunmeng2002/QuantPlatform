@@ -32,15 +32,15 @@ import {
   fetchRunDetail,
 } from '@/api/runs';
 import type { JobArtifact, RunDetail } from '@/api/types';
-import ArtifactList from '@/components/ArtifactList.vue';
-import ContentSkeleton from '@/components/ContentSkeleton.vue';
-import EmptyNotice from '@/components/EmptyNotice.vue';
-import EquityChartPanel from '@/components/EquityChartPanel.vue';
-import ErrorBanner from '@/components/ErrorBanner.vue';
-import PageHeader from '@/components/PageHeader.vue';
-import ResultTablePanel from '@/components/ResultTablePanel.vue';
-import StatusBadge from '@/components/StatusBadge.vue';
-import SurfaceCard from '@/components/SurfaceCard.vue';
+import ArtifactList from '@/components/business/ArtifactList.vue';
+import ContentSkeleton from '@/components/common/ContentSkeleton.vue';
+import EmptyNotice from '@/components/common/EmptyNotice.vue';
+import EquityChartPanel from '@/components/business/EquityChartPanel.vue';
+import ErrorBanner from '@/components/common/ErrorBanner.vue';
+import PageHeader from '@/components/common/PageHeader.vue';
+import ResultTablePanel from '@/components/business/ResultTablePanel.vue';
+import StatusBadge from '@/components/common/StatusBadge.vue';
+import SurfaceCard from '@/components/common/SurfaceCard.vue';
 import {
   confirmAction,
   describeApiFailure,

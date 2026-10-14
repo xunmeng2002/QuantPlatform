@@ -18,7 +18,7 @@ import type {
   RunComparisonRowGroup,
 } from '@/domain/run-comparison';
 import { describeEngineVerdict, describeRunStatus } from '@/domain/run-status';
-import StatusBadge from './StatusBadge.vue';
+import StatusBadge from '@/components/common/StatusBadge.vue';
 
 defineProps<{
   columns: RunComparisonColumn[];

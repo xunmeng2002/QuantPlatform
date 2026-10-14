@@ -23,8 +23,8 @@ import type { StrategyVisibility } from '@/api/types';
 import { useConfigurationFileSource } from '@/composables/use-configuration-file-source';
 import { describeApiFailure } from '@/composables/use-feedback';
 import { describeStrategyVisibility } from '@/domain/labels';
-import ErrorBanner from './ErrorBanner.vue';
-import FilePicker from './FilePicker.vue';
+import ErrorBanner from '@/components/common/ErrorBanner.vue';
+import FilePicker from '@/components/common/FilePicker.vue';
 
 const emit = defineEmits<{
   created: [strategyId: string];

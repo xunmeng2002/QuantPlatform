@@ -25,14 +25,14 @@ import type {
   StrategyVersion,
   UserDirectoryEntry,
 } from '@/api/types';
-import ContentSkeleton from '@/components/ContentSkeleton.vue';
-import DirectoryPicker from '@/components/DirectoryPicker.vue';
-import EmptyNotice from '@/components/EmptyNotice.vue';
-import ErrorBanner from '@/components/ErrorBanner.vue';
-import PageHeader from '@/components/PageHeader.vue';
-import StatusBadge from '@/components/StatusBadge.vue';
-import StrategyVersionUploadForm from '@/components/StrategyVersionUploadForm.vue';
-import SurfaceCard from '@/components/SurfaceCard.vue';
+import ContentSkeleton from '@/components/common/ContentSkeleton.vue';
+import DirectoryPicker from '@/components/business/DirectoryPicker.vue';
+import EmptyNotice from '@/components/common/EmptyNotice.vue';
+import ErrorBanner from '@/components/common/ErrorBanner.vue';
+import PageHeader from '@/components/common/PageHeader.vue';
+import StatusBadge from '@/components/common/StatusBadge.vue';
+import StrategyVersionUploadForm from '@/components/business/StrategyVersionUploadForm.vue';
+import SurfaceCard from '@/components/common/SurfaceCard.vue';
 import {
   confirmAction,
   describeApiFailure,

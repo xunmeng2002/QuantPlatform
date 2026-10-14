@@ -69,12 +69,12 @@ import {
   describeRateScopeTarget,
   resolveRateScope,
 } from '@/domain/rate-scope';
-import ContentSkeleton from './ContentSkeleton.vue';
-import EmptyNotice from './EmptyNotice.vue';
-import ErrorBanner from './ErrorBanner.vue';
-import PaginationToolbar from './PaginationToolbar.vue';
-import StatusBadge from './StatusBadge.vue';
-import SurfaceCard from './SurfaceCard.vue';
+import ContentSkeleton from '@/components/common/ContentSkeleton.vue';
+import EmptyNotice from '@/components/common/EmptyNotice.vue';
+import ErrorBanner from '@/components/common/ErrorBanner.vue';
+import PaginationToolbar from '@/components/common/PaginationToolbar.vue';
+import StatusBadge from '@/components/common/StatusBadge.vue';
+import SurfaceCard from '@/components/common/SurfaceCard.vue';
 
 /**
  * 十项费率在本页的次序 = 后端 `BaseCommissionWriteRequest` 的字段序 = 引擎的列序.

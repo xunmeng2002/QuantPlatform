@@ -31,11 +31,11 @@ import { MAXIMUM_COMMISSION_GROUP_NAME_LENGTH } from '@/api/types';
 import type { CommissionGroup, CommissionGroupPayload } from '@/api/types';
 import { useReferenceTable } from '@/composables/use-reference-table';
 import { formatDateTime } from '@/domain/format';
-import ContentSkeleton from './ContentSkeleton.vue';
-import EmptyNotice from './EmptyNotice.vue';
-import ErrorBanner from './ErrorBanner.vue';
-import PaginationToolbar from './PaginationToolbar.vue';
-import SurfaceCard from './SurfaceCard.vue';
+import ContentSkeleton from '@/components/common/ContentSkeleton.vue';
+import EmptyNotice from '@/components/common/EmptyNotice.vue';
+import ErrorBanner from '@/components/common/ErrorBanner.vue';
+import PaginationToolbar from '@/components/common/PaginationToolbar.vue';
+import SurfaceCard from '@/components/common/SurfaceCard.vue';
 
 interface CommissionGroupForm {
   // 组号没有默认值: 它是个决定 (引擎按这个数字找组), 替用户填一个等于替他认了一个组.

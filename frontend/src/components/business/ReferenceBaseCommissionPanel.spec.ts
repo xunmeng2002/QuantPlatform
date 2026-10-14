@@ -27,7 +27,7 @@ import type {
   Product,
 } from '@/api/types';
 import ReferenceBaseCommissionPanel from './ReferenceBaseCommissionPanel.vue';
-import StatusBadge from './StatusBadge.vue';
+import StatusBadge from '@/components/common/StatusBadge.vue';
 
 const REFERENCE_DATA_PATH = '/api/reference-data';
 const BASE_COMMISSIONS_PATH = `${REFERENCE_DATA_PATH}/base-commissions`;

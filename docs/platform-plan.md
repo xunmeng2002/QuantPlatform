@@ -546,22 +546,29 @@ frontend/
 ├── vite.config.ts            # vue + tailwind 插件；/api 代理与 vitest 配置同文件
 ├── tsconfig.json / tsconfig.app.json / tsconfig.node.json
 └── src/
-    ├── main.ts  App.vue  style.css    # style.css 内是 Tailwind 的 @theme 令牌
+    ├── main.ts  App.vue               # 组装根与根组件
     ├── api/         client.ts（唯一出入口）/ types.ts（手写契约）/
-    │                auth.ts / strategies.ts / runs.ts / users.ts
+    │                auth.ts / strategies.ts / runs.ts / users.ts / market-data.ts /
+    │                reference-data.ts / run-templates.ts / pagination.ts
     ├── domain/      纯逻辑: strategy-configuration / run-form / run-status / format / labels /
-    │                download / equity（P5：权益序列与回撤，纯函数）
+    │                download / equity（P5：权益序列与回撤）/ run-metrics / run-comparison /
+    │                rate-scope / market-data
     ├── stores/      session / strategy-catalog / user-directory
     ├── router/      index.ts（路由表 + 登录守卫 + 逐页懒加载）
-    ├── components/  AppLayout / ParameterForm / ParameterField / DirectoryPicker /
-    │                StrategyUploadForm / StrategyVersionUploadForm / ArtifactList /
-    │                ConfirmDialog / PaginationBar / StatusBadge / ErrorBanner /
-    │                EmptyNotice / LoadingNotice / FilePicker /
-    │                EquityChartPanel / ResultTablePanel（P5）
-    ├── composables/ usePolling.ts / useConfigurationFileSource.ts
-    └── views/       LoginView / RunListView / RunSubmitView / RunDetailView /
-                     StrategyListView / StrategyDetailView / UserAdminView /
-                     NotFoundView
+    ├── layouts/     AppLayout.vue（页头 + 内容壳）
+    ├── components/
+    │   ├── common/  通用件（不认业务枚举）: PageHeader / SurfaceCard / PaginationToolbar /
+    │   │            PaginationBar / StatusBadge / ErrorBanner / EmptyNotice / LoadingNotice /
+    │   │            ContentSkeleton / FilePicker
+    │   └── business/ 业务件: Parameter{Form,Field} / DirectoryPicker / Strategy{,Version}UploadForm /
+    │                ArtifactList / ResultTablePanel / EquityChartPanel / EquityOverlayChart /
+    │                RunComparisonTable / Reference{Product,CommissionGroup,BaseCommission}Panel
+    ├── styles/      global.css（Tailwind 的 @theme 令牌 + 全局焦点与动效）
+    ├── composables/ use-polling.ts / use-configuration-file-source.ts / use-feedback.ts /
+    │                use-reference-table.ts
+    └── views/       HomeView / LoginView / RunListView / RunSubmitView / RunDetailView /
+                     RunCompareView / StrategyListView / StrategyDetailView /
+                     ReferenceDataView / UserAdminView / NotFoundView
 ```
 
 > **注意**：这里的纯逻辑目录叫 `domain/`（不叫 `lib/` 或 `utils/`）、运行页面是
@@ -1217,7 +1224,7 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
     表格、分页、模态框、提示条、表单控件都是自写的
     （14 个 `components/`）。这是"最小集"的直接后果；若日后要换
     Element Plus，那批里只有布局件需要留。另：Tailwind v4 是 **CSS 优先**，
-    主题令牌写在 `src/style.css` 的 `@theme` 块里，**没有 `tailwind.config.js`**
+    主题令牌写在 `src/styles/global.css` 的 `@theme` 块里，**没有 `tailwind.config.js`**
     （照 v3 的教程去找那个文件会找不到）。
 
     **增补（2026-09-26，已完成第一批）**：本条当时的预判落地了——引入
@@ -1353,7 +1360,7 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
 | 弹窗忙碌态的去处 | 确认后弹窗立刻关闭，写入中的忙碌态挪到**触发它的那个按钮**的 `:loading` | 全批唯一的行为差（"处理中…"那句文案随之消失） |
 | 每页控件 | 三个列表页统一到 `PaginationToolbar`（每页 `ElSelect` + 页码条） | 它自己承担"改每页 → offset 归零"，且**先 emit `update:limit` 再 emit `update:offset`(0)**——顺序是它唯一的隐式契约，有 spec 钉住 |
 | 首屏与刷新 | 首屏 5 处用 `ContentSkeleton`（自带 `role="status"`）；轮询 / 级联 / 翻页不换骨架 | 骨架屏是**带动画**的，而本批判据是"列表数据刷新不加任何动画"，否则每次翻页闪一下灰条 |
-| 焦点与动效 | 只由 `style.css` 出：`:where(a, button, summary, input, select, textarea)` 150 ms 过渡 + `:focus-visible` 品牌色描边 | `:where()` 把特异性压成 0，只靠源序压 EP；全局焦点规则**显式排除** `.el-input__inner` / `.el-textarea__inner`，否则输入框会出现双框 |
+| 焦点与动效 | 只由 `styles/global.css` 出：`:where(a, button, summary, input, select, textarea)` 150 ms 过渡 + `:focus-visible` 品牌色描边 | `:where()` 把特异性压成 0，只靠源序压 EP；全局焦点规则**显式排除** `.el-input__inner` / `.el-textarea__inner`，否则输入框会出现双框 |
 | 本批不做 | 深色模式、响应式/移动端、`text-rose-600 → text-danger` 全仓重命名、`ResultTablePanel` 换 `el-table`（列由服务端数据动态生成）、页码按钮与跳页、侧边栏/页脚/主题切换器 | 逐条理由见 `PROGRESS.md` 的 `D.12` |
 
 **P4 交付时的实现选择**（2026-09-25）：

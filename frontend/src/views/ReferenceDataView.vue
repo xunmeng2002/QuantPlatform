@@ -12,10 +12,10 @@
 
 import { ElTabPane, ElTabs } from 'element-plus';
 
-import PageHeader from '@/components/PageHeader.vue';
-import ReferenceBaseCommissionPanel from '@/components/ReferenceBaseCommissionPanel.vue';
-import ReferenceCommissionGroupPanel from '@/components/ReferenceCommissionGroupPanel.vue';
-import ReferenceProductPanel from '@/components/ReferenceProductPanel.vue';
+import PageHeader from '@/components/common/PageHeader.vue';
+import ReferenceBaseCommissionPanel from '@/components/business/ReferenceBaseCommissionPanel.vue';
+import ReferenceCommissionGroupPanel from '@/components/business/ReferenceCommissionGroupPanel.vue';
+import ReferenceProductPanel from '@/components/business/ReferenceProductPanel.vue';
 </script>
 
 <template>

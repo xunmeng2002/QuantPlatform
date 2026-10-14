@@ -23,9 +23,9 @@ import type { EquityPoint } from '@/api/types';
 import { describeApiFailure } from '@/composables/use-feedback';
 import { buildEquitySeries, summarizeEquity } from '@/domain/equity';
 import { ABSENT_PLACEHOLDER, formatAmount, formatPercentRatio, formatTradingDay } from '@/domain/format';
-import EmptyNotice from './EmptyNotice.vue';
-import ErrorBanner from './ErrorBanner.vue';
-import LoadingNotice from './LoadingNotice.vue';
+import EmptyNotice from '@/components/common/EmptyNotice.vue';
+import ErrorBanner from '@/components/common/ErrorBanner.vue';
+import LoadingNotice from '@/components/common/LoadingNotice.vue';
 
 use([LineChart, GridComponent, TooltipComponent, DataZoomComponent, CanvasRenderer]);
 

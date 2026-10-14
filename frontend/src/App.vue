@@ -15,7 +15,7 @@
  *
  * 页面过渡放在 `RouterView` 的插槽里, 键取 `route.path` —— **不含 query**, 于是
  * `/runs?offset=20` 这类翻页不重挂载页面 (重挂载会清空列表并重新取数, 翻页要闪一下), 只有真正
- * 换页面才过渡. 过渡的类名在 `style.css` 的 `.page-*` 里.
+ * 换页面才过渡. 过渡的类名在 `styles/global.css` 的 `.page-*` 里.
  *
  * 过渡的孩子是一层 `div`, 不是 `<component :is>` 本身. 这不是多余的包裹: `<Transition mode="out-in">`
  * 要求孩子是**单个元素**, 而被路由的组件若渲染成片段 (最常见的原因是模板根节点前面写了一行注释
@@ -29,7 +29,7 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn';
 
 import { RouterView } from 'vue-router';
 
-import AppLayout from '@/components/AppLayout.vue';
+import AppLayout from '@/layouts/AppLayout.vue';
 </script>
 
 <template>

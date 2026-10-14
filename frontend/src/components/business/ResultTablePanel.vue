@@ -22,10 +22,10 @@ import type {
 } from '@/api/types';
 import { describeApiFailure } from '@/composables/use-feedback';
 import { ABSENT_PLACEHOLDER, formatAmount, formatCount, formatFlag, formatTradingDay } from '@/domain/format';
-import EmptyNotice from './EmptyNotice.vue';
-import ErrorBanner from './ErrorBanner.vue';
-import LoadingNotice from './LoadingNotice.vue';
-import PaginationBar from './PaginationBar.vue';
+import EmptyNotice from '@/components/common/EmptyNotice.vue';
+import ErrorBanner from '@/components/common/ErrorBanner.vue';
+import LoadingNotice from '@/components/common/LoadingNotice.vue';
+import PaginationBar from '@/components/common/PaginationBar.vue';
 
 const props = defineProps<{ runId: string }>();
 

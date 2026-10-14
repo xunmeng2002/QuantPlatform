@@ -14,13 +14,13 @@ import { DEFAULT_RUN_SORT_COLUMN, RUN_SORT_COLUMNS, fetchRuns } from '@/api/runs
 import type { RunSortColumn } from '@/api/runs';
 import { DEFAULT_PAGE_SIZE, RUN_STATUSES } from '@/api/types';
 import type { PageResponse, RunStatus, RunSummary } from '@/api/types';
-import ContentSkeleton from '@/components/ContentSkeleton.vue';
-import EmptyNotice from '@/components/EmptyNotice.vue';
-import ErrorBanner from '@/components/ErrorBanner.vue';
-import PageHeader from '@/components/PageHeader.vue';
-import PaginationToolbar from '@/components/PaginationToolbar.vue';
-import StatusBadge from '@/components/StatusBadge.vue';
-import SurfaceCard from '@/components/SurfaceCard.vue';
+import ContentSkeleton from '@/components/common/ContentSkeleton.vue';
+import EmptyNotice from '@/components/common/EmptyNotice.vue';
+import ErrorBanner from '@/components/common/ErrorBanner.vue';
+import PageHeader from '@/components/common/PageHeader.vue';
+import PaginationToolbar from '@/components/common/PaginationToolbar.vue';
+import StatusBadge from '@/components/common/StatusBadge.vue';
+import SurfaceCard from '@/components/common/SurfaceCard.vue';
 import { describeApiFailure } from '@/composables/use-feedback';
 import { usePolling } from '@/composables/use-polling';
 import {

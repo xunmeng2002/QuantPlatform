@@ -8,7 +8,7 @@
  *   `$attrs` 同时合并到加载分支与真实内容分支的根元素上, 挂上去的话 `loading` 一翻 false, 这个角色
  *   就跟着跑到真实内容上. 而 `el-skeleton` 自身没有任何 aria 属性 —— 只给 `role` 不给标签, 播报是
  *   空的, 那比它替掉的"加载中…"三个字还退了一步.
- * - `is-animated` 这个类也在钉: `style.css` 的 `prefers-reduced-motion` 块正是按
+ * - `is-animated` 这个类也在钉: `styles/global.css` 的 `prefers-reduced-motion` 块正是按
  *   `.el-skeleton.is-animated .el-skeleton__item` 关掉流光动画的, 类名一变那条规则就静默失效.
  */
 

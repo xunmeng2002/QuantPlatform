@@ -16,8 +16,8 @@ import { uploadStrategyVersion } from '@/api/strategies';
 import type { StrategyVersion } from '@/api/types';
 import { useConfigurationFileSource } from '@/composables/use-configuration-file-source';
 import { describeApiFailure } from '@/composables/use-feedback';
-import ErrorBanner from './ErrorBanner.vue';
-import FilePicker from './FilePicker.vue';
+import ErrorBanner from '@/components/common/ErrorBanner.vue';
+import FilePicker from '@/components/common/FilePicker.vue';
 
 const props = defineProps<{ strategyId: string }>();
 

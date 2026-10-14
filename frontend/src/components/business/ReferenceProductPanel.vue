@@ -39,11 +39,11 @@ import type { Product, ProductClass, ProductPayload } from '@/api/types';
 import { useReferenceTable } from '@/composables/use-reference-table';
 import { formatCount, formatDateTime, formatDecimal } from '@/domain/format';
 import { describeProductClass } from '@/domain/labels';
-import ContentSkeleton from './ContentSkeleton.vue';
-import EmptyNotice from './EmptyNotice.vue';
-import ErrorBanner from './ErrorBanner.vue';
-import PaginationToolbar from './PaginationToolbar.vue';
-import SurfaceCard from './SurfaceCard.vue';
+import ContentSkeleton from '@/components/common/ContentSkeleton.vue';
+import EmptyNotice from '@/components/common/EmptyNotice.vue';
+import ErrorBanner from '@/components/common/ErrorBanner.vue';
+import PaginationToolbar from '@/components/common/PaginationToolbar.vue';
+import SurfaceCard from '@/components/common/SurfaceCard.vue';
 
 /** 新建时的默认值逐列对齐后端 `ProductWriteRequest`: A 股一手一股、最小变动 0.01 元、股票. */
 interface ProductForm {

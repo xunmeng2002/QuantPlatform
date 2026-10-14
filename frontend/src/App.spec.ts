@@ -12,7 +12,7 @@
  * `<!---->` 这种**非空字符串**, 断言「非空」会假绿.
  *
  * 用真的路由单例与真的 store (只 stub 掉 `scrollTo`): RouterView 与守卫读的都是它们, 手抄一份最小
- * 路由表就造出了第二个真相. 与 `components/AppLayout.spec.ts` 同一个 pinia 层面的注意点 —— 路由单例
+ * 路由表就造出了第二个真相. 与 `layouts/AppLayout.spec.ts` 同一个 pinia 层面的注意点 —— 路由单例
  * 第一次被 mount 装进某个 app 之后, 守卫一律在那个 app 的注入上下文里取 store, 所以整个文件共用一个
  * pinia, 每个用例只清会话.
  *
@@ -34,7 +34,7 @@ import { nextTick } from 'vue';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from './App.vue';
-import { router } from './router';
+import { router } from '@/router';
 import { useSessionStore } from '@/stores/session';
 
 const pinia = createPinia();

@@ -17,7 +17,7 @@ import { computed } from 'vue';
 import { ElButton } from 'element-plus';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 
-import StatusBadge from './StatusBadge.vue';
+import StatusBadge from '@/components/common/StatusBadge.vue';
 
 import { describeUserType } from '@/domain/labels';
 import type { StatusPresentation } from '@/domain/run-status';

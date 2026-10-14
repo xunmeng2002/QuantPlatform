@@ -20,7 +20,7 @@
 import { ElAlert, ElButton } from 'element-plus';
 import { RouterLink } from 'vue-router';
 
-import SurfaceCard from '@/components/SurfaceCard.vue';
+import SurfaceCard from '@/components/common/SurfaceCard.vue';
 import { useSessionStore } from '@/stores/session';
 
 interface CapabilityCard {

@@ -20,7 +20,7 @@ import VChart from 'vue-echarts';
 
 import type { AlignedEquityCurve } from '@/domain/equity';
 import { formatAmount } from '@/domain/format';
-import EmptyNotice from './EmptyNotice.vue';
+import EmptyNotice from '@/components/common/EmptyNotice.vue';
 
 use([LineChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, CanvasRenderer]);
 
