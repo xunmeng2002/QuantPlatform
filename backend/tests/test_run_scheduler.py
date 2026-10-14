@@ -247,11 +247,11 @@ async def test_the_job_directory_holds_a_seed_database_for_this_contract_only(
 
     assert seed_database_path.is_file()
 
-    assert read_seed_database_rows(seed_database_path, "CommissionGroup") == [
+    assert read_seed_database_rows(seed_database_path, "CommissionGroups") == [
         (DEFAULT_COMMISSION_GROUP_ID, DEFAULT_COMMISSION_GROUP_NAME)
     ]
 
-    assert read_seed_database_rows(seed_database_path, "BaseCommission") == [
+    assert read_seed_database_rows(seed_database_path, "BaseCommissions") == [
         (
             DEFAULT_COMMISSION_GROUP_ID,
             DEFAULT_EXCHANGE_ID,
@@ -302,8 +302,8 @@ async def test_the_job_directory_seed_database_follows_the_run_commission_group(
     能区分两种实现: 按这一轮冻结的组号展开的, 与拿一个固定组号去展开的. 只验"跑成功了"看不出来
     ——后者照样跑得完, 只是按另一套费率算钱.
 
-    `CommissionGroup` 那张表本身不参与区分 (种子库把库里的组**整份**带过去, 引擎只按组号去费率表里
-    找), 故断言落在 `BaseCommission` 的行上.
+    `CommissionGroups` 那张表本身不参与区分 (种子库把库里的组**整份**带过去, 引擎只按组号去费率表里
+    找), 故断言落在 `BaseCommissions` 的行上.
     """
 
     runnable = await create_runnable_strategy(
@@ -326,7 +326,7 @@ async def test_the_job_directory_seed_database_follows_the_run_commission_group(
 
     seed_database_path = job_directory(platform_settings, run.id) / SEED_DATABASE_FILENAME
 
-    seed_rate_rows = read_seed_database_rows(seed_database_path, "BaseCommission")
+    seed_rate_rows = read_seed_database_rows(seed_database_path, "BaseCommissions")
 
     assert {row[0] for row in seed_rate_rows} == {SECOND_COMMISSION_GROUP_ID}
 

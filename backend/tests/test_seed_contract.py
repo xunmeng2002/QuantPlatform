@@ -35,6 +35,17 @@ SQLITE_INTERNAL_TABLE_NAME_PREFIX = "sqlite_"
 
 GENERATED_SEED_DATABASE_DIRECTORY_NAME = "generated-seed-database"
 
+"""引擎那一侧现在认的三个表名, 抄成字面量.
+
+准据是 `QuantTrading/src/Mdb/MdbStructs.cpp` 里 `GetSchema()` 的 `TableSchema::tableName`
+(**不是** `BackTestInitDbTableList.h` —— 那份清单写的是 C++ 结构体名, 一直是单数). 复数 s 是
+2026-10-13 那批改名留下的 (`eb8da43`, 21 张表一律加 s).
+
+抄字面量而不去读引擎仓, 是这条断言的全部价值所在: 它**故意与契约不同源**.
+"""
+
+ENGINE_SEED_TABLE_NAMES = ("Products", "CommissionGroups", "BaseCommissions")
+
 
 def _read_generated_table_names(database_path: Path) -> list[str]:
     """文件里的表名, 排除 SQLite 自建的内部表."""
@@ -113,6 +124,17 @@ def test_the_contract_and_the_model_table_cover_the_same_table_names() -> None:
     assert sorted(SEED_TABLE_MODELS) == sorted(
         table.table_name for table in SEED_TABLES
     )
+
+
+def test_the_contract_pins_the_engine_table_names() -> None:
+    """表名逐字等于引擎当前认的那三个.
+
+    本文件其余断言都是**自指**的 (契约 ↔ 生成物 ↔ ORM 模型, 三处同源), 故把契约改回单数时它们
+    照样全绿 —— 而引擎那边不报任何错, 只是查不到这三张表、费率全按 0 计, `Success` 仍为 true.
+    这一条是唯一能挡住那次静默的断言: 它红起来的原因是"引擎换了名字", 而不是"自己改了自己".
+    """
+
+    assert tuple(table.table_name for table in SEED_TABLES) == ENGINE_SEED_TABLE_NAMES
 
 
 def test_the_file_holds_exactly_the_three_engine_tables(

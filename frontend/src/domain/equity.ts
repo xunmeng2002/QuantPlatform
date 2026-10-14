@@ -1,10 +1,10 @@
 /**
  * 权益曲线的派生量: 回撤与概要.
  *
- * 后端只回 `Capital` 表逐日结算权益的原样序列 (一天一点), 回撤是**派生数据**, 在这里算:
+ * 后端只回 `Capitals` 表逐日结算权益的原样序列 (一天一点), 回撤是**派生数据**, 在这里算:
  * 它属于图表的形状, 放进接口就等于「前端换一种画法」要动后端.
  *
- * **口径是逐日结算价, 不是日内**: 引擎的 `Capital` 一天一行, 盘中回撤在库里根本不存在
+ * **口径是逐日结算价, 不是日内**: 引擎的 `Capitals` 一天一行, 盘中回撤在库里根本不存在
  * (样本里 `Margin` / `MarketValue` 恒为 0), 故曲线上的回撤是「相对逐日峰值的回落」.
  *
  * 多轮叠加画在一张图上时, 各轮的交易日集合**天然不同** (区间不同, 或某一轮中间停过), 故先按
@@ -116,7 +116,7 @@ function collectTradingDays(curves: EquityCurveInput[]): string[] {
   return [...tradingDays].sort();
 }
 
-/** 一轮的逐日权益, 同日多点取**末值**: 引擎的 `Capital` 一天一行, 真出现两行时"后写的那行"是它最后的结算. */
+/** 一轮的逐日权益, 同日多点取**末值**: 引擎的 `Capitals` 一天一行, 真出现两行时"后写的那行"是它最后的结算. */
 function collectLastBalances(points: EquityPoint[]): Map<string, number> {
   const balancesByTradingDay = new Map<string, number>();
 

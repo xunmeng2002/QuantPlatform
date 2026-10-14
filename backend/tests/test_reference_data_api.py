@@ -58,7 +58,7 @@ BASE_COMMISSIONS_PATH = f"{REFERENCE_DATA_PATH}/base-commissions"
 
 MEMBER_USERNAME = "reference-data-member"
 
-# 初始化 CSV 播种进来的 A 股两行 (见 `backend/reference_seed/Product.csv`), 加上用例自己建的
+# 初始化 CSV 播种进来的 A 股两行 (见 `backend/reference_seed/Products.csv`), 加上用例自己建的
 # 品种, 列表的期望次序就是它们按 (交易所, 品种代码) 排出来的样子.
 SEEDED_PRODUCT_KEYS = [("SSE", "600"), ("SZSE", "000")]
 

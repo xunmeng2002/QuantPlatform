@@ -8,7 +8,7 @@
 「品种」这一档的位置 —— 通配必须由平台展开掉 (见 `rate_expansion`). 按轮展开的另一个好处是
 种子库小得可以忽略: 只写该轮用到的那些合约, 不必把全市场铺进去.
 
-三张表里 `Product` 与 `CommissionGroup` 整体照抄, `BaseCommission` 只写**展开之后**的行 ——
+三张表里 `Products` 与 `CommissionGroups` 整体照抄, `BaseCommissions` 只写**展开之后**的行 ——
 写入口对这一点有断言 (见 `_ensure_base_commissions_are_expanded`), 因为未展开的行在引擎那里
 不是"多几行没用的数据", 而是"这一笔成交查不到费率, 费用静默按 0 算".
 
@@ -69,9 +69,9 @@ logger = logging.getLogger(__name__)
 """
 
 SEED_TABLE_MODELS: dict[str, Any] = {
-    "Product": ProductModel,
-    "CommissionGroup": CommissionGroupModel,
-    "BaseCommission": BaseCommissionModel,
+    "Products": ProductModel,
+    "CommissionGroups": CommissionGroupModel,
+    "BaseCommissions": BaseCommissionModel,
 }
 
 
@@ -80,7 +80,7 @@ class SeedRows:
     """一份种子库的全部内容: 三张表的行, 列序按契约.
 
     三张表装在同一个对象里而不拆成三个实参, 是因为它们要一起走完"读 → 展开 → 写": 展开只换
-    `BaseCommission` 那一份 (`dataclasses.replace`), 另两份原样带过去.
+    `BaseCommissions` 那一份 (`dataclasses.replace`), 另两份原样带过去.
     """
 
     products: tuple[SeedRow, ...]
@@ -96,8 +96,8 @@ class SeedRows:
 def build_create_table_statement(table: SeedTable) -> str:
     """按契约拼出一条 `CREATE TABLE`.
 
-    表名与列名都来自契约 (编译期常量), 不是外部输入, 故直接拼进 SQL; 双引号照旧加上,
-    `Order` 那类保留字在别的表上会咬人.
+    表名与列名都来自契约 (编译期常量), 不是外部输入, 故直接拼进 SQL; 双引号照旧加上 ——
+    标识符统一引用, 免得日后某张表起了保留字作名字时裸拼出错.
     """
 
     column_definitions = ", ".join(
@@ -211,17 +211,17 @@ async def read_seed_rows(
 
     return SeedRows(
         products=await _read_table_rows(
-            session, PRODUCT_TABLE, SEED_TABLE_MODELS["Product"]
+            session, PRODUCT_TABLE, SEED_TABLE_MODELS["Products"]
         ),
         commission_groups=await _read_table_rows(
-            session, COMMISSION_GROUP_TABLE, SEED_TABLE_MODELS["CommissionGroup"]
+            session, COMMISSION_GROUP_TABLE, SEED_TABLE_MODELS["CommissionGroups"]
         ),
         base_commissions=await _read_table_rows(
             session,
             BASE_COMMISSION_TABLE,
-            SEED_TABLE_MODELS["BaseCommission"],
+            SEED_TABLE_MODELS["BaseCommissions"],
             where_clause=(
-                SEED_TABLE_MODELS["BaseCommission"].commission_group_id
+                SEED_TABLE_MODELS["BaseCommissions"].commission_group_id
                 == commission_group_id
             ),
         ),

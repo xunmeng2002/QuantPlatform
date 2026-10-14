@@ -6,7 +6,7 @@
   - **只读**: 连接走 `?mode=ro`, 由 SQLite 自己强制 (对同一句柄写会直接报
     `attempt to write a readonly database`);
   - **表名白名单**: `RESULT_TABLE_NAMES` 是正本, 只有它收录的名字才可能被拼进 SQL,
-    且拼进去时一律加双引号 (`Order` 是 SQLite 保留字, 裸写会语法错);
+    且拼进去时一律加双引号 (标识符统一引用, 挡住保留字与大小写歧义两种坑);
   - **运行中不读**: `SqliteWrapper` 没设 `busy_timeout`, 引擎还在写时读会拿到 SQLITE_BUSY
     或半份文件, 故「这一轮已经结束」必须先由调用方判定 (见 `routers/runs.py`).
 
@@ -29,7 +29,7 @@ RESULT_TABLE_NOT_FOUND_MESSAGE = "结果表不存在"
 
 READ_ONLY_URI_SUFFIX = "?mode=ro"
 
-CAPITAL_TABLE_NAME = "Capital"
+CAPITAL_TABLE_NAME = "Capitals"
 
 TRADING_DAY_COLUMN_NAME = "TradingDay"
 
@@ -37,15 +37,19 @@ ROW_IDENTIFIER_COLUMN_NAME = "rowid"
 
 # 界面上开放的结果表, 即 `{table}` 路径参数的白名单**正本**.
 #
-# 引擎的结果库共 17 张表 (正本是 `QuantTrading/src/BackTest/BackTestTableList.h`), 这里只开
-# 交易与资金相关的 5 张, 其余 12 张 (含 `BarMarketData`) 一律 404. 放宽就是往这个元组里加
+# 引擎的结果库共 17 张表 (正本是 `QuantTrading/src/Mdb/MdbStructs.cpp` 的 `GetSchema()`),
+# 这里只开
+# 交易与资金相关的 5 张, 其余 12 张 (含 `BarMarketDatas`) 一律 404. 放宽就是往这个元组里加
 # 名字, 同时别忘了在前端 `api/types.ts` 的 `RESULT_TABLE_NAMES` 补一份 —— 那是本表的镜像.
+#
+# 名字一律是**复数**: 引擎 2026-10-13 把 21 张表全加了 s (`MdbStructs.cpp` 的 `GetSchema`), 而
+# `BackTestTableList.h` 里仍写着单数的 C++ 结构体名 —— 那份清单不是表名的准据.
 RESULT_TABLE_NAMES = (
     CAPITAL_TABLE_NAME,
-    "Trade",
-    "Order",
-    "Position",
-    "PositionDetail",
+    "Trades",
+    "Orders",
+    "Positions",
+    "PositionDetails",
 )
 
 """结果表里能出现的标量类型: 引擎的列只有 str / int / float, 无 BLOB."""
@@ -54,7 +58,7 @@ ResultScalar = str | int | float | bool | None
 
 @dataclass(frozen=True)
 class CapitalPointRecord:
-    """`Capital` 表的一行, 即某个交易日的结算权益."""
+    """`Capitals` 表的一行, 即某个交易日的结算权益."""
 
     trading_day: str
     balance: float
@@ -66,7 +70,7 @@ class ResultTablePage:
     """结果表的一页.
 
     `column_names` 由 `PRAGMA table_info` 给出, 顺序即权威顺序 —— 表头因此不必在界面上
-    写死 (`Order` 有 33 列, 写死就是 33 处会漂移的真相). `total` 是全表行数而不是本页行数.
+    写死 (`Orders` 有 33 列, 写死就是 33 处会漂移的真相). `total` 是全表行数而不是本页行数.
     """
 
     table_name: str
@@ -162,9 +166,9 @@ def read_result_table_page(
 def _quote_whitelisted_table_name(table_name: str) -> str:
     """表名过白名单 (不在册即当"不存在"), 再包上双引号.
 
-    双引号是必须的: `Order` 是 SQLite 保留字, 裸写直接语法错. 白名单已保证名字里不含
-    双引号, 故这里不做 `""` 转义 —— 但**顺序不能反**: 先引用后校验等于把没有护栏的字符串
-    送进了 SQL.
+    双引号是防御性的统一写法: 引擎给不给某张表起保留字作名字, 从平台这边看不出来; 白名单已保证
+    名字里不含双引号, 故这里不做 `""` 转义 —— 但**顺序不能反**: 先引用后校验等于把没有护栏的
+    字符串送进了 SQL.
     """
 
     if table_name not in RESULT_TABLE_NAMES:

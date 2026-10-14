@@ -391,21 +391,21 @@ export interface JobArtifactList {
  * (同 `RUN_SORT_COLUMNS` 的先例).
  */
 export const RESULT_TABLE_NAMES = [
-  'Capital',
-  'Trade',
-  'Order',
-  'Position',
-  'PositionDetail',
+  'Capitals',
+  'Trades',
+  'Orders',
+  'Positions',
+  'PositionDetails',
 ] as const;
 export type ResultTableName = (typeof RESULT_TABLE_NAMES)[number];
 
 /** 页签文案. 引擎的表名是英文的, 中文只出现在这一处, 不散到模板里. */
 export const RESULT_TABLE_LABELS: Record<ResultTableName, string> = {
-  Capital: '资金',
-  Trade: '成交',
-  Order: '委托',
-  Position: '持仓',
-  PositionDetail: '持仓明细',
+  Capitals: '资金',
+  Trades: '成交',
+  Orders: '委托',
+  Positions: '持仓',
+  PositionDetails: '持仓明细',
 };
 
 export interface EquityPoint {
@@ -459,7 +459,7 @@ export type ResultTableRecord = Record<string, ResultTableValue>;
  *
  * `total` / `offset` / `limit` 与 `PageResponse` 逐字同形 (`PaginationBar` 只认这三个数, 原样
  * 复用), 但它**不是** `PageResponse`: 结果表的行没有固定形状, 表头由响应里的 `columns` 给出
- * (顺序即权威顺序), 故列名不在前端写死——`Order` 有 33 列, 写死就是 33 处会漂移的真相.
+ * (顺序即权威顺序), 故列名不在前端写死——`Orders` 有 33 列, 写死就是 33 处会漂移的真相.
  */
 export interface ResultTableResponse {
   table: string;

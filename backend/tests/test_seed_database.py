@@ -207,13 +207,13 @@ async def test_the_generated_file_carries_the_expanded_contract_rows(
 
         generated_path = await _generate(session, platform_settings)
 
-    assert read_seed_database_rows(generated_path, "Product") == [
+    assert read_seed_database_rows(generated_path, "Products") == [
         ("SSE", REGISTERED_STOCK_PRODUCT_ID, "贵州茅台", 6, 1, 0.01, 100, 1, 200, 1, "")
     ]
 
-    assert read_seed_database_rows(generated_path, "CommissionGroup") == [(1, "默认组")]
+    assert read_seed_database_rows(generated_path, "CommissionGroups") == [(1, "默认组")]
 
-    assert read_seed_database_rows(generated_path, "BaseCommission") == [
+    assert read_seed_database_rows(generated_path, "BaseCommissions") == [
         (
             1,
             "SSE",
@@ -280,7 +280,7 @@ async def test_a_both_directions_rule_reaches_the_file_as_two_engine_rows(
 
         generated_path = await _generate(session, platform_settings)
 
-    generated_rows = read_seed_database_rows(generated_path, "BaseCommission")
+    generated_rows = read_seed_database_rows(generated_path, "BaseCommissions")
 
     # 只看方向与合约那两列: 本用例管的是"第三档有没有漏出去、有没有落到具体合约上", 其余十二列的
     # 取值由上面那条用例逐列钉住.
@@ -352,9 +352,9 @@ async def test_a_run_without_a_contract_gets_an_empty_rate_table(
 
         generated_path = await _generate(session, platform_settings, contracts=())
 
-    assert read_seed_database_rows(generated_path, "BaseCommission") == []
+    assert read_seed_database_rows(generated_path, "BaseCommissions") == []
 
-    assert read_seed_database_rows(generated_path, "CommissionGroup") == [(1, "默认组")]
+    assert read_seed_database_rows(generated_path, "CommissionGroups") == [(1, "默认组")]
 
 
 async def test_an_empty_table_is_written_as_an_empty_table(
@@ -371,9 +371,9 @@ async def test_an_empty_table_is_written_as_an_empty_table(
 
         generated_path = await _generate(session, platform_settings)
 
-    assert read_seed_database_rows(generated_path, "Product") == []
-    assert read_seed_database_rows(generated_path, "CommissionGroup") == []
-    assert read_seed_database_rows(generated_path, "BaseCommission") == []
+    assert read_seed_database_rows(generated_path, "Products") == []
+    assert read_seed_database_rows(generated_path, "CommissionGroups") == []
+    assert read_seed_database_rows(generated_path, "BaseCommissions") == []
 
 
 async def test_rows_of_another_commission_group_never_reach_the_file(
@@ -406,14 +406,14 @@ async def test_rows_of_another_commission_group_never_reach_the_file(
 
         generated_path = await _generate(session, platform_settings)
 
-    assert read_seed_database_rows(generated_path, "CommissionGroup") == [
+    assert read_seed_database_rows(generated_path, "CommissionGroups") == [
         (1, "默认组"),
         (2, "默认组"),
     ]
 
     assert [
         row[0]
-        for row in read_seed_database_rows(generated_path, "BaseCommission")
+        for row in read_seed_database_rows(generated_path, "BaseCommissions")
     ] == [1, 1]
 
 
@@ -447,7 +447,7 @@ async def test_missing_rates_are_reported_but_the_file_is_still_written(
         ("SSE", "600519", CommissionDirection.SELL.value),
     ]
 
-    assert read_seed_database_rows(_generated_path(platform_settings), "BaseCommission") == []
+    assert read_seed_database_rows(_generated_path(platform_settings), "BaseCommissions") == []
 
 
 async def test_read_seed_rows_keeps_only_the_named_group(

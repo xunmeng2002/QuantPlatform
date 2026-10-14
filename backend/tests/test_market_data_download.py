@@ -30,6 +30,7 @@ from app.services.market_data_preparation import (
     MARKET_DATA_LOGIN_FAILED_MESSAGE,
     MARKET_DATA_PREPARE_TIMEOUT_MESSAGE,
     MARKET_DATA_REQUEST_INCOMPLETE_MESSAGE,
+    MARKET_DATA_SCHEMA_NOT_INITIALIZED_MESSAGE,
     MARKET_DATA_STILL_INSUFFICIENT_MESSAGE,
     MarketDataPrepared,
     MarketDataRequest,
@@ -75,6 +76,10 @@ STUB_DELAY_SECONDS = 5
 CANCEL_REACTION_SECONDS = 0.4
 
 LOGIN_FAILURE_STDERR = "BaoStock 登录失败"
+
+#: 组件库未建或版本戳不符时打印的原文 (见 `QuoteHub/bao_stock.py` 的 `SchemaCheck`). 它发生在联网
+#: 登录之前, 与登录失败不会同时出现.
+SCHEMA_NOT_INITIALIZED_STDERR = "数据库未初始化，请先执行 python init_database.py --create"
 QUOTE_HUB_CLI_FILENAME = quote_hub.QUOTE_HUB_CLI_FILENAME
 
 
@@ -405,6 +410,20 @@ async def test_a_login_failure_points_at_credentials(
         await ensure_market_data_available(settings, _build_request(), asyncio.Event())
 
     assert failure.value.message == MARKET_DATA_LOGIN_FAILED_MESSAGE
+
+
+async def test_an_uninitialized_component_database_points_at_building_it(
+    tmp_path: Path, download_component: Path
+) -> None:
+    """库未建好与登录失败**必须分开**: 一个要做的是跑组件的建库脚本, 一个才去查凭据与网络."""
+
+    set_exit_code(download_component, 1, SCHEMA_NOT_INITIALIZED_STDERR)
+    settings = _build_settings(tmp_path, download_component)
+
+    with pytest.raises(MarketDataUnavailableError) as failure:
+        await ensure_market_data_available(settings, _build_request(), asyncio.Event())
+
+    assert failure.value.message == MARKET_DATA_SCHEMA_NOT_INITIALIZED_MESSAGE
 
 
 async def test_any_other_nonzero_exit_is_a_plain_download_failure(

@@ -519,7 +519,7 @@ async def read_run_equity_handler(
     settings: SettingsDependency,
     current_user: CurrentUserDependency,
 ) -> RunEquityResponse:
-    """逐日权益序列 (读结果库的 `Capital` 表). 非本人提交即 404, 运行未结束即 409.
+    """逐日权益序列 (读结果库的 `Capitals` 表). 非本人提交即 404, 运行未结束即 409.
 
     只有轮结束之后才读: 引擎写库用的 `SqliteWrapper` 没设 `busy_timeout`, 边写边读会拿到
     SQLITE_BUSY 或半份数据, 而"结束"的信号就是进程退出 (状态进终态).

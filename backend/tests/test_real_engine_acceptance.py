@@ -425,13 +425,13 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
             f"{RUNS_PATH}/{submitted.id}/equity", headers=bearer_headers(owner.token)
         )
         trade_table_response = await client.get(
-            f"{RUNS_PATH}/{submitted.id}/tables/Trade",
+            f"{RUNS_PATH}/{submitted.id}/tables/Trades",
             params={"limit": RESULT_PAGE_PROBE_LIMIT},
             headers=bearer_headers(owner.token),
         )
-        # `Order` 是 SQLite 保留字: 这条请求走通了才说明表名真的被引号包住 (裸拼会 500).
+        # `Orders` 是 SQLite 保留字的复数: 这条请求走通了才说明表名真的被引号包住 (裸拼会 500).
         order_table_response = await client.get(
-            f"{RUNS_PATH}/{submitted.id}/tables/Order",
+            f"{RUNS_PATH}/{submitted.id}/tables/Orders",
             params={"limit": RESULT_PAGE_PROBE_LIMIT},
             headers=bearer_headers(owner.token),
         )
@@ -527,7 +527,7 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
 
     trade_page = trade_table_response.json()
 
-    assert trade_page["table"] == "Trade"
+    assert trade_page["table"] == "Trades"
     # 总行数与收尾镜像进 `Runs` 的那一列**互证**: 两条路是分别算出来的 (一条数结果库的行, 一条
     # 是引擎回写时冻结的), 对不上就是其中一条写歪了. 这里有意不比一个常数——那个数由引擎的下游
     # 算术决定, 与平台无关 (见常量区).
@@ -538,7 +538,7 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
     assert len(trade_page["records"]) == RESULT_PAGE_PROBE_LIMIT
     assert "TradingDay" in trade_page["columns"]
 
-    # `Order` 是 SQLite 保留字: 这条能回数据才说明表名真的被引号包住 (裸拼会 500).
+    # `Orders` 表名读得出来: 名字若漂回单数 `Order`, 引擎那边写的是 `Orders`, 这里就是 404.
     assert order_table_response.status_code == 200, order_table_response.text
     assert order_table_response.json()["total"] == finished.order_count
 

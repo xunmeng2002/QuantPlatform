@@ -160,7 +160,7 @@ def write_capital_database(
     run_id: str,
     capital_rows: Sequence[tuple[str, float, float]],
 ) -> Path:
-    """建一个只含 `Capital` 表的结果库, 列与引擎一致 (列是子集).
+    """建一个只含 `Capitals` 表的结果库, 列与引擎一致 (列是子集).
 
     查询要真的执行, 故这里必须是**真的** SQLite 文件: 拿一份占位文本当库, 那条用例测到的会
     是"读不出来"而不是"读出来了什么".
@@ -171,11 +171,11 @@ def write_capital_database(
 
     with open_result_database_for_writing(database_file) as connection:
         connection.execute(
-            'CREATE TABLE "Capital"("TradingDay" char(16), "AccountId" char(32),'
+            'CREATE TABLE "Capitals"("TradingDay" char(16), "AccountId" char(32),'
             ' "Balance" double, "PreBalance" double, "Available" double)'
         )
         connection.executemany(
-            'INSERT INTO "Capital" VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO "Capitals" VALUES (?, ?, ?, ?, ?)',
             [
                 (trading_day, ACCOUNT_ID, balance, balance, available)
                 for trading_day, balance, available in capital_rows
@@ -188,7 +188,7 @@ def write_capital_database(
 def expected_equity_points(
     capital_rows: Sequence[tuple[str, float, float]],
 ) -> list[dict[str, object]]:
-    """由夹具里的 `Capital` 行派生应有的三个字段 (不另抄一份)."""
+    """由夹具里的 `Capitals` 行派生应有的三个字段 (不另抄一份)."""
 
     return [
         {"trading_day": trading_day, "balance": balance, "available": available}

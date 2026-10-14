@@ -12,6 +12,11 @@
   - `Spark/include/Spark/Types.h` —— 类型别名, 如 `ExchangeIdType = char[8]`、
     `GroupNameType = char[64]`.
 
+**三张表名都是复数** (`Products` / `CommissionGroups` / `BaseCommissions`): 引擎 2026-10-13 把 21 张表
+一律加了 s (准据是 `MdbStructs.cpp` 的 `GetSchema`), 而 C++ 行结构体仍是单数 (`Product`) —— 于是
+"表名"与"结构体名"在这两个仓里逐字不同. 这里写错不会报错: 引擎查不到那三张表, 照跑完整轮并把
+`Success` 报成 true, 只是费率按 0 计、合约乘数全部退化.
+
 **为什么不拿 ORM 生成**: 引擎按列**下标**绑定 —— 它把 `SELECT *` 出来的每一行按位置喂进
 字段数组, 列序一错就是静默错位 (把 `ExchangeId` 读成 `ProductId`), 引擎不报错, 只算错钱.
 而 ORM 的表是按 catalog 的用法设计的 (平台自造的 `Id` 主键、两个审计时间戳), 与引擎那张表
@@ -58,7 +63,7 @@ class SeedTable:
 
 
 PRODUCT_TABLE = SeedTable(
-    table_name="Product",
+    table_name="Products",
     columns=(
         SeedColumn("ExchangeId", "char(8)"),
         SeedColumn("ProductId", "char(32)"),
@@ -77,7 +82,7 @@ PRODUCT_TABLE = SeedTable(
 
 
 COMMISSION_GROUP_TABLE = SeedTable(
-    table_name="CommissionGroup",
+    table_name="CommissionGroups",
     columns=(
         SeedColumn("CommissionGroupId", "int"),
         SeedColumn("CommissionGroupName", "char(64)"),
@@ -87,7 +92,7 @@ COMMISSION_GROUP_TABLE = SeedTable(
 
 
 BASE_COMMISSION_TABLE = SeedTable(
-    table_name="BaseCommission",
+    table_name="BaseCommissions",
     columns=(
         SeedColumn("CommissionGroupId", "int"),
         SeedColumn("ExchangeId", "char(8)"),

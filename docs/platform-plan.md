@@ -57,7 +57,7 @@
   （P4 实测订正，原记 24.15 / 11.12）。
 - 引擎产物：`result.json`、`BackTest_<RunId>.db`（17 张表）、
   `Dump/<RunId>/t_*.csv`（17 个）、`log/<名>.<时间戳>.log`。
-- 权益曲线数据源现成：`Capital` 表含 `TradingDay, Balance, Available`，
+- 权益曲线数据源现成：`Capitals` 表含 `TradingDay, Balance, Available`，
   逐日一行，实测序列 `1000000.0 → 999549.73 → 999164.41`。
 - 宿主契约：`python <策略>.py`，**从 CWD 读**两个硬编码名配置文件——
   策略配置（如 `TestStrategyGrid.json`）与引擎配置（`BackTest.json`），
@@ -691,7 +691,7 @@ P4 / P5 的功能闭环。
 | `POST` | `/api/runs` | 提交：校验 → 落 `queued` 行 → 唤醒调度器 → 返回 `run_id`（**目录由调度侧构造**） |
 | `GET` | `/api/runs` | 本人运行列表，按状态/策略筛选、按指标排序、分页 |
 | `GET` | `/api/runs/{id}` | 元信息 + `result.json` 全文 |
-| `GET` | `/api/runs/{id}/equity` | 权益曲线序列（读 `Capital` 逐日 `Balance`） |
+| `GET` | `/api/runs/{id}/equity` | 权益曲线序列（读 `Capitals` 逐日 `Balance`） |
 | `GET` | `/api/runs/{id}/tables/{table}` | 结果表分页查询 |
 | `GET` | `/api/runs/{id}/files` | 产物清单（名 + 大小） |
 | `GET` | `/api/runs/{id}/files/{relpath}` | 产物下载 |
@@ -745,11 +745,11 @@ P4 / P5 的功能闭环。
 > 已实现（`backend/app/services/result_database.py` + `routers/runs.py`）。
 > 六条要点：
 >
-> 1. **表名白名单只有 5 张**：`Capital` / `Trade` / `Order` / `Position` /
->    `PositionDetail`，其余 12 张（含 2928 行的 `BarMarketData`）在界面上不可见。
+> 1. **表名白名单只有 5 张**：`Capitals` / `Trades` / `Orders` / `Positions` /
+>    `PositionDetails`，其余 12 张（含 2928 行的 `BarMarketDatas`）在界面上不可见。
 >    校验与 `SELECT` 拼接**同处一个模块**，为的是让「先白名单、后拼接」在代码上
->    无法被绕过；表名一律加**双引号**——`Order` 是 SQLite 保留字，不加引号直接
->    `near "Order": syntax error`。列名不参与拼接（`SELECT *` + `PRAGMA table_info`）。
+>    无法被绕过；表名一律加**双引号**（标识符统一引用，挡住保留字与大小写歧义）。
+>    列名不参与拼接（`SELECT *` + `PRAGMA table_info`）。
 > 2. **只读连接**：`sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True)`。
 >    `as_uri()` 要求**绝对**路径，故先 `resolve()`,否则
 >    `ValueError: relative paths can't be expressed as file URIs`。这一条被钉成
@@ -767,7 +767,7 @@ P4 / P5 的功能闭环。
 >    「开连接 → 查询 → 关连接」整个放进同一个 worker。与 P4 直接内联文件 IO 的做法
 >    **有意分叉**：一条 `COUNT(*)` + 一页 `SELECT` 的耗时随库长大，目标是云上多用户，
 >    不该占着事件循环。
-> 6. **回撤不在后端算**：端点只回 `Capital` 的原样逐日序列（`trading_day` /
+> 6. **回撤不在后端算**：端点只回 `Capitals` 的原样逐日序列（`trading_day` /
 >    `balance` / `available`），回撤与收益率由**前端纯函数**派生
 >    （`frontend/src/domain/equity.ts`，进 vitest 单测）。理由：它是派生数据，
 >    后端一旦算了，前端要点另一条曲线就再加一个字段，接口会随着图表变化。
@@ -1011,7 +1011,7 @@ P2b 的「可跑」所需的判定已于 P3 开工前（2026-09-25）**拍板**�
 
 P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`1000000.0 → 999549.73`）」里的
 `999549.73` 是 **P0 有种子库那轮的基线，而那批产物已不在盘上**（`runs/` 已被清掉），
-钉死它等于钉死一个取不到的数。改为**自洽形式**：首点恒为 `1000000.0`（`Capital`
+钉死它等于钉死一个取不到的数。改为**自洽形式**：首点恒为 `1000000.0`（`Capitals`
 的种子行 = 初始资金），末点与该轮 `result.json.Balance` 逐位相等——这条不依赖
 种子库在不在，比一个常数更强，本轮实测即 `999377.0899999999`（无种子库变体）。
 
@@ -1256,14 +1256,14 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
 
 **P5 起新记的已知缺口**：
 
-19. **另 12 张表在界面上看不到**（含 2928 行的 `BarMarketData` 等行情与统计表）：
+19. **另 12 张表在界面上看不到**（含 2928 行的 `BarMarketDatas` 等行情与统计表）：
     本轮只开 5 张交易与资金表。要看别表，要么同时改白名单与页签两处，
     要么日后补一个 `GET /runs/{id}/tables` 列表端点。
 20. **表名清单是两处真相**：后端 `services/result_database.py:RESULT_TABLE_NAMES`
     是正本，前端 `api/types.ts:RESULT_TABLE_NAMES` 是**镜像**（照 `RUN_SORT_COLUMNS`
     的先例）。这是"不加列表端点"的直接代价——漏改一处不会报错，只会让某个页签
     点开是 404。
-21. **盘中回撤不可得**：`Capital` 只有**逐日结算权益**（`Margin` / `MarketValue`
+21. **盘中回撤不可得**：`Capitals` 只有**逐日结算权益**（`Margin` / `MarketValue`
     在本样本里恒为 0），库里根本不存在日内曲线。图上画的是逐日权益与**逐日**回撤，
     不是"日内最高点之后回落多少"。
 22. **失败的轮看不到部分结果**：`db_path` 只在引擎写 `result.json` **成功之后**
@@ -1372,7 +1372,7 @@ P5 的验收判据**订正过一次**：「曲线与实测数据点吻合（`100
 | 决策点 | 选择 | 备注 |
 | ---- | ---- | ---- |
 | 图表库版本 | **`echarts ^6.1.0` + `vue-echarts ^8.3.0`** | 当前最新且**唯一自洽**的一对：vue-echarts 8 的 peer 写死 `echarts ^6.0.0`；已按需注册控制体积 |
-| 明细表范围 | **精选 5 张**：`Capital` / `Trade` / `Order` / `Position` / `PositionDetail` | **不加列表端点**，表名清单在前端镜像一份；见 §12.19 / §12.20 |
+| 明细表范围 | **精选 5 张**：`Capitals` / `Trades` / `Orders` / `Positions` / `PositionDetails` | **不加列表端点**，表名清单在前端镜像一份；见 §12.19 / §12.20 |
 | 回撤在哪算 | **前端纯函数派生**（`domain/equity.ts`），后端只回原样序列 | 端点不该随图表变化；前端这份是纯逻辑，正好进 vitest |
 | 阻塞调用 | **`asyncio.to_thread`**（本仓首例） | sqlite3 阻塞且连接不能跨线程，"开→查→关"整个进同一 worker；与 P4 内联文件 IO 有意分叉 |
 | 未结束的轮 | **409 + 前端不请求** | `SqliteWrapper` 无 `busy_timeout`，运行中读会拿到 `SQLITE_BUSY` 或半份文件 |
@@ -1491,7 +1491,7 @@ A 股品种码 3 位、期货 1–4 位字母）且**已在 `Products` 表登记
 
 引擎侧**零改动**：`CommissionCalculator::Apply` 仍是对
 `(CommissionGroupId, ExchangeId, InstrumentId, Direction)` 的**一次精确哈希查找**，
-`BaseCommission` 表里没有"品种"这一档、`Trade` 也不带 `ProductId`，所以通配语义不可能只靠数据
+`BaseCommissions` 表里没有"品种"这一档、`Trades` 也不带 `ProductId`，所以通配语义不可能只靠数据
 表达。做法是**平台侧展开**：
 
 - `app/reference_data/rate_expansion.py`（纯函数，不碰库与文件系统）按三级顺序解析

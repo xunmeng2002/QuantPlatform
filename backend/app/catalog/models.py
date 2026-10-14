@@ -443,7 +443,7 @@ class RunTemplateModel(Base):
 
 
 class ProductModel(Base):
-    """品种基本数据: 引擎 `Product` 表在平台侧的宿主.
+    """品种基本数据: 引擎 `Products` 表在平台侧的宿主.
 
     **列按引擎列序声明, 平台专有列排在最后**. 这不是排版的讲究: 引擎装载种子库时按列**下标**
     绑定 (`SELECT *` 的结果直接喂进字段描述数组), 少一列、多一列或换个次序都是静默错位 ——
@@ -491,7 +491,7 @@ class ProductModel(Base):
 
 
 class CommissionGroupModel(Base):
-    """手续费组: 引擎 `CommissionGroup` 表在平台侧的宿主.
+    """手续费组: 引擎 `CommissionGroups` 表在平台侧的宿主.
 
     `CommissionGroupId` 是**人工指定的整数**, 不是自增主键 —— 引擎每轮的 `BackTest.json` 里
     `CommissionGroupId` 是一个具体的整数, 引擎按它去费率表里找组. 自增的话, 库里"1 号组"是哪
@@ -524,7 +524,7 @@ class CommissionGroupModel(Base):
 
 
 class BaseCommissionModel(Base):
-    """费率明细: 引擎 `BaseCommission` 表在平台侧的宿主.
+    """费率明细: 引擎 `BaseCommissions` 表在平台侧的宿主.
 
     一行 = 某个手续费组下的一档费率规则: 某个交易所、某一格合约代码、某一个方向上的费率与税额.
     后两格都允许写成通配 (见下).

@@ -3,7 +3,7 @@
  * 引擎结果表的明细分页表.
  *
  * 页签就是 `RESULT_TABLE_NAMES` (后端白名单的镜像), **按需取数**: 打开哪个页签才取哪个. 表头取
- * 响应里的 `columns` 而不是在界面上写死——`Order` 有 33 列, 写死就是 33 处会漂移的真相.
+ * 响应里的 `columns` 而不是在界面上写死——`Orders` 有 33 列, 写死就是 33 处会漂移的真相.
  */
 
 import { computed, ref, watch } from 'vue';

@@ -1,7 +1,7 @@
 """行情组件的测试替身.
 
 契约只有两条 (见 `app/services/quote_hub.py`): 以 `quote_hub_root` 为 cwd 跑该目录下的
-`BaoStockParquet.py`, 以及一张三张表齐备的 `stock_data.db`. 于是替身就是"一个目录 + 一个脚本",
+`bao_stock_parquet.py`, 以及一张三张表齐备的 `stock_data.db`. 于是替身就是"一个目录 + 一个脚本",
 生产代码里不必开任何注入缝.
 
 脚本的行为由**同目录下的文件**驱动, 而不是环境变量: 环境变量会漏进同一个进程里的其它用例,
@@ -116,7 +116,7 @@ if ingest_file.is_file():
 
 
 def write_stub_component(quote_hub_root: Path) -> Path:
-    """落一个桩 `BaoStockParquet.py`. 文件在 = 组件在位."""
+    """落一个桩 `bao_stock_parquet.py`. 文件在 = 组件在位."""
 
     quote_hub_root.mkdir(parents=True, exist_ok=True)
     component_file = quote_hub_root / STUB_COMPONENT_FILENAME

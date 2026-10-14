@@ -255,7 +255,12 @@ cd frontend && npm run dev                # http://localhost:5173/
   本就按年整份导出，只有取过整年，第一次落地的那份才不含半年的空洞。
 
 前置同第 1 节。三样都要在位：引擎、行情组件 `../QuoteHub`（要有 `stock_data.db` 与
-`BaoStockParquet.py`）、仓内 `market-data/Bar`。组件下载要联网。
+`bao_stock_parquet.py`）、仓内 `market-data/Bar`。组件下载要联网。
+
+> **组件的库现在要先建好**（2026-10 QuoteHub v1.0.0 起）：组件**不建表、不迁移**，库须先在其仓根
+> 跑一次 `python init_database.py --create`（既有库改跑 `--upgrade` 认领）。库未建好或版本戳不符
+> 时组件退出码非 0 并指向那个脚本，平台把这一类报成「行情组件的数据库未初始化或版本不符」——
+> 不再混进「行情下载失败」。
 
 > **注意**：组件库里那份 `StockData.db` 是**生产数据**。走查只增不减，但 D.27 之后第一轮下载会
 > 为传进去的每个合约写账 —— 那是预期内的，不是污染。
@@ -414,10 +419,10 @@ done
 > `BackTest.json` 的 `CommissionGroupId`。故下文的费率判据都要落到**这一轮选的那一组**上，
 > 不再默认是 1 号组。
 
-> **`Product` 的品种代码是三位，不是六位合约代码**（`SSE` + `600`、`SZSE` + `000`）：
+> **`Products` 的品种代码是三位，不是六位合约代码**（`SSE` + `600`、`SZSE` + `000`）：
 > 引擎的查找键是 `(ExchangeId, ProductId)`，而 `ProductId` 取自**行情数据自己那一列**
 > （`MdReader` 按 `ExchangeId, InstrumentId, ProductId` 分组，`SimExchange::InitMdInstrument`
-> 拿它去 `Product` 表选品种）。填成 `600519` 就一个品种都匹配不上，那批合约会走
+> 拿它去 `Products` 表选品种）。填成 `600519` 就一个品种都匹配不上，那批合约会走
 > `VolumeMultiple = 1` 的兜底并计入 `VolumeMultipleFallbackProductCount` ——
 > **回测照跑完，金额与费用却全错**。随平台发布的初始化 CSV 里那两行就是三位。
 
@@ -482,30 +487,33 @@ ls -l runs/<RunId>/BackTestInit.db     # 该轮现生成的那份
 sqlite3 runs/<RunId>/BackTestInit.db ".tables"
 
 # 2) 列序与列数: 与 backend/app/reference_data/seed_contract.py 逐列同序同名
-sqlite3 -header runs/<RunId>/BackTestInit.db "pragma table_info(Product)"
+sqlite3 -header runs/<RunId>/BackTestInit.db "pragma table_info(Products)"
 
 # 3) 展开后的费率行: 只应有该轮合约的行, 三级规则已被摊平
-sqlite3 -header runs/<RunId>/BackTestInit.db "select * from BaseCommission"
+sqlite3 -header runs/<RunId>/BackTestInit.db "select * from BaseCommissions"
 
 # 4) 该轮用的是哪一组 (D.34): 冻结在引擎配置里, 与上面那张表的组号列必须一致
 grep -o '"CommissionGroupId": *[0-9]*' runs/<RunId>/BackTest.json
 ```
 
-- [ ] **恰好三张表**：`Product` / `CommissionGroup` / `BaseCommission`（引擎侧是单数表名）。
-- [ ] `Product` 的列**逐列**等于 `seed_contract.py` 的声明，且文件里**没有任何平台列**
+- [ ] **恰好三张表**：`Products` / `CommissionGroups` / `BaseCommissions`（引擎 2026-10-13 起
+      一律带复数 s，而 C++ 行结构体仍是单数——表名与结构体名在这两个仓里逐字不同）。
+- [ ] `Products` 的列**逐列**等于 `seed_contract.py` 的声明，且文件里**没有任何平台列**
       （`Id` / `CreatedAt` / `UpdatedAt` 都不该出现——引擎按下标读，多一列在前面就是静默错位）。
-- [ ] **`BaseCommission` 只有该轮合约的行**：三级规则（含交易所级那一行）都已被摊成
+- [ ] **`BaseCommissions` 只有该轮合约的行**：三级规则（含交易所级那一行）都已被摊成
       `SSE` / `600519` / 买 与 `SSE` / `600519` / 卖 两行；**没有** `600` 或空串的 `InstrumentId`
       留在文件里（那是管理端的中间形态，不是引擎读的形态）。
 - [ ] **方向只有 `0` 与 `1`，绝不出现 `-1`**：上面那条 `select *` 出来的方向列只有买、卖两值。
       双向那一档是管理端的中间形态（`-1` 只在平台侧存在），它一旦原样落进这个文件，引擎那四列的
       精确查找**一条都命不中** —— 费用静默按 0 算，而回测照常报成功。
-- [ ] **费率行属于这一轮选的那一组**（D.34）：`BaseCommission` 那个组号列**只有一个取值**，
+- [ ] **费率行属于这一轮选的那一组**（D.34）：`BaseCommissions` 那个组号列**只有一个取值**，
       且等于上面第 4 条 `grep` 出来的 `CommissionGroupId`。用 2 号组提交时，这条判据才问得出
       "平台读的是不是所选的组"——只往 1 号组录费率的话，写死 1 的实现照样全绿。
 - [ ] **引擎漂移对照（人工，本轮必做一次）**：打开 `../QuantTrading/src/Mdb/MdbStructs.cpp`
       的字段描述数组，逐列比对 `backend/app/reference_data/seed_contract.py` 的列名与次序，
-      并用 `../QuantTrading/src/BackTest/BackTestInitDbTableList.h` 核对三表清单。
+      并用同处 `GetSchema()` 的 `TableSchema::tableName` 核对三表**表名**。
+      **表名的准据只有这一处**：`BackTestInitDbTableList.h` 写的是 C++ 结构体名（一直是单数），
+      拿它核表名会把复数 s 判成漂移。
       **这条是产物级测试盖不住的**：那边比的是"本仓与生成物"，而生成物是照本仓的声明造的，
       引擎侧模板一旦漂移，本仓全绿也看不出来。
 

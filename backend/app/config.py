@@ -60,7 +60,7 @@ DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES = 8 * 1024
 # 它必须在自己的目录下运行: `connect_database()` 用的是一个**相对**文件名 (`stock_data.db`),
 # 换个 cwd 就会安静地读/建另一个位置的库, 现象是"跑成功但没数据".
 DEFAULT_QUOTE_HUB_ROOT = PLATFORM_ROOT.parent / "QuoteHub"
-QUOTE_HUB_CLI_FILENAME = "BaoStockParquet.py"
+QUOTE_HUB_CLI_FILENAME = "bao_stock_parquet.py"
 QUOTE_HUB_DATABASE_FILENAME = "stock_data.db"
 
 # 落盘的行情精度**恒为 5 分钟**, 与用户选什么无关. 引擎装载期按这个字面量过滤 parquet

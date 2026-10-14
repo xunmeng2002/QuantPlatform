@@ -39,6 +39,47 @@ Python 策略**。
 
 ## ✅ 已完成
 
+### D.39 · 2026-10-14 （第三十九批） 同步上游两处契约：引擎表名一律复数 + QuoteHub 入口改名与建库前置
+
+- **触发**：用户「QuantTrading 做了较大的调整、尤其是数据库表名的变化，配置变化。另外就是
+  QuoteHub 这边应该也有调整。你先大致看一下，先从哪开始」。
+- **上游事实（实测，不采信记载）**：引擎 2026-10-13 起把 **21 张表名一律加 s**，准据是
+  `QuantTrading/src/Mdb/MdbStructs.cpp` 的 `GetSchema()` 里 `TableSchema::tableName`；
+  `BackTestInitDbTableList.h` / `BackTestTableList.h` 写的是 C++ 结构体名（**一直是单数**），
+  **不是表名的准据**。本机 `bin/Release/BackTest.dll` 于 2026-10-14 11:19 重编（在那次改名之后），
+  引擎根下的 `BackTestInit.db` 里已是复数表名。
+- **为什么种子库那三张是静默故障**：名字写错**不报错**——引擎查不到
+  `Products` / `CommissionGroups` / `BaseCommissions`，照跑完整轮并把 `Success` 报成 true，只是
+  费率按 0 计、合约乘数全部退化；唯一的线索是 `result.json` 的 `CommissionMissingCount`。结果库那
+  五张是**响的**（名字错即五个明细页签全 404），故两者危害不同级。
+- **落点（种子库）**：`reference_data/seed_contract.py` 三张表名改复数（并在 docstring 写明"表名与
+  C++ 结构体名逐字不同"）、`seed_database.py` 的 `SEED_TABLE_MODELS` 键与四处字面查找、
+  `reference_seed/*.csv` 三份 `git mv` 改名（文件名即表名，`initial_rows.py` 按 `table.table_name`
+  拼路径，不改名就找不到）。
+- **落点（结果库）**：`services/result_database.py` 的 `RESULT_TABLE_NAMES` 改复数，前端
+  `api/types.ts` 的镜像同步。「表名一律加双引号」那条理由原是"`Order` 是 SQLite 保留字"，
+  改名后不再成立，改成不受名字变化影响的统一引用（引号照加）。
+- **落点（QuoteHub）**：入口文件名 `BaoStockParquet.py` → `bao_stock_parquet.py`（只 `config.py`
+  一处常量；桩脚本按它派生名字，故一处生效）。**新增一类失败**——组件 v1.0.0 起**不建表、不迁移**，
+  库未建好或版本戳不符时退非零并指向 `init_database.py`（发生在联网登录**之前**），平台原本把它
+  混进"行情下载失败"，现单列 `MARKET_DATA_SCHEMA_NOT_INITIALIZED_MESSAGE`。
+- **新增两条"钉住上游"的断言**：本仓其余同类断言都是**自指**的（契约 ↔ 生成物 ↔ ORM 模型三处同源），
+  把契约改回单数照样全绿。故 `test_seed_contract.py::test_the_contract_pins_the_engine_table_names`
+  与 `test_run_results.py::test_the_whitelist_pins_the_engine_table_names` 把表名抄成**字面量**、
+  **故意与契约不同源**。
+- **文档同步**：`acceptance-checklist.md`（§14/§16 的表名、"引擎侧是单数表名"那句改为复数并点名
+  漂移对照的准据、`BaoStockParquet.py`、组件的建库前置）、`platform-plan.md`、`job-workspace.md`、
+  `.env.example`、以及本文件。**带日期的历史实测行有意保留原名**——那时确实是单数，改写会篡改实测
+  记录。
+- **验收**：后端 `pytest` **747 项全过**；真引擎验收 `pytest -m real_engine` **5 项全过**，且逐份看
+  作业目录里的 `result.json`：`BasicDataLoaded=true`、`CommissionMissingCount=0`、
+  `CommissionZeroRateKeyCount=0`、`VolumeMultipleFallbackProductCount=0`——**这一条才证明种子库
+  真被引擎装载**（`Success=true` 单独不够，它同时对错误的表名成立）。前端 `type-check` 干净 +
+  `vitest` **238 项全绿**。
+- **仍未决 —— 待用户手工验收**：`acceptance-checklist.md` §16.3 那三条 `sqlite3` 判据（现已改成复数
+  表名）与 §14 的组件建库前置走查。
+- **提交状态**：**已提交**（本批与上述文档同步同一棵树入库）。
+
 ### D.38 · 2026-10-09 （第三十八批） 引擎 Linux 包改用 `RUNPATH: $ORIGIN`：家规进 `CMakeCommon` + 《引擎 Linux 发布包要求》
 
 - **触发**：用户问「离正式发布和上云还差什么」，一路追到「云主机是 Linux，Windows 做服务不太行」
@@ -195,57 +236,11 @@ Python 策略**。
 
 ### D.34 · 2026-10-07 （第三十四批） 手续费组随轮冻结：提交页选组 + 删组两道闸
 
-- **触发**：用户「在新建回测的地方选手续费组」。此前组号是
-  `app/scheduler/engine_config.py` 的**模块常量** `COMMISSION_GROUP_ID = 1`，管理端能建 2 号、
-  3 号组，但**永远只有 1 号组会被用到**。
-- **用户拍板两点**：① 请求体里这一格**必填、不给默认值**；② 被**配置模板**引用着的组，
-  **删除时拦**。
-- **引擎侧零改动（三处 `file:line` 已核实）**：这个键本来就由 `Config` 解析
-  （`Config.cpp:53`）、由 `SimExchange` 记下（`SimExchange.cpp:106`）并在建账号时带上
-  （`SimExchange.cpp:786`）——与**早就是运行级字段**的 `InitialCapital` 完全同构（同一个
-  `Config` 解析、同一个 `HandleRegisterAccount` 消费）。故本批全部落在 QuantPlatform，
-  `QuantTrading` 只改一句文档（见其 `docs/backtest-run-contract.md` §5）。
-- **语义：组号随轮冻结**。提交时写进该轮 `BackTest.json` 的 `CommissionGroupId`，落库于
-  `Runs.BacktestConfigJson`；**提交期的费率校验与调度期按轮生成种子库读同一个值**，不再各读
-  一个常量。
-- **落点（后端）**：`services/run_configuration.py` 加 `COMMISSION_GROUP_ID_FIELD_NAME` /
-  `COMMISSION_GROUP_ID_KEY = "CommissionGroupId"` / `validate_commission_group_id`（照
-  `validate_initial_capital` 的形制）；`DecodedRunFields` 加字段，`decode_run_fields` **从引擎
-  配置**读它（与 `initial_capital` 同一侧，**刻意不进** `RUN_FIELD_KEY_NAMES` —— 那张表喂的是
-  策略配置，而组号只在 `BackTest.json` 里）；
-  **新增** `app/services/commission_group.py`（DRY：`commission_group_exists` 共用那条 `select`
-  谓词 + `ensure_commission_group_exists` 400 包装，被提交与模板建两处共用）；
-  `services/run_submission.py` 在费率校验**之前**另问一次"组存在"；
-  `scheduler/runner.py` 的 `LaunchContext` 多一个 `commission_group_id`（从**冻结的**
-  `engine_configuration_text` 解出，`_decode_launch_fields` 只负责如实退回取值），解不出即
-  `UnrunnableJob(UNDECODABLE_COMMISSION_GROUP_MESSAGE)`。
-- **报备：删掉 `engine_config.COMMISSION_GROUP_ID` 这个模块常量**（属 Harness §3.1「弃用一个
-  既有导出符号」的强制确认点，本批按计划里已获批处理）。理由：留着它早晚被下一个调用点捡回去
-  用，而三个消费点（提交侧费率校验、种子库展开、`render_engine_config`）**全部改走运行级取值**。
-  测试侧改从 `tests/helpers.py:DEFAULT_COMMISSION_GROUP_ID` 取（约七个文件）。
-- **两道闸的错误码**：提交 / 建模板时组不存在 → **400**
-  （`UNKNOWN_COMMISSION_GROUP_MESSAGE_TEMPLATE`，点名组号并指向「基础数据」页）；
-  删一个被模板引用的组 → **409**
-  （`COMMISSION_GROUP_TEMPLATE_REFERENCED_MESSAGE_TEMPLATE`，**点名条数**），与既有的"组下还
-  有费率明细就拦"并列。**这条 400 不能并进那次费率校验**：交易对留空时那条整个跳过，而组号照样
-  会被冻进这一轮的引擎配置——表现为引擎按一个空组计费。
-- **迁移的 `default=1` 是回填值，不是接口默认值**：
-  `catalog/migrations.py::add_missing_columns` 要求 NOT NULL 新列有一个**可渲染的标量默认**，
-  否则该列根本不会被加上。老模板行得到 1，**与它们此前的实际行为一致**（那时平台侧只有那一个
-  常量）。docstring 里把这句写死，免得日后被读成"接口默认值"。
-- **新增一条非管理员只读路由** `GET /api/reference-data/commission-group-options`：管理面那九个
-  端点都挂着 `AdminUserDependency`，而**普通用户有权提交回测** —— 他要选组就必须看得见组。故在
-  同一 router 里加一条**只要登录**的只读投影（组号 + 组名），并在该模块 docstring 里点明这处
-  例外（"这是给提交页用的选项投影，不是管理面"）。
-- **前端**：`domain/run-form.ts` 的 `RunFieldInputs.commissionGroupId: number | null`
-  （**不拿文本承载数值** —— 这一格是下拉选出来的，与手输的 `initialCapitalText` 有意分叉）；
-  新增 `readCommissionGroupId`，拒 `null` / 非整数 / `< 0`，且**不写 `?? 0`**（`0` 是**合法**
-  组号，与 `initialCapital ?? 0` 那种"下游还会再拒一次"的情形不同）；`RunSubmitView.vue` 在
-  「运行范围」卡片加**第三个独立取数**的下拉（`id="run-commission-group"`，文案「组号 · 组名」），
-  **不预选**（只有"上次提交的参数"里带了组号才回填）；一个组都没有时禁用并给出"先去基础数据页
-  建一个"的**可读原因**，而不是一个空的静默下拉。
-- **验收**：后端 `pytest` **740 项全过**（D.33 基线 730 + 本节 10）；前端 `type-check` 干净 +
-  `vitest` **238 项 / 30 文件全绿**（233 + 5）。
+> **全条见归档 D.34**。一段话：组号从 `engine_config.COMMISSION_GROUP_ID` 那个**模块常量**改成
+> **运行级字段**，提交时冻进该轮 `BackTest.json` 的 `CommissionGroupId`（落库 `Runs.BacktestConfigJson`），
+> 提交期费率校验与调度期生成种子库**读同一个值**；被**配置模板**引用着的组删除时拦（409）。请求体里
+> 这一格**必填、不给默认值**。**引擎零改动**（那个键本来由 `Config` 解析、`SimExchange` 建账号时带上）。
+
 - **仍未决 —— 待用户手工验收**：新建回测页选组走查（含**一个组都没有时的提示**、与"上次提交的
   参数"的回填往返）、删一个被模板引用的组被 409 拒、该轮 `BackTest.json` 的 `CommissionGroupId`
   与作业目录种子库里的费率行属于**同一个组**。清单见
@@ -258,45 +253,18 @@ Python 策略**。
   `CommissionGroupNotExist` 是死代码）—— 靠提交期那两道校验兜住，两者都点名组号与合约；
   ② **队列里的轮不受删组拦截保护** —— 它们会在起跑前以 `UnrunnableJob` 失败，文案点名缺哪个
   合约、哪个方向（**不是静默降级**）。
-- **提交状态**：**已提交**（`f32ac48`，与 D.31–D.33 同一棵树一并入库）。
 
 ### D.33 · 2026-10-07 （第三十三批） 费率方向加「双向」通配 + 展开时摊成两行
 
-- **触发**：用户「给买卖方向也提供一个通配选项吧, 大部分对于买卖双向都是一样的。也在生成
-  initdb 时进行扩展」。D.32 解决了"按合约 / 品种 / 交易所录"，但方向那一格仍是买卖各占一行 ——
-  佣金与过户费本来就买卖同数，只有印花税分侧，于是每录一条规则都要复制一遍。
-- **用户拍板**：新建规则的「方向」**默认取双向**（买 / 卖仍可选）。
-- **编码方式与三级作用域同一套路：不加列，由 `Direction` 的取值承载** —— `-1` = 双向（**只在
-  平台侧存在**）、`0` = 只买、`1` = 只卖。引擎那四列的精确查找一字不动，**引擎零改动**。
-- **两侧同时放宽时谁赢，两条次序**：① **作用域先于方向**（更具体的一档遮住更宽的一档，故合约级
-  「双向」压过品种级「卖」）；② **同一格内，精确方向遮住双向**（同一合约上既有「双向」又有
-  「卖」时，卖那一笔取「卖」那一行）。
-- **落点**：后端 `catalog/enums.py` 加 `RateDirection`（`BOTH = -1`，买 / 卖两值**取自**
-  `CommissionDirection` 而不另写一遍）；`catalog/schemas.py` 的写侧改收它（读侧仍是裸 `int`）；
-  `rate_expansion.py` 加 `_find_row_for_direction`（**每档内先精确、再双向**），
-  `_with_instrument_id` 改名为 **`_bind_row_to_contract`**（整行照搬，**同时改写合约格与方向格**
-  这两处键列）；`seed_database.py` 在写文件**之前**加 `_ensure_base_commissions_are_expanded`
-  （方向只许 0 / 1、合约格不许为空，不符即抛且**连目录都不建**）。
-  前端：`api/types.ts` 的 `COMMISSION_DIRECTIONS` / `CommissionDirection` 换成
-  `RATE_DIRECTIONS` / `RateDirection`（**删一个导出符号**，全仓唯一消费者是费率面板）+
-  `BOTH_DIRECTIONS`；`domain/labels.ts` 加 `-1: '双向'` 与 `describeCommissionDirectionPhrase`
-  （`双向` 已经是完整说法，**不再接「向」**）；面板默认双向、下拉三档、方向那一格的提示改写。
-- **有意撤掉一条既有校验（报备）**：`test_a_direction_outside_the_engine_values_is_rejected`
-  原本参数化 `[-1, 2]` 两条都期望 422 —— `-1` 从"引擎取值之外"变成**有意收下的合法档**，故这条
-  收成 `[2]`，另起一条"双向可建、可读回"的用例。**"方向只能是 0 / 1"这条规则只在引擎那一侧
-  继续成立**，平台这一侧不再成立。
-- **三道网兜住「`-1` 漏进种子库」**（这是本次唯一会**静默算错钱**的路径：引擎那四列查不到就
-  `CommissionMissingCount++`、费用按 0 算，而回测照常报"成功"）：① 绑定函数同时改写方向格；
-  ② 写入口的断言（管得住任何调用方，`write_seed_database` 是公开函数）；③ `test_seed_database.py`
-  里对**真生成的文件**断言每一行 `BaseCommission.Direction ∈ {0, 1}`。前端另有一条断言钉住
-  「双向费率」那句话里**不出现**「双向向费率」。
-- **验收**：后端 `pytest` **730 项全过**（D.32 基线 722 + 本节 8 条）；前端 `type-check` 干净 +
-  `vitest` **233 项 / 30 文件全绿**（231 + 2）。
+> **全条见归档 D.33**。一段话：编码方式与三级作用域同一套路——**不加列，由 `Direction` 的取值
+> 承载**（`-1` = 双向，**只在平台侧存在**；`0` = 只买、`1` = 只卖）。引擎那四列的精确查找一字不动，
+> **引擎零改动**。两侧同时放宽时两条次序：**作用域先于方向**、**同一格内精确方向遮住双向**。三道网
+> 兜住"`-1` 漏进种子库"这条**唯一会静默算错钱**的路径。
+
 - **仍未决 —— 待用户手工验收**：`acceptance-checklist.md` §16.2 加的"**只录一条双向即可提交**"、
   §16.3 加的第 4 条判据（**产物 `Direction` 只有 0 与 1，绝不出现 `-1`**）。
 - **已知风险（已接受）**：**双向会把印花税收进买入侧** —— 界面提示里明说了这件事，但**不拦**
   （别的市场确实两侧都收），要不要拆成买 / 卖两行由用户定。
-- **提交状态**：**已提交**（`f32ac48`，与 D.31 / D.32 / D.34 同一棵树一并入库）。
 
 ### D.32 · 2026-10-07 （第三十二批） 费率三级设置 + 种子库改按轮生成
 
@@ -306,7 +274,7 @@ Python 策略**。
 > 五处计划外改动的报备随原文入归档。
 
 - **仍未决 —— 待用户手工验收**：费率三级走查（含未登记短码被 400 拦、换作用域清空代码）、
-  该轮作业目录 `sqlite3` 三条判据（**恰好三表 / 列序对齐 / `BaseCommission` 只有该轮合约的
+  该轮作业目录 `sqlite3` 三条判据（**恰好三表 / 列序对齐 / `BaseCommissions` 只有该轮合约的
   行**）、真引擎一轮四个计数、三级全删则提交被 400 拦、**与 `MdbStructs.cpp` 的列序人工对照**。
   清单见 [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §16。
 - **已接受的风险（仍生效）**：`bin/*/BackTestInit.db` 从此**无人维护**（手工跑
@@ -483,7 +451,7 @@ Python 策略**。
 - **P6 的前置已由 P6 自己结清**（2026-09-28，D.23）：P5 打通的「读结果库」那条路确实够用——
   `/api/runs/compare?ids=a,b,c` 把 `read_capital_series` 在**多轮**上各调一次
   （逐轮各自 `to_thread`，不 `ATTACH`），曲线叠加是前端的事。**当时记的口径坑已落地**：
-  不同轮的 `Capital` 长度与起点都不同（交易日区间不同），叠加前按 `TradingDay` 取并集对齐、
+  不同轮的 `Capitals` 长度与起点都不同（交易日区间不同），叠加前按 `TradingDay` 取并集对齐、
   缺的那天填 `null` 留断口（`frontend/src/domain/equity.ts:alignEquitySeries`），**不插值、
   不取前值**——覆盖区间不同恰恰是这一页最该暴露的事实。`DELETE /api/runs/{id}` 已随 P7 落地
   （连工作目录一起删，先目录后行）。
@@ -522,7 +490,7 @@ Python 策略**。
 | 前端测试 | **vitest 只测纯逻辑**（`environment: node`） | 不装 `@vue/test-utils` 与 jsdom；**要测组件时再加**。**2026-09-26 正是按本行自己预设的条件加装**（jsdom + @vue/test-utils；全局仍 `node`，组件 spec 逐文件声明 jsdom），见归档 D.11；当时的存疑原文已归档为 `Q.07` |
 | 前端页面范围 | **闭环 + 最小 admin 用户页** | 原不含 `/compare`、`/settings`；**权益曲线与明细分页表已于 P5 补齐**、**`/compare` 已于 P6 落地（D.23）**，只剩 `/settings`（P8） |
 | 前端版本号 | **照抄本机同族项目的已验证组合** | router 5 / pinia 4 / vitest 5 / TS 7 都是主版本跳跃，不追 |
-| 结果表明细范围 | **精选 5 张**：`Capital` / `Trade` / `Order` / `Position` / `PositionDetail` | P5 拍板；**不加列表端点**，表名清单前端镜像一份，见归档 D.08 |
+| 结果表明细范围 | **精选 5 张**：`Capitals` / `Trades` / `Orders` / `Positions` / `PositionDetails` | P5 拍板；**不加列表端点**，表名清单前端镜像一份，见归档 D.08；**2026-10-13 引擎把表名一律加了 s**（D.39） |
 | 回撤在哪算 | **前端纯函数派生**（`domain/equity.ts`） | P5 拍板；后端只回原样逐日序列，接口不随图表变化 |
 | 阻塞的库调用 | **`asyncio.to_thread`**（本仓首例，P5 引入） | sqlite3 阻塞且连接不能跨线程；与 P4 内联文件 IO 有意分叉 |
 | 引擎版本管理 | **只做可追溯**（2026-09-27 拍板） | 记下每轮跑的是哪个构建并显示，**不收包 / 不启停 / 不按轮选**；理由见 `platform-plan.md` §12.23 |
@@ -626,7 +594,7 @@ Python 策略**。
   `cd backend && python -c "from app.config import PlatformSettings as S; s=S.from_environment();
   print(s.market_data_root.is_dir(), s.session_file_path.is_file(), s.engine_root.is_dir(),
   s.quote_hub_root.is_dir())"`。**修法**：`mkdir` 一个空目录即可 —— 那道闸只问 `is_dir()`, 而
-  QuoteHub 的 `--output-root` 是它自己建的（`BaoStockParquet.py:380` 的
+  QuoteHub 的 `--output-root` 是它自己建的（`bao_stock_parquet.py:380` 的
   `os.makedirs(..., exist_ok=True)`）, 空根会在首轮提交时按需下载填上。**不必重启后端**:
   `is_dir()` 是**逐请求**求值, 不是启动期快照。两点附带：① `market_data_root` 同时是引擎
   `BackTest.json` 的 `MdDataPath`, 故它必须与引擎同机可读；② 仓外那两份现成的行情根都对不上
@@ -698,9 +666,9 @@ Python 策略**。
   （闭环靠手动验收，这本就是计划原本的验收方式）。
 - **P5 新增的已知缺口**（**明确不做**，别当缺陷修，逐条理由见
   `platform-plan.md` §12.19–12.22）：**另 12 张结果表在界面上看不到**
-  （含 2928 行的 `BarMarketData`，只开了 5 张交易与资金表）、**表名清单是两处
+  （含 2928 行的 `BarMarketDatas`，只开了 5 张交易与资金表）、**表名清单是两处
   真相**（后端白名单 + 前端镜像，漏改一处只会让某个页签 404）、**盘中回撤不可得**
-  （`Capital` 只有逐日结算权益，`Margin`/`MarketValue` 在本样本里恒为 0，
+  （`Capitals` 只有逐日结算权益，`Margin`/`MarketValue` 在本样本里恒为 0，
   图上画的是逐日而非日内）、**失败的轮看不到部分结果**（`db_path` 只在
   `result.json` 写成功后才镜像入库，取消/超时/启动失败的轮一律空串 → 404）。
   另**不做**：K 线图、多轮曲线叠加（属 P6）、图表导出图片、明细表导出 CSV

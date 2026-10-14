@@ -76,7 +76,7 @@ class ResultTableFixture:
 
 
 RESULT_TABLE_FIXTURES: dict[str, ResultTableFixture] = {
-    "Capital": ResultTableFixture(
+    "Capitals": ResultTableFixture(
         column_definitions=(
             ("TradingDay", "char(16)"),
             ("AccountId", "char(32)"),
@@ -94,7 +94,7 @@ RESULT_TABLE_FIXTURES: dict[str, ResultTableFixture] = {
             ("20240104", ACCOUNT_ID, 0, 1000500.0, 998000.0, 1000000.0),
         ),
     ),
-    "Trade": ResultTableFixture(
+    "Trades": ResultTableFixture(
         column_definitions=(
             ("TradingDay", "char(16)"),
             ("AccountId", "char(32)"),
@@ -116,7 +116,7 @@ RESULT_TABLE_FIXTURES: dict[str, ResultTableFixture] = {
             ("20240104", ACCOUNT_ID, "SSE", "600003", "T0007", 1, 13.0, 700),
         ),
     ),
-    "Order": ResultTableFixture(
+    "Orders": ResultTableFixture(
         column_definitions=(
             ("TradingDay", "char(16)"),
             ("AccountId", "char(32)"),
@@ -132,7 +132,7 @@ RESULT_TABLE_FIXTURES: dict[str, ResultTableFixture] = {
             ("20240103", ACCOUNT_ID, "SSE", "600002", 3, 12.0, 500),
         ),
     ),
-    "Position": ResultTableFixture(
+    "Positions": ResultTableFixture(
         column_definitions=(
             ("TradingDay", "char(16)"),
             ("AccountId", "char(32)"),
@@ -146,7 +146,7 @@ RESULT_TABLE_FIXTURES: dict[str, ResultTableFixture] = {
             ("20240102", ACCOUNT_ID, "SSE", "600000", 1, 300),
         ),
     ),
-    "PositionDetail": ResultTableFixture(
+    "PositionDetails": ResultTableFixture(
         column_definitions=(
             ("TradingDay", "char(16)"),
             ("AccountId", "char(32)"),
@@ -165,10 +165,27 @@ RESULT_TABLE_FIXTURES: dict[str, ResultTableFixture] = {
 }
 
 UNLISTED_TABLE_NAMES = (
-    "BarMarketData",
+    "BarMarketDatas",
     "users",
     "sqlite_master",
-    'Capital"; DROP TABLE "Trade"; --',
+    'Capitals"; DROP TABLE "Trades"; --',
+)
+
+"""引擎那一侧现在认的五个表名, 抄成字面量.
+
+准据是 `QuantTrading/src/Mdb/MdbStructs.cpp` 里 `GetSchema()` 的 `TableSchema::tableName`
+(**不是** `BackTestTableList.h` —— 那份清单写的是 C++ 结构体名, 一直是单数). 复数 s 是
+2026-10-13 那批改名留下的 (`eb8da43`, 21 张表一律加 s).
+
+同 `test_seed_contract.py` 的那一条: 抄字面量是为了让这条断言**故意与白名单不同源**.
+"""
+
+ENGINE_RESULT_TABLE_NAMES = (
+    "Capitals",
+    "Trades",
+    "Orders",
+    "Positions",
+    "PositionDetails",
 )
 
 OUTSIDE_JOB_DIRECTORY_PATHS = (
@@ -209,9 +226,9 @@ def result_database_file(settings: PlatformSettings, run_id: str) -> Path:
 
 
 def expected_equity_points() -> list[dict[str, object]]:
-    """权益曲线应有的三个字段, 由夹具里的 `Capital` 行派生 (不另抄一份)."""
+    """权益曲线应有的三个字段, 由夹具里的 `Capitals` 行派生 (不另抄一份)."""
 
-    table = RESULT_TABLE_FIXTURES["Capital"]
+    table = RESULT_TABLE_FIXTURES["Capitals"]
     column_indexes = {
         column_name: index for index, column_name in enumerate(table.column_names)
     }
@@ -345,11 +362,11 @@ async def test_the_trade_table_page_returns_its_columns_and_rows(
 ) -> None:
     """表头由 `columns` 给出且顺序即权威顺序, 行按列序落成对象.
 
-    界面上不写死列: `Order` 有 33 列, 写死就是 33 处会漂移的真相.
+    界面上不写死列: `Orders` 有 33 列, 写死就是 33 处会漂移的真相.
     """
 
     response = await client.get(
-        _table_path(result_board.member_run.id, "Trade"),
+        _table_path(result_board.member_run.id, "Trades"),
         headers=bearer_headers(result_board.member_token),
     )
 
@@ -357,20 +374,20 @@ async def test_the_trade_table_page_returns_its_columns_and_rows(
 
     payload = response.json()
 
-    assert payload["table"] == "Trade"
-    assert payload["columns"] == RESULT_TABLE_FIXTURES["Trade"].column_names
-    assert payload["total"] == len(RESULT_TABLE_FIXTURES["Trade"].rows)
+    assert payload["table"] == "Trades"
+    assert payload["columns"] == RESULT_TABLE_FIXTURES["Trades"].column_names
+    assert payload["total"] == len(RESULT_TABLE_FIXTURES["Trades"].rows)
     assert payload["offset"] == 0
     assert payload["limit"] == DEFAULT_PAGE_SIZE
-    assert payload["records"] == expected_table_records("Trade")
+    assert payload["records"] == expected_table_records("Trades")
 
 
 async def test_every_whitelisted_table_is_reachable_by_its_engine_name(
     client: AsyncClient, result_board: ResultBoard
 ) -> None:
-    """白名单里的 5 张表都要读得出来 —— 其中 `Order` 是 SQLite 保留字.
+    """白名单里的 5 张表都要读得出来 —— 其中 `Orders` 是 33 列那张宽表.
 
-    这条用例就是"表名忘了加引号"会转红的那条: 裸写 `FROM Order` 是语法错, 接口会 500.
+    表名漂回单数 `Order` 时这条转红 (接口 404); 名字与引擎对不上, 这里是唯一的拦路点.
     """
 
     for table_name in RESULT_TABLE_NAMES:
@@ -400,7 +417,7 @@ async def test_paging_advances_without_repeating_or_skipping_records(
 
     for offset in (0, 3, 6):
         response = await client.get(
-            _table_path(result_board.member_run.id, "Trade"),
+            _table_path(result_board.member_run.id, "Trades"),
             params={"offset": offset, "limit": 3},
             headers=bearer_headers(result_board.member_token),
         )
@@ -415,7 +432,17 @@ async def test_paging_advances_without_repeating_or_skipping_records(
 
         collected.extend(payload["records"])
 
-    assert collected == expected_table_records("Trade")
+    assert collected == expected_table_records("Trades")
+
+
+def test_the_whitelist_pins_the_engine_table_names() -> None:
+    """白名单逐字等于引擎当前写的那五张表.
+
+    夹具的表名与这里同源, 故白名单被"顺手改回单数"时, 其余用例照样全绿 —— 而真实的一轮会在
+    界面上五个页签全 404, 因为引擎写的库里头是复数.
+    """
+
+    assert RESULT_TABLE_NAMES == ENGINE_RESULT_TABLE_NAMES
 
 
 @pytest.mark.parametrize("table_name", UNLISTED_TABLE_NAMES)
@@ -424,7 +451,7 @@ async def test_a_table_outside_the_whitelist_is_not_found(
 ) -> None:
     """未收录的表名一律 404, 且**什么都没被执行**.
 
-    `BarMarketData` 是引擎真有、但本轮界面没开的一张表; 其余三个分别是"平台自己的库"、
+    `BarMarketDatas` 是引擎真有、但本轮界面没开的一张表; 其余三个分别是"平台自己的库"、
     SQLite 的元数据表、以及一次拼接尝试. 后者跑完必须连一行都没少.
     """
 
@@ -437,12 +464,12 @@ async def test_a_table_outside_the_whitelist_is_not_found(
     assert response.json()["detail"] == RESULT_TABLE_NOT_FOUND_MESSAGE
 
     intact = await client.get(
-        _table_path(result_board.member_run.id, "Trade"),
+        _table_path(result_board.member_run.id, "Trades"),
         headers=bearer_headers(result_board.member_token),
     )
 
     assert intact.status_code == 200
-    assert intact.json()["total"] == len(RESULT_TABLE_FIXTURES["Trade"].rows)
+    assert intact.json()["total"] == len(RESULT_TABLE_FIXTURES["Trades"].rows)
 
 
 @pytest.mark.parametrize("table_name", UNLISTED_TABLE_NAMES)
@@ -503,7 +530,7 @@ async def test_a_run_that_has_not_finished_has_no_readable_results(
     assert equity_response.json()["detail"] == RESULT_NOT_READY_MESSAGE
 
     table_response = await client.get(
-        _table_path(result_board.member_run.id, "Trade"),
+        _table_path(result_board.member_run.id, "Trades"),
         headers=bearer_headers(result_board.member_token),
     )
 
@@ -523,7 +550,7 @@ async def test_another_users_result_database_is_out_of_reach(
         _equity_path(result_board.member_run.id), headers=outsider_headers
     )
     table_response = await client.get(
-        _table_path(result_board.member_run.id, "Trade"), headers=outsider_headers
+        _table_path(result_board.member_run.id, "Trades"), headers=outsider_headers
     )
 
     assert equity_response.status_code == 404
@@ -536,7 +563,7 @@ async def test_result_reads_reject_an_anonymous_caller(
     """匿名访问两条端点都是 401 (缺令牌时由 Starlette 层挡下, 响应体里没有 detail)."""
 
     equity_response = await client.get(_equity_path(result_board.member_run.id))
-    table_response = await client.get(_table_path(result_board.member_run.id, "Trade"))
+    table_response = await client.get(_table_path(result_board.member_run.id, "Trades"))
 
     assert equity_response.status_code == 401
     assert table_response.status_code == 401
@@ -579,7 +606,7 @@ async def test_a_missing_database_file_is_not_found(
     )
 
     response = await client.get(
-        _table_path(result_board.member_run.id, "Trade"),
+        _table_path(result_board.member_run.id, "Trades"),
         headers=bearer_headers(result_board.member_token),
     )
 
@@ -650,7 +677,7 @@ async def test_invalid_paging_parameters_are_rejected(
     """分页参数越界或不是整数一律 422 (上限与房规的 `MAXIMUM_PAGE_SIZE` 同值)."""
 
     response = await client.get(
-        _table_path(result_board.member_run.id, "Trade"),
+        _table_path(result_board.member_run.id, "Trades"),
         params=params,
         headers=bearer_headers(result_board.member_token),
     )

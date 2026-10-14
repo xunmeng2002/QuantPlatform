@@ -76,7 +76,7 @@ const PRE_CHANGE_VERSION_MESSAGE = '该版本落在改形态之前, 没有配置
 /**
  * 一个手续费组都没有时那句原因.
  *
- * 这不是异常状态: 全新安装的组表就是空的 (`reference_seed/CommissionGroup.csv` 只有表头), 组由
+ * 这不是异常状态: 全新安装的组表就是空的 (`reference_seed/CommissionGroups.csv` 只有表头), 组由
  * 管理员在「基础数据」页维护. 空下拉框配一句"还没有组"是**可行动**的; 空下拉框什么都不说, 用户
  * 只会以为页面坏了.
  */

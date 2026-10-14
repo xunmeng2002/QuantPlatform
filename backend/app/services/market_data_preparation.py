@@ -54,6 +54,7 @@ MARKET_DATA_COMPONENT_START_FAILED_MESSAGE = "行情组件无法启动"
 MARKET_DATA_REQUEST_INCOMPLETE_MESSAGE = "该轮运行记录的行情准备参数不完整, 无法确定要准备哪段区间"
 MARKET_DATA_UNIVERSE_TOO_LARGE_MESSAGE = "需要一并刷新的合约过多, 超出单次命令的长度上限"
 MARKET_DATA_LOGIN_FAILED_MESSAGE = "行情数据源登录失败, 请检查行情组件的凭据与网络"
+MARKET_DATA_SCHEMA_NOT_INITIALIZED_MESSAGE = "行情组件的数据库未初始化或版本不符, 请先按其文档建库"
 MARKET_DATA_DOWNLOAD_FAILED_MESSAGE = "行情下载失败"
 MARKET_DATA_PREPARE_TIMEOUT_MESSAGE = "行情准备超时"
 MARKET_DATA_STILL_INSUFFICIENT_MESSAGE = "该合约在所请求区间内没有行情数据"
@@ -414,7 +415,14 @@ def _assert_component_in_place(quote_hub_root: Path) -> None:
 
 
 def _classify_failure(stderr_tail: str) -> str:
-    """把非零退出分成两类. 两者对用户的指向完全不同: 一个是凭据/网络, 一个是其它."""
+    """把非零退出分三类. 三者对运维的指向完全不同: 库没建好、凭据/网络、其它.
+
+    先认"库没建好": 那一步发生在联网登录之前, 与登录失败不会同时出现, 且它的修复动作最具体 ——
+    归进"下载失败"的话, 运维会去查网络, 而真正要做的只是跑一次组件的建库脚本.
+    """
+
+    if quote_hub.indicates_schema_not_initialized(stderr_tail):
+        return MARKET_DATA_SCHEMA_NOT_INITIALIZED_MESSAGE
 
     if quote_hub.indicates_login_failure(stderr_tail):
         return MARKET_DATA_LOGIN_FAILED_MESSAGE

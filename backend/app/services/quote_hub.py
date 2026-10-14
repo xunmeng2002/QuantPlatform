@@ -95,7 +95,7 @@ TRADABLE_STOCK_TYPE_VALUES = ("1",)
 # 误伤, 是**有意接受**的: 下拉框的用途是挑一个现在还能跑的标的.
 TRADING_TRADE_STATUS_VALUE = "1"
 
-# 组件主键 `sh.600519` 的前缀与引擎侧的交易所字面量. 与 `BaoStockParquet.py` 的拆分函数、以及
+# 组件主键 `sh.600519` 的前缀与引擎侧的交易所字面量. 与 `bao_stock_parquet.py` 的拆分函数、以及
 # 行情目录名 `Identity=SSE.Stock` 三处必须一致, 故这里只镜像、不推导.
 EXCHANGE_PREFIX_TO_IDENTIFIER = {"sh": "SSE", "sz": "SZSE"}
 EXCHANGE_IDENTIFIER_TO_PREFIX = {
@@ -106,6 +106,10 @@ CONTRACT_CODE_SEPARATOR = "."
 
 # 组件打印的登录失败标记. 它 `raise SystemExit("BaoStock 登录失败")`, 类别只能从 stderr 文字认.
 LOGIN_FAILURE_STDERR_MARKER = "登录失败"
+
+# 组件库未建或版本戳不符时, 它以非零退出并在 stderr 里点名 `init_database.py` (那是消费方要执行的
+# 建库动作). 这一步发生在联网登录之前, 故与登录失败不会同时出现. 类别同样只能从文字认.
+SCHEMA_NOT_INITIALIZED_STDERR_MARKER = "init_database.py"
 
 STREAM_TAIL_CHARACTER_LIMIT = 4096
 STREAM_READ_CHUNK_BYTES = 4096
@@ -548,3 +552,13 @@ def indicates_login_failure(stderr_tail: str) -> bool:
     与它的其它致命错误同码, 故这一步是消歧的**唯一**依据."""
 
     return LOGIN_FAILURE_STDERR_MARKER in stderr_tail
+
+
+def indicates_schema_not_initialized(stderr_tail: str) -> bool:
+    """组件库未建或版本戳不符时, stderr 里那句指向 `init_database.py` 的提示.
+
+    与登录失败同码, 也同是"只能从文字认". 它指向的修复动作 (先建库) 与凭据/网络毫无关系, 故不
+    能与登录失败归成一类 —— 归错了, 运维会去查网络, 而真正要做的是跑一次建库脚本.
+    """
+
+    return SCHEMA_NOT_INITIALIZED_STDERR_MARKER in stderr_tail

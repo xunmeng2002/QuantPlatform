@@ -1872,6 +1872,115 @@
   下键，但它同时是"这一格认到第几位小数"的下限；显示 (`formatDecimal` 默认 6 位) 与后端 (`Float`)
   本来就是六位 / 不限，故这一改只是把三者对齐，`最小变动价位` 那格（`0.01`，两位）未动。
 
+## D.33 · 2026-10-07 （第三十三批） 费率方向加「双向」通配 + 展开时摊成两行
+
+> 归档于 2026-10-14（D.39 拆分时 ✅ 区超出 5 批；**短版留在 `PROGRESS.md`**，含仍未决的手工验收项与已接受的风险）。
+> 下列原文取自 `e59755e` 之后的工作区版本，一字未改。
+- **触发**：用户「给买卖方向也提供一个通配选项吧, 大部分对于买卖双向都是一样的。也在生成
+  initdb 时进行扩展」。D.32 解决了"按合约 / 品种 / 交易所录"，但方向那一格仍是买卖各占一行 ——
+  佣金与过户费本来就买卖同数，只有印花税分侧，于是每录一条规则都要复制一遍。
+- **用户拍板**：新建规则的「方向」**默认取双向**（买 / 卖仍可选）。
+- **编码方式与三级作用域同一套路：不加列，由 `Direction` 的取值承载** —— `-1` = 双向（**只在
+  平台侧存在**）、`0` = 只买、`1` = 只卖。引擎那四列的精确查找一字不动，**引擎零改动**。
+- **两侧同时放宽时谁赢，两条次序**：① **作用域先于方向**（更具体的一档遮住更宽的一档，故合约级
+  「双向」压过品种级「卖」）；② **同一格内，精确方向遮住双向**（同一合约上既有「双向」又有
+  「卖」时，卖那一笔取「卖」那一行）。
+- **落点**：后端 `catalog/enums.py` 加 `RateDirection`（`BOTH = -1`，买 / 卖两值**取自**
+  `CommissionDirection` 而不另写一遍）；`catalog/schemas.py` 的写侧改收它（读侧仍是裸 `int`）；
+  `rate_expansion.py` 加 `_find_row_for_direction`（**每档内先精确、再双向**），
+  `_with_instrument_id` 改名为 **`_bind_row_to_contract`**（整行照搬，**同时改写合约格与方向格**
+  这两处键列）；`seed_database.py` 在写文件**之前**加 `_ensure_base_commissions_are_expanded`
+  （方向只许 0 / 1、合约格不许为空，不符即抛且**连目录都不建**）。
+  前端：`api/types.ts` 的 `COMMISSION_DIRECTIONS` / `CommissionDirection` 换成
+  `RATE_DIRECTIONS` / `RateDirection`（**删一个导出符号**，全仓唯一消费者是费率面板）+
+  `BOTH_DIRECTIONS`；`domain/labels.ts` 加 `-1: '双向'` 与 `describeCommissionDirectionPhrase`
+  （`双向` 已经是完整说法，**不再接「向」**）；面板默认双向、下拉三档、方向那一格的提示改写。
+- **有意撤掉一条既有校验（报备）**：`test_a_direction_outside_the_engine_values_is_rejected`
+  原本参数化 `[-1, 2]` 两条都期望 422 —— `-1` 从"引擎取值之外"变成**有意收下的合法档**，故这条
+  收成 `[2]`，另起一条"双向可建、可读回"的用例。**"方向只能是 0 / 1"这条规则只在引擎那一侧
+  继续成立**，平台这一侧不再成立。
+- **三道网兜住「`-1` 漏进种子库」**（这是本次唯一会**静默算错钱**的路径：引擎那四列查不到就
+  `CommissionMissingCount++`、费用按 0 算，而回测照常报"成功"）：① 绑定函数同时改写方向格；
+  ② 写入口的断言（管得住任何调用方，`write_seed_database` 是公开函数）；③ `test_seed_database.py`
+  里对**真生成的文件**断言每一行 `BaseCommission.Direction ∈ {0, 1}`。前端另有一条断言钉住
+  「双向费率」那句话里**不出现**「双向向费率」。
+- **验收**：后端 `pytest` **730 项全过**（D.32 基线 722 + 本节 8 条）；前端 `type-check` 干净 +
+  `vitest` **233 项 / 30 文件全绿**（231 + 2）。
+- **仍未决 —— 待用户手工验收**：`acceptance-checklist.md` §16.2 加的"**只录一条双向即可提交**"、
+  §16.3 加的第 4 条判据（**产物 `Direction` 只有 0 与 1，绝不出现 `-1`**）。
+- **已知风险（已接受）**：**双向会把印花税收进买入侧** —— 界面提示里明说了这件事，但**不拦**
+  （别的市场确实两侧都收），要不要拆成买 / 卖两行由用户定。
+- **提交状态**：**已提交**（`f32ac48`，与 D.31 / D.32 / D.34 同一棵树一并入库）。
+
+## D.34 · 2026-10-07 （第三十四批） 手续费组随轮冻结：提交页选组 + 删组两道闸
+
+> 归档于 2026-10-14（D.39 拆分时 ✅ 区超出 5 批；**短版留在 `PROGRESS.md`**，含仍未决的手工验收项与已接受的风险）。
+> 下列原文取自 `e59755e` 之后的工作区版本，一字未改。
+- **触发**：用户「在新建回测的地方选手续费组」。此前组号是
+  `app/scheduler/engine_config.py` 的**模块常量** `COMMISSION_GROUP_ID = 1`，管理端能建 2 号、
+  3 号组，但**永远只有 1 号组会被用到**。
+- **用户拍板两点**：① 请求体里这一格**必填、不给默认值**；② 被**配置模板**引用着的组，
+  **删除时拦**。
+- **引擎侧零改动（三处 `file:line` 已核实）**：这个键本来就由 `Config` 解析
+  （`Config.cpp:53`）、由 `SimExchange` 记下（`SimExchange.cpp:106`）并在建账号时带上
+  （`SimExchange.cpp:786`）——与**早就是运行级字段**的 `InitialCapital` 完全同构（同一个
+  `Config` 解析、同一个 `HandleRegisterAccount` 消费）。故本批全部落在 QuantPlatform，
+  `QuantTrading` 只改一句文档（见其 `docs/backtest-run-contract.md` §5）。
+- **语义：组号随轮冻结**。提交时写进该轮 `BackTest.json` 的 `CommissionGroupId`，落库于
+  `Runs.BacktestConfigJson`；**提交期的费率校验与调度期按轮生成种子库读同一个值**，不再各读
+  一个常量。
+- **落点（后端）**：`services/run_configuration.py` 加 `COMMISSION_GROUP_ID_FIELD_NAME` /
+  `COMMISSION_GROUP_ID_KEY = "CommissionGroupId"` / `validate_commission_group_id`（照
+  `validate_initial_capital` 的形制）；`DecodedRunFields` 加字段，`decode_run_fields` **从引擎
+  配置**读它（与 `initial_capital` 同一侧，**刻意不进** `RUN_FIELD_KEY_NAMES` —— 那张表喂的是
+  策略配置，而组号只在 `BackTest.json` 里）；
+  **新增** `app/services/commission_group.py`（DRY：`commission_group_exists` 共用那条 `select`
+  谓词 + `ensure_commission_group_exists` 400 包装，被提交与模板建两处共用）；
+  `services/run_submission.py` 在费率校验**之前**另问一次"组存在"；
+  `scheduler/runner.py` 的 `LaunchContext` 多一个 `commission_group_id`（从**冻结的**
+  `engine_configuration_text` 解出，`_decode_launch_fields` 只负责如实退回取值），解不出即
+  `UnrunnableJob(UNDECODABLE_COMMISSION_GROUP_MESSAGE)`。
+- **报备：删掉 `engine_config.COMMISSION_GROUP_ID` 这个模块常量**（属 Harness §3.1「弃用一个
+  既有导出符号」的强制确认点，本批按计划里已获批处理）。理由：留着它早晚被下一个调用点捡回去
+  用，而三个消费点（提交侧费率校验、种子库展开、`render_engine_config`）**全部改走运行级取值**。
+  测试侧改从 `tests/helpers.py:DEFAULT_COMMISSION_GROUP_ID` 取（约七个文件）。
+- **两道闸的错误码**：提交 / 建模板时组不存在 → **400**
+  （`UNKNOWN_COMMISSION_GROUP_MESSAGE_TEMPLATE`，点名组号并指向「基础数据」页）；
+  删一个被模板引用的组 → **409**
+  （`COMMISSION_GROUP_TEMPLATE_REFERENCED_MESSAGE_TEMPLATE`，**点名条数**），与既有的"组下还
+  有费率明细就拦"并列。**这条 400 不能并进那次费率校验**：交易对留空时那条整个跳过，而组号照样
+  会被冻进这一轮的引擎配置——表现为引擎按一个空组计费。
+- **迁移的 `default=1` 是回填值，不是接口默认值**：
+  `catalog/migrations.py::add_missing_columns` 要求 NOT NULL 新列有一个**可渲染的标量默认**，
+  否则该列根本不会被加上。老模板行得到 1，**与它们此前的实际行为一致**（那时平台侧只有那一个
+  常量）。docstring 里把这句写死，免得日后被读成"接口默认值"。
+- **新增一条非管理员只读路由** `GET /api/reference-data/commission-group-options`：管理面那九个
+  端点都挂着 `AdminUserDependency`，而**普通用户有权提交回测** —— 他要选组就必须看得见组。故在
+  同一 router 里加一条**只要登录**的只读投影（组号 + 组名），并在该模块 docstring 里点明这处
+  例外（"这是给提交页用的选项投影，不是管理面"）。
+- **前端**：`domain/run-form.ts` 的 `RunFieldInputs.commissionGroupId: number | null`
+  （**不拿文本承载数值** —— 这一格是下拉选出来的，与手输的 `initialCapitalText` 有意分叉）；
+  新增 `readCommissionGroupId`，拒 `null` / 非整数 / `< 0`，且**不写 `?? 0`**（`0` 是**合法**
+  组号，与 `initialCapital ?? 0` 那种"下游还会再拒一次"的情形不同）；`RunSubmitView.vue` 在
+  「运行范围」卡片加**第三个独立取数**的下拉（`id="run-commission-group"`，文案「组号 · 组名」），
+  **不预选**（只有"上次提交的参数"里带了组号才回填）；一个组都没有时禁用并给出"先去基础数据页
+  建一个"的**可读原因**，而不是一个空的静默下拉。
+- **验收**：后端 `pytest` **740 项全过**（D.33 基线 730 + 本节 10）；前端 `type-check` 干净 +
+  `vitest` **238 项 / 30 文件全绿**（233 + 5）。
+- **仍未决 —— 待用户手工验收**：新建回测页选组走查（含**一个组都没有时的提示**、与"上次提交的
+  参数"的回填往返）、删一个被模板引用的组被 409 拒、该轮 `BackTest.json` 的 `CommissionGroupId`
+  与作业目录种子库里的费率行属于**同一个组**。清单见
+  [`docs/acceptance-checklist.md`](docs/acceptance-checklist.md) §16。
+- **新 ❓：组号 `0` 与"键丢了"在引擎侧分辨不出**（jsoncpp 的 `asInt()` 对缺键返回 0）。平台侧
+  从不把键弄丢（`_read_integer` 回 `None` → 翻译成 `UnrunnableJob`），故这是"绕过平台手改
+  `BackTest.json`"才够得着的场景；本批保留 `>= 0` 的取值域（与管理端写侧 schema 同口径），
+  **未另行收口**。
+- **已知风险（已接受）**：① **组选错 = 静默按 0 计费**（引擎对不存在的组不报错，
+  `CommissionGroupNotExist` 是死代码）—— 靠提交期那两道校验兜住，两者都点名组号与合约；
+  ② **队列里的轮不受删组拦截保护** —— 它们会在起跑前以 `UnrunnableJob` 失败，文案点名缺哪个
+  合约、哪个方向（**不是静默降级**）。
+- **提交状态**：**已提交**（`f32ac48`，与 D.31–D.33 同一棵树一并入库）。
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型

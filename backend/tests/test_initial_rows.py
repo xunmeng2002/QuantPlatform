@@ -145,7 +145,7 @@ def test_read_initial_rows_rejects_a_header_that_is_not_the_contract(tmp_path: P
     表现为"某些品种的乘数不对", 归因不到这份文件上.
     """
 
-    csv_path = tmp_path / "Product.csv"
+    csv_path = tmp_path / "Products.csv"
 
     csv_path.write_text(
         "ExchangeId,ProductId,ProductName\nSSE,600519,贵州茅台\n", encoding="utf-8"
@@ -242,14 +242,14 @@ async def test_a_bad_header_leaves_every_table_untouched(
     三张表在同一事务里落库就是为了这个: 半播的库事后分不出哪几行是初始化带的、哪几行是人工录
     的, 而报错信息只指向 CSV, 与那半库数据对不上号.
 
-    坏的这份刻意放在**最后**一张表上 (契约次序是 Product → CommissionGroup →
-    BaseCommission): 放前头的话, 后面两张表根本还没轮上, "什么都没留下"是白来的.
+    坏的这份刻意放在**最后**一张表上 (契约次序是 Products → CommissionGroups →
+    BaseCommissions): 放前头的话, 后面两张表根本还没轮上, "什么都没留下"是白来的.
     """
 
     _write_csv(seed_csv_directory, PRODUCT_TABLE, PRODUCT_CSV_ROWS)
     _write_csv(seed_csv_directory, COMMISSION_GROUP_TABLE, COMMISSION_GROUP_CSV_ROWS)
 
-    (seed_csv_directory / "BaseCommission.csv").write_text(
+    (seed_csv_directory / "BaseCommissions.csv").write_text(
         "CommissionGroupId,ExchangeId,InstrumentId\n1,SSE,600519\n", encoding="utf-8"
     )
 

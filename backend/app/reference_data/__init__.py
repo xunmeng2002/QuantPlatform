@@ -1,6 +1,6 @@
 """reference_data: 回测引擎「基本数据」的保管与导出.
 
-三张表 (`Product` / `CommissionGroup` / `BaseCommission`) 的**数据**住在 catalog 里, 由管理
+三张表 (`Products` / `CommissionGroups` / `BaseCommissions`) 的**数据**住在 catalog 里, 由管理
 页面增删改查 (见 `routers/reference_data.py`); 引擎读的那个 `BackTestInit.db` 是**派生物**,
 每次保存后从 catalog 重新生成.
 
