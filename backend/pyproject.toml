@@ -1,0 +1,8 @@
+# 只为声明解释器基线. 3.14 是硬下限: PEP 649 延迟注解、PEP 695 泛型、PEP 698 `override`
+# 都按它写. **刻意不写 build-system** —— 本仓不是可安装包, 依赖走 requirements.txt、
+# 测试配置走 pytest.ini (pytest 的配置发现以 pytest.ini 优先, 故不在此重复一份).
+[project]
+name = "quant-platform-backend"
+version = "0.0.0"
+description = "薪火量化平台的 FastAPI 后端."
+requires-python = ">=3.14"

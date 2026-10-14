@@ -19,6 +19,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import override
 
 from sqlalchemy import update
 
@@ -230,6 +231,7 @@ class UnrunnableJob(Exception):
     就是泄漏服务端目录布局与别人的用户 id.
     """
 
+    @override
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message

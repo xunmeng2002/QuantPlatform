@@ -28,12 +28,12 @@ from collections.abc import Sequence
 from contextlib import closing
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
 
-from sqlalchemy import inspect, select
+from sqlalchemy import ColumnElement, inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..catalog.models import (
+    Base,
     BaseCommissionModel,
     CommissionGroupModel,
     ProductModel,
@@ -66,7 +66,7 @@ logger = logging.getLogger(__name__)
 读写时立刻报错 (见 `engine_attribute_names`).
 """
 
-SEED_TABLE_MODELS: dict[str, Any] = {
+SEED_TABLE_MODELS: dict[str, type[Base]] = {
     "Products": ProductModel,
     "CommissionGroups": CommissionGroupModel,
     "BaseCommissions": BaseCommissionModel,
@@ -109,7 +109,7 @@ def build_create_table_statement(table: SeedTable) -> str:
     )
 
 
-def _attribute_names_by_column_name(model: Any) -> dict[str, str]:
+def _attribute_names_by_column_name(model: type[Base]) -> dict[str, str]:
     """模型的 `数据库列名 → ORM 属性名` 对照.
 
     **不能拿 `Column.key` 当属性名**: `mapped_column("ExchangeId", String(8))` 显式给了列名,
@@ -126,7 +126,7 @@ def _attribute_names_by_column_name(model: Any) -> dict[str, str]:
     }
 
 
-def engine_attribute_names(table: SeedTable, model: Any) -> tuple[str, ...]:
+def engine_attribute_names(table: SeedTable, model: type[Base]) -> tuple[str, ...]:
     """把契约的列名翻译成该模型上的属性名, 保持契约的次序.
 
     按**列名**配对而不是按下标: ORM 还带着平台专有的 `Id` / `CreatedAt` / `UpdatedAt`, 按下标
@@ -155,7 +155,7 @@ def engine_attribute_names(table: SeedTable, model: Any) -> tuple[str, ...]:
     return tuple(attribute_names)
 
 
-def _primary_key_attribute_names(table: SeedTable, model: Any) -> tuple[str, ...]:
+def _primary_key_attribute_names(table: SeedTable, model: type[Base]) -> tuple[str, ...]:
     """契约主键列的属性名, 用于给导出定行序."""
 
     attribute_names_by_column_name = _attribute_names_by_column_name(model)
@@ -168,7 +168,10 @@ def _primary_key_attribute_names(table: SeedTable, model: Any) -> tuple[str, ...
 
 
 async def _read_table_rows(
-    session: AsyncSession, table: SeedTable, model: Any, where_clause: Any = None
+    session: AsyncSession,
+    table: SeedTable,
+    model: type[Base],
+    where_clause: ColumnElement[bool] | None = None,
 ) -> tuple[SeedRow, ...]:
     """读出这张表的行, 列序按契约.
 

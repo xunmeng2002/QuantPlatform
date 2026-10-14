@@ -13,7 +13,6 @@
 """
 
 import logging
-from typing import Any
 
 from sqlalchemy import MetaData, inspect, literal, text
 from sqlalchemy.engine import Connection
@@ -68,7 +67,7 @@ def add_missing_columns(connection: Connection, metadata: MetaData) -> list[str]
 
 
 def _build_add_column_statement(
-    connection: Connection, table_name: str, column: Column[Any]
+    connection: Connection, table_name: str, column: Column[object]
 ) -> str | None:
     """渲染一条 `ALTER TABLE ... ADD COLUMN`; 该列补不上时回 None."""
 
@@ -87,7 +86,7 @@ def _build_add_column_statement(
     )
 
 
-def _render_default_clause(connection: Connection, column: Column[Any]) -> str | None:
+def _render_default_clause(connection: Connection, column: Column[object]) -> str | None:
     """从模型的 Python 侧默认值渲染 `DEFAULT <literal>`; 渲染不出来时回 None.
 
     值经 `literal(...).compile(literal_binds=True)` 渲染, 不自己拼引号: 拼接是"值里有什么

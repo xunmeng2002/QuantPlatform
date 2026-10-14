@@ -20,6 +20,7 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import override
 
 from ..config import (
     MARKET_DATA_PRECISION_FREQUENCY,
@@ -74,6 +75,7 @@ class MarketDataPrepared(Enum):
 class MarketDataUnavailableError(Exception):
     """行情备不齐, 且这一轮不该硬跑. 文案可直接进运行行的 `ErrorMsg`."""
 
+    @override
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
