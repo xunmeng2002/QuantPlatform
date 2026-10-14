@@ -35,7 +35,6 @@ from ..ids import generate_identifier
 
 
 STRATEGY_LIBRARY_DIRECTORY_NAME = "strategies"
-STAGING_DIRECTORY_PREFIX = ".staging-"
 
 VERSION_CONFLICT_MESSAGE = "该策略有并发上传占用了同一个版本号, 请重试"
 
@@ -75,24 +74,29 @@ def build_version_directory(user_id: str, strategy_id: str, version_no: int) -> 
 def write_strategy_version(storage_path: Path, uploaded_version: UploadedStrategyVersion) -> None:
     """把上传的两份原文写进版本目录.
 
-    先写同级的临时目录、再整目录改名: 于是失败时唯一的删除动作只落在自己刚建的临时目录上,
-    碰不到任何既有版本目录; 改名也保证读侧永远看不到半个版本.
+    占位用 `mkdir()` —— 目标已存在即 `FileExistsError` 是两个平台**共同**的语义, 而
+    "写临时目录再整目录改名"只在 Windows 上如此: POSIX 的 `rename(2)` 会静默替换**空目录**
+    目标, 撞号于是不再报错, 变成"两次上传共用一个目录", 后一次的回滚会删掉前一次仍在用的目录.
+
+    也不必靠改名做原子发布: 版本目录的可见性由**库里的行**决定 (读侧一律经
+    `version.storage_path` 还原), 行没落库, 目录里有几份文件都没人看得见.
+
+    失败时的删除只落在自己刚占下的那个目录上, 碰不到任何既有版本目录——占位在 `try` 之外,
+    故"撞号"这种情况一个文件都还没写.
     """
 
     storage_path.parent.mkdir(parents=True, exist_ok=True)
-    staging_path = storage_path.parent / f"{STAGING_DIRECTORY_PREFIX}{generate_identifier()}"
+    storage_path.mkdir()
 
     try:
-        staging_path.mkdir()
-        (staging_path / uploaded_version.entry_filename).write_bytes(
+        (storage_path / uploaded_version.entry_filename).write_bytes(
             uploaded_version.source_bytes
         )
-        (staging_path / uploaded_version.configuration_filename).write_text(
+        (storage_path / uploaded_version.configuration_filename).write_text(
             uploaded_version.configuration_text, encoding="utf-8"
         )
-        staging_path.rename(storage_path)
     except OSError:
-        shutil.rmtree(staging_path, ignore_errors=True)
+        shutil.rmtree(storage_path, ignore_errors=True)
         raise
 
 
@@ -144,7 +148,7 @@ async def store_strategy_version(session: AsyncSession, settings: PlatformSettin
     """把一次上传落成一个版本; 内容与既有版本完全相同则复用该版本, 不占新版本号.
 
     提交也在此完成, 不留给调用点: 落盘与落库必须同生共死, 分在两层写就会出现"文件在而库里
-    无记录"的孤儿目录, 而孤儿目录会占住那个版本号, 使下一次同号重试的改名失败——一次瞬时
+    无记录"的孤儿目录, 而孤儿目录会占住那个版本号, 使下一次同号重试的占位失败——一次瞬时
     故障 (磁盘满、忙等超时) 就此变成该策略的永久故障. 故回滚接的是**提交失败这一层**, 不是
     某个具体的异常类型; 只有完整性冲突才另译成 409.
 
@@ -152,13 +156,10 @@ async def store_strategy_version(session: AsyncSession, settings: PlatformSettin
     要依赖连接还活着. 排在后面的话, 连接已断这类让回滚本身也失败的情形会让目录留下——正好
     把这段代码要防的那个故障又放了进来.
 
-    版本号是"读 max 加一", 两个并发上传会算出同一个号. 认号靠的正是那次整目录改名:
-    改名成功才算占到号, 撞上了就是 `FileExistsError`, 译成 409 让调用方重试. 这条路径必须
-    在写盘处接, 接到提交处就永远走不到——改名先于提交失败. **这套语义是 Windows 的**:
-    目标存在即 `FileExistsError`. POSIX 的 `rename(2)` 会静默替换空目录目标, 撞号不再报错
-    而变成"两次上传共用一个目录", 后一次的回滚会删掉前一次仍在用的目录. 本平台绑死
-    Windows + Python 3.14 (`.pyd` 是 `cp314-win_amd64`, 见 `PROGRESS.md` 备注), 故不为此加分支; 若日后换平台,
-    这里必须先改成 `mkdir(exist_ok=False)` 之类的显式占位.
+    版本号是"读 max 加一", 两个并发上传会算出同一个号. 认号靠的是那次 `mkdir()` 占位:
+    建成才算占到号, 撞上了就是 `FileExistsError`, 译成 409 让调用方重试. 这条路径必须在
+    写盘处接, 接到提交处就永远走不到——占位先于提交失败. 占位语义两平台一致, 理由见
+    `write_strategy_version`.
 
     复用路径上不碰 `UpdatedAt`: 没有任何新内容落库, 把"最近变更"往前推会让这个字段说谎.
     """
