@@ -22,6 +22,7 @@ import pytest
 
 from app.services import quote_hub
 from app.services.market_data_coverage import (
+    CoverageVerdict,
     RefreshDecision,
     decide_after_refresh,
     judge_coverage,
@@ -296,7 +297,7 @@ def _build_stub_database(quote_hub_root: Path) -> None:
     connection.close()
 
 
-def _read_verdict(quote_hub_root: Path, code: str, frequency: str, start_day: str, end_day: str):
+def _read_verdict(quote_hub_root: Path, code: str, frequency: str, start_day: str, end_day: str) -> tuple[quote_hub.CoverageFacts, CoverageVerdict]:
     facts = quote_hub.read_coverage_facts(
         quote_hub_root, code, frequency, start_day, end_day
     )

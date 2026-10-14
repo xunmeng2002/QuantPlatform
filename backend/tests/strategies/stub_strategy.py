@@ -44,6 +44,7 @@ import json
 import os
 import sys
 import time
+from typing import Any
 
 STRATEGY_CONFIGURATION_FILENAME = "<<CONFIG_FILENAME>>"
 
@@ -137,7 +138,7 @@ MISSING_RATE_KEYS = ["SSE.510300", "SSE.510500"]
 GBK_ERROR_MESSAGE = "引擎报告: 行情数据缺失"
 
 
-def record_span(phase):
+def record_span(phase: str) -> None:
     """把这一刻追加进 span.txt, 写完即关闭.
 
     写一行关一次不是浪费: 进程被 `TerminateProcess` 强杀时没有收尾机会, 而"它到底有没有开始
@@ -148,20 +149,20 @@ def record_span(phase):
         span_file.write(f"{phase} {os.getpid()} {time.time():.6f}\n")
 
 
-def read_json(filename, encoding="utf-8"):
+def read_json(filename: str, encoding: str = "utf-8") -> dict[str, Any]:
     with open(filename, encoding=encoding) as source_file:
         return json.load(source_file)
 
 
-def read_engine_configuration():
+def read_engine_configuration() -> dict[str, Any]:
     return read_json(ENGINE_CONFIGURATION_FILENAME)
 
 
-def read_strategy_configuration():
+def read_strategy_configuration() -> dict[str, Any]:
     return read_json(STRATEGY_CONFIGURATION_FILENAME)
 
 
-def build_result(engine_configuration, behavior):
+def build_result(engine_configuration: dict[str, Any], behavior: str) -> dict[str, Any]:
     """按引擎配置与行为算出要落盘的 result.json.
 
     回显的六个键取自引擎配置而不是策略配置: 它们本来就是引擎写进结果文件的东西, 平台据此判断
@@ -208,12 +209,12 @@ def build_result(engine_configuration, behavior):
     return result
 
 
-def write_result(result, encoding="utf-8"):
+def write_result(result: dict[str, Any], encoding: str = "utf-8") -> None:
     with open(RESULT_FILENAME, "w", encoding=encoding) as result_file:
         json.dump(result, result_file, ensure_ascii=False)
 
 
-def write_flood(flood_bytes, stderr_flood_bytes):
+def write_flood(flood_bytes: int, stderr_flood_bytes: int) -> None:
     """按旋钮往两条流里写字节.
 
     两条流都要能单独灌满: 管道死锁的暴露条件是"一条流写满而另一条不写", 只给一个总量旋钮的话
@@ -229,7 +230,7 @@ def write_flood(flood_bytes, stderr_flood_bytes):
         sys.stdout.flush()
 
 
-def main():
+def main() -> int:
     strategy_configuration = read_strategy_configuration()
     engine_configuration = read_engine_configuration()
 

@@ -44,35 +44,6 @@ class PlatformDatabase:
         )
 
         self._configure_sqlite_connections()
-    def _configure_sqlite_connections(self) -> None:
-        """逐连接打开外键校验并设置忙等超时.
-
-        SQLite 默认不校验外键, 不显式打开则外键声明形同注释; 默认忙等为 0, 并发写入会直接
-        抛 SQLITE_BUSY 而非等待.
-        """
-
-        if self._engine.dialect.name != SQLITE_DIALECT:
-            return
-
-        def _apply_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
-            cursor = dbapi_connection.cursor()
-
-            try:
-                cursor.execute("PRAGMA foreign_keys=ON")
-                cursor.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MILLISECONDS}")
-            finally:
-                cursor.close()
-
-        event.listen(self._engine.sync_engine, "connect", _apply_pragmas)
-    def _create_database_directory(self) -> None:
-        """SQLite 不会自建目录, 库文件所在目录缺失会在首次连接时报错."""
-
-        database_file = make_url(self._database_url).database
-
-        if not database_file or database_file == SQLITE_MEMORY_DATABASE:
-            return
-
-        Path(database_file).parent.mkdir(parents=True, exist_ok=True)
     async def initialize(self) -> None:
         """建表, 并给已存在的表补上模型新增的列.
 
@@ -114,3 +85,32 @@ class PlatformDatabase:
             except Exception:
                 await session.rollback()
                 raise
+    def _configure_sqlite_connections(self) -> None:
+        """逐连接打开外键校验并设置忙等超时.
+
+        SQLite 默认不校验外键, 不显式打开则外键声明形同注释; 默认忙等为 0, 并发写入会直接
+        抛 SQLITE_BUSY 而非等待.
+        """
+
+        if self._engine.dialect.name != SQLITE_DIALECT:
+            return
+
+        def _apply_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
+            cursor = dbapi_connection.cursor()
+
+            try:
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MILLISECONDS}")
+            finally:
+                cursor.close()
+
+        event.listen(self._engine.sync_engine, "connect", _apply_pragmas)
+    def _create_database_directory(self) -> None:
+        """SQLite 不会自建目录, 库文件所在目录缺失会在首次连接时报错."""
+
+        database_file = make_url(self._database_url).database
+
+        if not database_file or database_file == SQLITE_MEMORY_DATABASE:
+            return
+
+        Path(database_file).parent.mkdir(parents=True, exist_ok=True)

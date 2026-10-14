@@ -14,7 +14,7 @@
 import asyncio
 
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 
 from app.catalog.database import PlatformDatabase
 from app.catalog.enums import RunStatus
@@ -70,7 +70,7 @@ STDOUT_FILENAME = "stdout.txt"
 STDERR_FILENAME = "stderr.txt"
 
 
-async def cancel_run(client: AsyncClient, token: str, run_id: str):
+async def cancel_run(client: AsyncClient, token: str, run_id: str) -> Response:
     """请求取消一个运行, 原样返回响应."""
 
     return await client.post(

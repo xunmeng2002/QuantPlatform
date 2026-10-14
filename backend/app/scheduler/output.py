@@ -53,15 +53,15 @@ class OutputStreamTail:
 
         if excess_bytes > 0:
             del self._recent_bytes[:excess_bytes]
+    def close(self) -> None:
+        """关闭落盘文件."""
+
+        self._destination_file.close()
     @property
     def tail(self) -> str:
         """最近 maximum_tail_bytes 字节对应的文本."""
 
         return decode_tail(bytes(self._recent_bytes[-self._maximum_tail_bytes :]))
-    def close(self) -> None:
-        """关闭落盘文件."""
-
-        self._destination_file.close()
 
 
 class JobOutputCapture:
@@ -83,6 +83,14 @@ class JobOutputCapture:
     def __exit__(self, exception_type: type[BaseException] | None, exception_value: BaseException | None, traceback: TracebackType | None) -> None:
         self._stdout_stream.close()
         self._stderr_stream.close()
+    def append_stdout(self, chunk: bytes) -> None:
+        """落盘一段标准输出."""
+
+        self._stdout_stream.append(chunk)
+    def append_stderr(self, chunk: bytes) -> None:
+        """落盘一段标准错误."""
+
+        self._stderr_stream.append(chunk)
     @property
     def stdout_tail(self) -> str:
         """标准输出尾部."""
@@ -93,11 +101,3 @@ class JobOutputCapture:
         """标准错误尾部."""
 
         return self._stderr_stream.tail
-    def append_stdout(self, chunk: bytes) -> None:
-        """落盘一段标准输出."""
-
-        self._stdout_stream.append(chunk)
-    def append_stderr(self, chunk: bytes) -> None:
-        """落盘一段标准错误."""
-
-        self._stderr_stream.append(chunk)

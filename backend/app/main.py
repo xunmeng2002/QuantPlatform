@@ -11,12 +11,12 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
+import uvicorn
 from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.exc import SQLAlchemyError
-import uvicorn
 
 from .auth.login_throttle import LoginAttemptThrottle
 from .bootstrap import ensure_initial_admin
@@ -81,6 +81,8 @@ INVALID_CONTENT_LENGTH_DETAIL = "Content-Length 不合法"
 SENSITIVE_FIELD_NAMES = frozenset({"password", "password_hash"})
 REDACTED_FIELD_VALUE = "***"
 
+logger = logging.getLogger(__name__)
+
 
 def _redact_validation_error(validation_error: dict[str, Any]) -> dict[str, Any]:
     """抹掉报错中回显的敏感字段值, 其余原样保留.
@@ -100,8 +102,6 @@ def _redact_validation_error(validation_error: dict[str, Any]) -> dict[str, Any]
         redacted["input"] = REDACTED_FIELD_VALUE
 
     return redacted
-
-logger = logging.getLogger(__name__)
 
 
 async def _prune_retained_runs(database: PlatformDatabase, settings: PlatformSettings) -> None:

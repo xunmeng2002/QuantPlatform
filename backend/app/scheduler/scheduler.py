@@ -60,11 +60,6 @@ class RunScheduler:
         self._retention_task: asyncio.Task[None] | None = None
         self._loop_task: asyncio.Task[None] | None = None
         self._stopping = True
-    @property
-    def registry(self) -> RunningJobRegistry:
-        """在跑的作业句柄表, 供取消端点取句柄."""
-
-        return self._registry
     async def start(self) -> None:
         """起常驻循环. 在此之前提交的作业由第一轮派发捡起, 不需要额外的补扫."""
 
@@ -105,18 +100,6 @@ class RunScheduler:
             logger.warning("停机时限内仍有作业在跑, 它们会在下次启动时被标为中断")
 
         await self._cancel_retention_sweep()
-    async def _cancel_retention_sweep(self) -> None:
-        """取消在跑的保留清理并等它退出."""
-
-        retention_task = self._retention_task
-        self._retention_task = None
-
-        if retention_task is None:
-            return
-
-        retention_task.cancel()
-
-        await asyncio.gather(retention_task, return_exceptions=True)
     def wake(self) -> None:
         """催一次派发.
 
@@ -140,6 +123,23 @@ class RunScheduler:
             return False
 
         return True
+    @property
+    def registry(self) -> RunningJobRegistry:
+        """在跑的作业句柄表, 供取消端点取句柄."""
+
+        return self._registry
+    async def _cancel_retention_sweep(self) -> None:
+        """取消在跑的保留清理并等它退出."""
+
+        retention_task = self._retention_task
+        self._retention_task = None
+
+        if retention_task is None:
+            return
+
+        retention_task.cancel()
+
+        await asyncio.gather(retention_task, return_exceptions=True)
     async def _run_loop(self) -> None:
         """常驻循环: 先清信号 → 再扫库 → 后等唤醒.
 

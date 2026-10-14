@@ -14,6 +14,7 @@ from app.catalog.enums import CommissionDirection, RateDirection
 from app.reference_data.rate_expansion import (
     EXCHANGE_LEVEL_INSTRUMENT_ID,
     MissingRate,
+    RateExpansion,
     RunContract,
     describe_missing_rates,
     expand_rates_for_run,
@@ -83,7 +84,7 @@ def _as_record(row: tuple[object, ...]) -> dict[str, object]:
     return dict(zip(BASE_COMMISSION_COLUMN_NAMES, row))
 
 
-def _contract_rows(expansion) -> list[tuple[str, int, float, int]]:
+def _contract_rows(expansion: RateExpansion) -> list[tuple[str, int, float, int]]:
     """展开结果里每行的 (合约格, 方向, 规则标记, 组号), 保持产物的次序."""
 
     return [
