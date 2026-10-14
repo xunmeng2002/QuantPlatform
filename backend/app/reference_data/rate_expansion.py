@@ -143,9 +143,7 @@ def _lookup_key(row: SeedRow) -> tuple[str, str, int]:
     )
 
 
-def _index_rows_by_lookup_key(
-    base_commission_rows: Sequence[SeedRow], commission_group_id: int
-) -> dict[tuple[str, str, int], SeedRow]:
+def _index_rows_by_lookup_key(base_commission_rows: Sequence[SeedRow], commission_group_id: int) -> dict[tuple[str, str, int], SeedRow]:
     """把费率行收成查找表, 只收指定组的行.
 
     混进别组的行会让同一个键落到两行上, 而后者静默胜出 —— 那是算错钱, 不是报错. 故这里逐行核对
@@ -167,12 +165,7 @@ def _index_rows_by_lookup_key(
     return rows_by_key
 
 
-def _find_row_for_direction(
-    rows_by_key: dict[tuple[str, str, int], SeedRow],
-    exchange_id: str,
-    instrument_id: str,
-    direction: int,
-) -> SeedRow | None:
+def _find_row_for_direction(rows_by_key: dict[tuple[str, str, int], SeedRow], exchange_id: str, instrument_id: str, direction: int) -> SeedRow | None:
     """某一格上**管这个方向**的那一行: 先找精确方向, 再找双向.
 
     次序不能反. 同一格上既写了「双向」又写了「卖」, 意思是"大体两边一样, 卖单独说" —— 故精确的
@@ -187,13 +180,8 @@ def _find_row_for_direction(
     return rows_by_key.get((exchange_id, instrument_id, BOTH_DIRECTIONS))
 
 
-def _find_product_level_row(
-    rows_by_key: dict[tuple[str, str, int], SeedRow],
-    product_codes: Set[tuple[str, str]],
-    exchange_id: str,
-    instrument_id: str,
-    direction: int,
-) -> SeedRow | None:
+def _find_product_level_row(rows_by_key: dict[tuple[str, str, int], SeedRow], product_codes: Set[tuple[str, str]],
+    exchange_id: str, instrument_id: str, direction: int) -> SeedRow | None:
     """品种档: 合约码的**前缀**里登记在品种表、且这一档管得上这个方向的那一款, 取最长的前缀.
 
     从长到短试, 第一个命中的即最具体的那一档. 中间某档已登记但恰好缺这一方向时不驻足, 继续往
@@ -217,13 +205,8 @@ def _find_product_level_row(
     return None
 
 
-def _resolve_from_index(
-    rows_by_key: dict[tuple[str, str, int], SeedRow],
-    product_codes: Set[tuple[str, str]],
-    exchange_id: str,
-    instrument_id: str,
-    direction: int,
-) -> SeedRow | None:
+def _resolve_from_index(rows_by_key: dict[tuple[str, str, int], SeedRow], product_codes: Set[tuple[str, str]],
+    exchange_id: str, instrument_id: str, direction: int) -> SeedRow | None:
     """三档依次解析 (每档内先精确方向、再双向), 命中即返回整行; 三档都没有时回 `None`."""
 
     cell_row = _find_row_for_direction(rows_by_key, exchange_id, instrument_id, direction)
@@ -243,14 +226,8 @@ def _resolve_from_index(
     )
 
 
-def resolve_effective_rate(
-    base_commission_rows: Sequence[SeedRow],
-    commission_group_id: int,
-    product_codes: Set[tuple[str, str]],
-    exchange_id: str,
-    instrument_id: str,
-    direction: int,
-) -> SeedRow | None:
+def resolve_effective_rate(base_commission_rows: Sequence[SeedRow], commission_group_id: int,
+    product_codes: Set[tuple[str, str]], exchange_id: str, instrument_id: str, direction: int) -> SeedRow | None:
     """解析一格 (合约 × 方向) 最终生效的那一行; 三档都没命中时回 `None`.
 
     **返回的是命中的那条规则, 不是给引擎直接用的行**: 命中的可能是双向那一行, 于是方向格仍是
@@ -268,12 +245,8 @@ def resolve_effective_rate(
     )
 
 
-def expand_rates_for_run(
-    base_commission_rows: Sequence[SeedRow],
-    commission_group_id: int,
-    product_codes: Set[tuple[str, str]],
-    contracts: Sequence[RunContract],
-) -> RateExpansion:
+def expand_rates_for_run(base_commission_rows: Sequence[SeedRow], commission_group_id: int,
+    product_codes: Set[tuple[str, str]], contracts: Sequence[RunContract]) -> RateExpansion:
     """把三档规则展开成一组具体合约的行, 并报出仍然没命中的格.
 
     输出按 `(交易所, 合约格, 方向)` 排序, 与导出种子库的定序一致 —— 同一份规则每次生成的文件因此

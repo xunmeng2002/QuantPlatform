@@ -146,9 +146,7 @@ def test_the_version_file_wins_over_the_digest(tmp_path: Path) -> None:
     assert read_engine_version(engine_root) == "build-2026.09.26"
 
 
-def test_the_version_file_is_stripped_and_read_from_its_first_non_empty_line(
-    tmp_path: Path,
-) -> None:
+def test_the_version_file_is_stripped_and_read_from_its_first_non_empty_line(tmp_path: Path) -> None:
     """版本文件是给人写的, 故容得下前导空行、两侧空白与后面的说明行."""
 
     engine_root = _engine_root(tmp_path)
@@ -197,9 +195,7 @@ def test_the_binding_is_found_under_this_platforms_own_suffix(tmp_path: Path) ->
     assert find_python_binding(engine_root) == engine_root / BINDING_FILENAME
 
 
-def test_a_binding_built_for_another_interpreter_is_not_the_engine_binding(
-    tmp_path: Path,
-) -> None:
+def test_a_binding_built_for_another_interpreter_is_not_the_engine_binding(tmp_path: Path) -> None:
     """别的 ABI 编出来的扩展模块不是引擎绑定, 即便它的名字很像.
 
     `QuantTrading.cp39-win_amd64.pyd` 不等于"模块名 + 本平台允许的后缀"中的任何一个 —— 这与

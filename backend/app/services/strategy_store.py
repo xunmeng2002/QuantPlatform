@@ -72,9 +72,7 @@ def build_version_directory(user_id: str, strategy_id: str, version_no: int) -> 
     )
 
 
-def write_strategy_version(
-    storage_path: Path, uploaded_version: UploadedStrategyVersion
-) -> None:
+def write_strategy_version(storage_path: Path, uploaded_version: UploadedStrategyVersion) -> None:
     """把上传的两份原文写进版本目录.
 
     先写同级的临时目录、再整目录改名: 于是失败时唯一的删除动作只落在自己刚建的临时目录上,
@@ -114,9 +112,7 @@ def remove_strategy_version(storage_path: Path, user_library_root: Path) -> None
     shutil.rmtree(storage_path, ignore_errors=True)
 
 
-async def _find_identical_version(
-    session: AsyncSession, strategy_id: str, source_hash: str, configuration_text: str
-) -> StrategyVersionModel | None:
+async def _find_identical_version(session: AsyncSession, strategy_id: str, source_hash: str, configuration_text: str) -> StrategyVersionModel | None:
     """取同策略下的同内容版本.
 
     判同必须连配置模板一起比: 模板决定策略读到的每一个键取值, 同一份源码配不同模板是一份**新**
@@ -143,13 +139,8 @@ async def _next_version_no(session: AsyncSession, strategy_id: str) -> int:
     return (highest_version_no or 0) + 1
 
 
-async def store_strategy_version(
-    session: AsyncSession,
-    settings: PlatformSettings,
-    strategy: StrategyModel,
-    uploaded_by: UserModel,
-    uploaded_version: UploadedStrategyVersion,
-) -> StrategyVersionModel:
+async def store_strategy_version(session: AsyncSession, settings: PlatformSettings, strategy: StrategyModel,
+    uploaded_by: UserModel, uploaded_version: UploadedStrategyVersion) -> StrategyVersionModel:
     """把一次上传落成一个版本; 内容与既有版本完全相同则复用该版本, 不占新版本号.
 
     提交也在此完成, 不留给调用点: 落盘与落库必须同生共死, 分在两层写就会出现"文件在而库里

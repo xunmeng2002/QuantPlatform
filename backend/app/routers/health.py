@@ -78,10 +78,7 @@ def _probe_directory_writable(directory: Path) -> bool:
 
 
 @router.get("", response_model=EngineHealthResponse)
-async def read_health_handler(
-    settings: SettingsDependency,
-    admin_user: AdminUserDependency,
-) -> EngineHealthResponse:
+async def read_health_handler(settings: SettingsDependency, admin_user: AdminUserDependency) -> EngineHealthResponse:
     """引擎自检: 扩展模块、运行时 DLL、运行根可写性与两个引擎侧输入."""
 
     python_binding = find_python_binding(settings.engine_root)

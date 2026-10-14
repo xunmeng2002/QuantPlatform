@@ -44,13 +44,8 @@ BASE_COMMISSION_COLUMN_NAMES = BASE_COMMISSION_TABLE.column_names()
 PRODUCT_COLUMN_NAMES = PRODUCT_TABLE.column_names()
 
 
-def _rate_row(
-    exchange_id: str,
-    instrument_id: str,
-    direction: int,
-    rule_tag: float = 1.0,
-    commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID,
-) -> tuple[object, ...]:
+def _rate_row(exchange_id: str, instrument_id: str, direction: int, rule_tag: float = 1.0,
+    commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID) -> tuple[object, ...]:
     """按契约列序造一行费率, 数值列全部取 `rule_tag`.
 
     十条费率列里只有六条有量纲差异; 这里让它们统一带上 `rule_tag`, 于是"这一行是哪一条规则"是

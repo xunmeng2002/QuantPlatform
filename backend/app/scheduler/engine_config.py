@@ -112,9 +112,7 @@ def serialize_configuration(configuration: Mapping[str, object]) -> str:
         raise InvalidRequestError(CONFIGURATION_NOT_SERIALIZABLE_MESSAGE) from error
 
 
-def parse_configuration_object(
-    source_id: str, configuration_text: str
-) -> dict[str, object] | None:
+def parse_configuration_object(source_id: str, configuration_text: str) -> dict[str, object] | None:
     """把一份落库的配置文本解回字典; 读不动只记日志并回 `None`.
 
     与 `serialize_configuration` 成对放在这里: 同一个形状的读写各写一份的话, 改了一侧而另一侧
@@ -137,15 +135,8 @@ def parse_configuration_object(
     return parsed_configuration
 
 
-def render_engine_config(
-    run_id: str,
-    match_mode: MarketDataType,
-    start_trading_day: str,
-    end_trading_day: str,
-    initial_capital: float,
-    commission_group_id: int,
-    market_data_path: Path,
-) -> str:
+def render_engine_config(run_id: str, match_mode: MarketDataType, start_trading_day: str, end_trading_day: str,
+    initial_capital: float, commission_group_id: int, market_data_path: Path) -> str:
     """渲染 `BackTest.json`.
 
     **`BarPreces` 没有形参**: 它恒等于 `MARKET_DATA_PRECISION`, 即落盘数据的精度. 这是那条

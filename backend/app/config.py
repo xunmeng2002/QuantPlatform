@@ -354,7 +354,6 @@ class PlatformSettings:
                 raise ValueError(
                     f"trusted_proxy_addresses 含无法解析的地址: {trusted_address!r}"
                 ) from None
-
     @classmethod
     def from_environment(cls) -> PlatformSettings:
         """按环境变量构造配置, 缺省值指向本仓的默认布局."""

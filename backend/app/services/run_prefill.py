@@ -47,9 +47,7 @@ class LastSubmittedParameters:
     params: dict[str, object] = field(default_factory=dict)
 
 
-async def read_last_submitted_parameters(
-    session: AsyncSession, current_user: UserModel, strategy_id: str
-) -> LastSubmittedParameters | None:
+async def read_last_submitted_parameters(session: AsyncSession, current_user: UserModel, strategy_id: str) -> LastSubmittedParameters | None:
     """该用户在该策略下最近一次提交的参数; 没有历史运行 (或配置文本读不动) 时回 `None`.
 
     回 `None` 是**正常结果**而不是错误: 首次使用某个策略走的就是这条路, 提交页据此拿该版本的

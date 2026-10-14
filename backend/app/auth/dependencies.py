@@ -38,11 +38,7 @@ def unauthorized_error(detail: str) -> HTTPException:
     )
 
 
-async def get_current_user(
-    credentials: BearerCredentials,
-    session: SessionDependency,
-    settings: SettingsDependency,
-) -> UserModel:
+async def get_current_user(credentials: BearerCredentials, session: SessionDependency, settings: SettingsDependency) -> UserModel:
     """校验令牌并取出对应用户. 令牌非法、用户已删或账号停用一律 401."""
 
     if credentials is None or credentials.scheme.lower() != BEARER_SCHEME.lower():
@@ -64,9 +60,7 @@ async def get_current_user(
     return user
 
 
-async def require_admin(
-    current_user: Annotated[UserModel, Depends(get_current_user)],
-) -> UserModel:
+async def require_admin(current_user: Annotated[UserModel, Depends(get_current_user)]) -> UserModel:
     """要求当前用户为管理员."""
 
     if not is_admin(current_user):

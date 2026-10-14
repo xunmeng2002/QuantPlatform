@@ -109,9 +109,7 @@ def _build_template_response(template: RunTemplateModel) -> RunTemplateResponse:
     )
 
 
-async def _ensure_template_quota(
-    session: AsyncSession, current_user: UserModel, strategy_id: str
-) -> None:
+async def _ensure_template_quota(session: AsyncSession, current_user: UserModel, strategy_id: str) -> None:
     """护栏: 单个策略下本人的模板数不超上限, 超了即 400.
 
     这是**护栏而不是不变量**: 计数与插入之间没有锁, 并发两次创建可能各自读到 49 而双双落库.
@@ -133,11 +131,7 @@ async def _ensure_template_quota(
 
 
 @router.get("", response_model=RunTemplateListResponse)
-async def list_run_templates_handler(
-    strategy_id: str,
-    session: SessionDependency,
-    current_user: CurrentUserDependency,
-) -> RunTemplateListResponse:
+async def list_run_templates_handler(strategy_id: str, session: SessionDependency, current_user: CurrentUserDependency) -> RunTemplateListResponse:
     """本人为该策略保存的模板, 最近创建的在前.
 
     走 `load_visible_strategy` 而不是 `load_owned_strategy`: 别人共享给你的策略也要能存模板,
@@ -169,12 +163,8 @@ async def list_run_templates_handler(
 
 
 @router.post("", response_model=RunTemplateResponse, status_code=status.HTTP_201_CREATED)
-async def create_run_template_handler(
-    strategy_id: str,
-    request_body: RunTemplateCreateRequest,
-    session: SessionDependency,
-    current_user: CurrentUserDependency,
-) -> RunTemplateResponse:
+async def create_run_template_handler(strategy_id: str, request_body: RunTemplateCreateRequest,
+    session: SessionDependency, current_user: CurrentUserDependency) -> RunTemplateResponse:
     """保存一套取值.
 
     参数的判据取自该策略**最新版本**的配置模板, 而模板**不绑版本**: 模板是策略级的, 换版本
@@ -243,13 +233,8 @@ async def create_run_template_handler(
 
 
 @router.patch("/{template_id}", response_model=RunTemplateResponse)
-async def rename_run_template_handler(
-    strategy_id: str,
-    template_id: str,
-    request_body: RunTemplateRenameRequest,
-    session: SessionDependency,
-    current_user: CurrentUserDependency,
-) -> RunTemplateResponse:
+async def rename_run_template_handler(strategy_id: str, template_id: str, request_body: RunTemplateRenameRequest,
+    session: SessionDependency, current_user: CurrentUserDependency) -> RunTemplateResponse:
     """给模板改名. 只改名——改取值等于存一个新模板.
 
     归属判定只经 `load_owned_run_template` (它同时按 `OwnerUserId` 与 `StrategyId` 过滤), **不
@@ -276,12 +261,8 @@ async def rename_run_template_handler(
 
 
 @router.delete("/{template_id}", response_model=MessageResponse)
-async def delete_run_template_handler(
-    strategy_id: str,
-    template_id: str,
-    session: SessionDependency,
-    current_user: CurrentUserDependency,
-) -> MessageResponse:
+async def delete_run_template_handler(strategy_id: str, template_id: str, session: SessionDependency,
+    current_user: CurrentUserDependency) -> MessageResponse:
     """硬删模板; 已删的再删即 404 (同 `delete_strategy_handler` 的重复删除语义).
 
     不软删的理由在模型侧 (没有外键指向它). 这里只补一条操作面的后果: 删掉的名字立刻可以再用,

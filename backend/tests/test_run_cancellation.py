@@ -102,9 +102,7 @@ def assert_row_is_self_consistent(run: RunModel) -> None:
     assert run.market_data_type is None
 
 
-async def test_cancelling_a_queued_run_never_starts_it(
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_cancelling_a_queued_run_never_starts_it(platform_settings: PlatformSettings) -> None:
     """取消排队中的作业: 行变 `interrupted`, 耗时是 NULL, 作业目录**从未被创建**.
 
     耗时必须是 NULL: 它从 `started_at` 算, 而这一轮根本没开始跑——写成 0 会被读成"瞬间跑完".
@@ -177,12 +175,8 @@ async def test_cancelling_a_queued_run_never_starts_it(
     ]
 
 
-async def test_cancelling_a_run_that_has_no_handle_interrupts_it_in_place(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_cancelling_a_run_that_has_no_handle_interrupts_it_in_place(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """"已认领但句柄还没登记"那一格: 就地写成中断, 不留进程号, 也不建作业目录.
 
     这是取消端点上唯一没有句柄可送达的一格 (另一格是还没被认领的 `queued`). 它真实可达: 认领与
@@ -228,12 +222,8 @@ def _mark_as_claimed_without_a_handle(run: RunModel) -> None:
     run.runner_pid = None
 
 
-async def test_cancelling_a_running_run_kills_the_process(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_cancelling_a_running_run_kills_the_process(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """取消运行中的作业: 进程真的死了, 且**结果文件不存在**.
 
     `result.json` 不存在是"陈旧结果防护"生效的证据: 桩在启动时先删掉上一轮的结果文件, 故它的
@@ -278,12 +268,8 @@ async def test_cancelling_a_running_run_kills_the_process(
     assert count_span_end_lines(platform_settings, submitted.id) == 0
 
 
-async def test_a_cancel_racing_the_finalization_leaves_one_consistent_row(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_cancel_racing_the_finalization_leaves_one_consistent_row(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """取消落在"结果文件已写出、进程还没退"那一瞬: 终态只可能是二者之一, 且行自洽.
 
     桩写完 `result.json` 之后停 0.2 秒才退, 于是这个窗口是**可复现**的——测试盯着盘上的结果文件
@@ -338,12 +324,8 @@ async def test_a_cancel_racing_the_finalization_leaves_one_consistent_row(
     assert observed_again.duration_ms == settled_run.duration_ms
 
 
-async def test_cancelling_someone_elses_run_is_a_404(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_cancelling_someone_elses_run_is_a_404(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """非提交人取消 → 404, 且行不受影响.
 
     授权不延伸到他人的运行记录: 被授权人能提交回测, 不等于能看或能取消别人的运行.
@@ -380,13 +362,8 @@ async def test_cancelling_someone_elses_run_is_a_404(
 @pytest.mark.parametrize(
     "terminal_status", [RunStatus.SUCCEEDED, RunStatus.INTERRUPTED]
 )
-async def test_cancelling_an_already_finished_run_is_a_conflict(
-    terminal_status: RunStatus,
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_cancelling_an_already_finished_run_is_a_conflict(terminal_status: RunStatus, client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """取消一个已落终态的运行 → 409.
 
     409 而不是 400/404: 行存在且对调用方可见 (404 不成立), 请求本身合法 (400 不成立), 冲突的是
@@ -421,9 +398,7 @@ async def test_cancelling_an_already_finished_run_is_a_conflict(
     assert response.json()["detail"] == STATUS_CONFLICT_MESSAGE
 
 
-async def test_cancelling_an_unknown_run_is_a_404(
-    client: AsyncClient, run_owner: SignedInAccount
-) -> None:
+async def test_cancelling_an_unknown_run_is_a_404(client: AsyncClient, run_owner: SignedInAccount) -> None:
     """取消一个不存在的 id → 404."""
 
     response = await cancel_run(client, run_owner.token, UNKNOWN_RUN_ID)
@@ -431,12 +406,8 @@ async def test_cancelling_an_unknown_run_is_a_404(
     assert response.status_code == 404
 
 
-async def test_cancelling_without_a_token_is_rejected(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_cancelling_without_a_token_is_rejected(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """无令牌取消 → 401, 且行不受影响."""
 
     runnable = await create_runnable_strategy(

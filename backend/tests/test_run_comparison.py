@@ -153,11 +153,7 @@ def result_database_file(settings: PlatformSettings, run_id: str) -> Path:
     )
 
 
-def write_capital_database(
-    settings: PlatformSettings,
-    run_id: str,
-    capital_rows: Sequence[tuple[str, float, float]],
-) -> Path:
+def write_capital_database(settings: PlatformSettings, run_id: str, capital_rows: Sequence[tuple[str, float, float]]) -> Path:
     """建一个只含 `Capitals` 表的结果库, 列与引擎一致 (列是子集).
 
     查询要真的执行, 故这里必须是**真的** SQLite 文件: 拿一份占位文本当库, 那条用例测到的会
@@ -183,9 +179,7 @@ def write_capital_database(
     return database_file
 
 
-def expected_equity_points(
-    capital_rows: Sequence[tuple[str, float, float]],
-) -> list[dict[str, object]]:
+def expected_equity_points(capital_rows: Sequence[tuple[str, float, float]]) -> list[dict[str, object]]:
     """由夹具里的 `Capitals` 行派生应有的三个字段 (不另抄一份)."""
 
     return [
@@ -194,16 +188,9 @@ def expected_equity_points(
     ]
 
 
-async def create_compared_run(
-    database: PlatformDatabase,
-    settings: PlatformSettings,
-    tenant: ComparisonTenant,
-    grid_step: float,
-    metrics: dict[str, object],
-    capital_rows: Sequence[tuple[str, float, float]] | None = None,
-    status: RunStatus = RunStatus.SUCCEEDED,
-    owner: SignedInAccount | None = None,
-) -> RunModel:
+async def create_compared_run(database: PlatformDatabase, settings: PlatformSettings, tenant: ComparisonTenant,
+    grid_step: float, metrics: dict[str, object], capital_rows: Sequence[tuple[str, float, float]] | None = None,
+    status: RunStatus = RunStatus.SUCCEEDED, owner: SignedInAccount | None = None) -> RunModel:
     """造一轮参与对比的运行.
 
     `capital_rows` 为 `None` 时**不写结果库也不填 `DbPath`**——那一格 (还没收尾、或策略在早期就
@@ -239,11 +226,7 @@ async def create_compared_run(
 
 
 @pytest_asyncio.fixture
-async def comparison_board(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> ComparisonBoard:
+async def comparison_board(client: AsyncClient, database: PlatformDatabase, platform_settings: PlatformSettings) -> ComparisonBoard:
     member = await create_signed_in_account(database, client, RUN_OWNER_USERNAME)
     outsider = await create_signed_in_account(database, client, OTHER_MEMBER_USERNAME)
     strategy = await create_strategy_record(database, member.user, STRATEGY_NAME)
@@ -290,9 +273,7 @@ async def comparison_board(
     )
 
 
-async def request_comparison(
-    client: AsyncClient, token: str, comparison_run_ids: Sequence[str]
-) -> Response:
+async def request_comparison(client: AsyncClient, token: str, comparison_run_ids: Sequence[str]) -> Response:
     """请求一次对比, 原样返回响应."""
 
     return await client.get(
@@ -302,9 +283,7 @@ async def request_comparison(
     )
 
 
-async def read_comparison(
-    client: AsyncClient, token: str, comparison_run_ids: Sequence[str]
-) -> RunComparisonResponse:
+async def read_comparison(client: AsyncClient, token: str, comparison_run_ids: Sequence[str]) -> RunComparisonResponse:
     """请求一次对比, 断言 200 再解出响应体."""
 
     response = await request_comparison(client, token, comparison_run_ids)
@@ -320,9 +299,7 @@ def returned_run_ids(comparison: RunComparisonResponse) -> list[str]:
     return [entry.summary.id for entry in comparison.runs]
 
 
-async def test_two_runs_that_differ_only_in_one_parameter_are_side_by_side(
-    client: AsyncClient, comparison_board: ComparisonBoard
-) -> None:
+async def test_two_runs_that_differ_only_in_one_parameter_are_side_by_side(client: AsyncClient, comparison_board: ComparisonBoard) -> None:
     """**验收句**: 同策略同参、只差 `GridStep` 的两轮并列, 指标互异且各带各的曲线.
 
     三件事一起断言才构成"并列"这件事: 两列 (而不是一轮画两遍)、指标确实不同 (而不是两块一样的
@@ -387,9 +364,7 @@ async def test_two_runs_that_differ_only_in_one_parameter_are_side_by_side(
     )
 
 
-async def test_the_columns_follow_the_request_order(
-    client: AsyncClient, comparison_board: ComparisonBoard
-) -> None:
+async def test_the_columns_follow_the_request_order(client: AsyncClient, comparison_board: ComparisonBoard) -> None:
     """列的次序就是请求里那个次序, 不是库返回的次序.
 
     **同一对运行号按两种次序各请求一次**, 两次都要等于各自的请求序. 只发一次是不行的: `IN (...)`
@@ -415,9 +390,7 @@ async def test_the_columns_follow_the_request_order(
     assert returned_run_ids(descending_comparison) == descending_ids
 
 
-async def test_a_repeated_id_yields_one_column(
-    client: AsyncClient, comparison_board: ComparisonBoard
-) -> None:
+async def test_a_repeated_id_yields_one_column(client: AsyncClient, comparison_board: ComparisonBoard) -> None:
     """重复的运行号只出一列: 库里那一行只有一份, 出两列会让响应与请求对不上.
 
     同一轮数满 7 次仍然放行, 因为**上限按去重之后判**: 实际要画的是 1 列, 没有理由拒.
@@ -432,12 +405,8 @@ async def test_a_repeated_id_yields_one_column(
     assert returned_run_ids(comparison) == [comparison_board.fine_run.id]
 
 
-async def test_more_than_the_maximum_number_of_runs_is_rejected(
-    client: AsyncClient,
-    comparison_board: ComparisonBoard,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_more_than_the_maximum_number_of_runs_is_rejected(client: AsyncClient, comparison_board: ComparisonBoard,
+    database: PlatformDatabase, platform_settings: PlatformSettings) -> None:
     """超过上限的**去重后**轮数一律 400, 且什么都不读.
 
     去重与否在这里是可分的: 造 `MAXIMUM_COMPARISON_RUNS + 1` 个**互不相同**的轮.
@@ -466,9 +435,7 @@ async def test_more_than_the_maximum_number_of_runs_is_rejected(
 
 
 @pytest.mark.parametrize("raw_ids", ["", "   ", ",", ", ,", " , "])
-async def test_an_empty_id_list_is_rejected(
-    client: AsyncClient, comparison_board: ComparisonBoard, raw_ids: str
-) -> None:
+async def test_an_empty_id_list_is_rejected(client: AsyncClient, comparison_board: ComparisonBoard, raw_ids: str) -> None:
     """一个运行号都没给 (空串、只有分隔符、只有空白) 一律 400.
 
     切成空列表后若继续走下去, `IN ()` 会退化成"什么都不匹配", 而整请求 404 那句文案会把一次
@@ -485,9 +452,7 @@ async def test_an_empty_id_list_is_rejected(
     assert response.json()["detail"] == COMPARISON_IDS_REQUIRED_MESSAGE
 
 
-async def test_the_ids_parameter_is_required(
-    client: AsyncClient, comparison_board: ComparisonBoard
-) -> None:
+async def test_the_ids_parameter_is_required(client: AsyncClient, comparison_board: ComparisonBoard) -> None:
     """连 `ids` 都不带是 422 (契约里它必填), 不会走到那句 400 的文案上."""
 
     response = await client.get(
@@ -497,9 +462,7 @@ async def test_the_ids_parameter_is_required(
     assert response.status_code == 422
 
 
-async def test_another_members_run_makes_the_whole_request_not_found(
-    client: AsyncClient, comparison_board: ComparisonBoard
-) -> None:
+async def test_another_members_run_makes_the_whole_request_not_found(client: AsyncClient, comparison_board: ComparisonBoard) -> None:
     """混进别人的轮 → **整请求 404**, 响应里一列都没有.
 
     降级成"少一列"是不行的: 越权与不存在一旦留下形状上的差别, 拿一组 id 去试就能问出"这个运行
@@ -519,9 +482,7 @@ async def test_another_members_run_makes_the_whole_request_not_found(
     assert comparison_board.outsider_run.id not in response.text
 
 
-async def test_an_unknown_run_id_is_indistinguishable_from_another_members(
-    client: AsyncClient, comparison_board: ComparisonBoard
-) -> None:
+async def test_an_unknown_run_id_is_indistinguishable_from_another_members(client: AsyncClient, comparison_board: ComparisonBoard) -> None:
     """不认识这个运行号与"这是他提交的轮"逐字相同: 同状态码、同响应体."""
 
     hidden = await request_comparison(
@@ -537,11 +498,7 @@ async def test_an_unknown_run_id_is_indistinguishable_from_another_members(
     assert unknown.text == hidden.text
 
 
-def assert_only_the_curve_is_missing(
-    comparison: RunComparisonResponse,
-    expected_run_id: str,
-    expected_reason: str,
-) -> None:
+def assert_only_the_curve_is_missing(comparison: RunComparisonResponse, expected_run_id: str, expected_reason: str) -> None:
     """第一列的曲线降级、它的指标与第二列**整个**完好.
 
     降级那一列恒为本模块的细网格那一份 (各降级用例造它时用的就是 `FINE_GRID_METRICS`), 第二列
@@ -567,12 +524,8 @@ def assert_only_the_curve_is_missing(
     )
 
 
-async def test_an_unfinished_run_keeps_its_metrics_and_loses_only_its_curve(
-    client: AsyncClient,
-    comparison_board: ComparisonBoard,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_an_unfinished_run_keeps_its_metrics_and_loses_only_its_curve(client: AsyncClient,
+    comparison_board: ComparisonBoard, database: PlatformDatabase, platform_settings: PlatformSettings) -> None:
     """还没结束的轮进得来, 指标照出, 只是没有曲线.
 
     这一行直接落库 (`status='running'`): 调度器只认领 `queued`, 故它不会自己往下走, 断言不依赖
@@ -600,12 +553,8 @@ async def test_an_unfinished_run_keeps_its_metrics_and_loses_only_its_curve(
     )
 
 
-async def test_a_run_without_a_result_database_loses_only_its_curve(
-    client: AsyncClient,
-    comparison_board: ComparisonBoard,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_run_without_a_result_database_loses_only_its_curve(client: AsyncClient,
+    comparison_board: ComparisonBoard, database: PlatformDatabase, platform_settings: PlatformSettings) -> None:
     """`DbPath` 是空串的轮 (`result.json` 没写成功) 同样只降曲线.
 
     空串拼出来的路径**就是作业目录本身**, 那种"打开"会以另一种面目失败, 故它单列一档文案.
@@ -630,12 +579,8 @@ async def test_a_run_without_a_result_database_loses_only_its_curve(
     )
 
 
-async def test_a_deleted_result_database_loses_only_its_curve(
-    client: AsyncClient,
-    comparison_board: ComparisonBoard,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_deleted_result_database_loses_only_its_curve(client: AsyncClient, comparison_board: ComparisonBoard,
+    database: PlatformDatabase, platform_settings: PlatformSettings) -> None:
     """结果库文件被移走 (手工清理、或保留策略走过) 时, 指标一个都不少.
 
     这一格就是"指标取镜像列"这个决定的判据: 换成"对比时重读 `result.json`"的实现, 这里会以
@@ -664,12 +609,8 @@ async def test_a_deleted_result_database_loses_only_its_curve(
     )
 
 
-async def test_an_unreadable_result_database_loses_only_its_curve(
-    client: AsyncClient,
-    comparison_board: ComparisonBoard,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_an_unreadable_result_database_loses_only_its_curve(client: AsyncClient,
+    comparison_board: ComparisonBoard, database: PlatformDatabase, platform_settings: PlatformSettings) -> None:
     """文件在、但读不出来时也只降这一列: 一次坏库不该让整页 500.
 
     与单轮权益端点的差别正在这里: 那边读不出来即 404/409, 这边是"整页少一条线", 代价差着一个
@@ -700,12 +641,8 @@ async def test_an_unreadable_result_database_loses_only_its_curve(
     )
 
 
-async def test_a_database_path_outside_the_job_directory_loses_only_its_curve(
-    client: AsyncClient,
-    comparison_board: ComparisonBoard,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_database_path_outside_the_job_directory_loses_only_its_curve(client: AsyncClient,
+    comparison_board: ComparisonBoard, database: PlatformDatabase, platform_settings: PlatformSettings) -> None:
     """`DbPath` 指向作业目录之外时, 那条曲线一律当"文件已不在", 且**别人的数一个都不出来**.
 
     这不是假想: `DbPath` 由引擎写进 `result.json`, 而策略是任意 Python 且与引擎同进程, 它完全
@@ -749,9 +686,7 @@ async def test_a_database_path_outside_the_job_directory_loses_only_its_curve(
     )
 
 
-async def test_the_summary_matches_the_list_view_column_for_column(
-    client: AsyncClient, comparison_board: ComparisonBoard
-) -> None:
+async def test_the_summary_matches_the_list_view_column_for_column(client: AsyncClient, comparison_board: ComparisonBoard) -> None:
     """对比里的 `summary` 与列表里那一行**逐字段相同** (含这次新加的 `params_json`).
 
     加宽是纯增量这件事要一条断言来顶: 两处若各有一份字段清单, 将来加一列只会加在一边, 而那种
@@ -782,9 +717,7 @@ async def test_the_summary_matches_the_list_view_column_for_column(
     assert listed_summary.params_json == parameters_with_grid_step(FINE_GRID_STEP)
 
 
-async def test_the_detail_view_still_carries_the_widened_column(
-    client: AsyncClient, comparison_board: ComparisonBoard
-) -> None:
+async def test_the_detail_view_still_carries_the_widened_column(client: AsyncClient, comparison_board: ComparisonBoard) -> None:
     """详情响应里 `params_json` 还在 (它现在继承自列表视图, 不再是自己声明的那个字段)."""
 
     response = await client.get(
@@ -796,9 +729,7 @@ async def test_the_detail_view_still_carries_the_widened_column(
     assert response.json()["params_json"] == parameters_with_grid_step(FINE_GRID_STEP)
 
 
-async def test_anonymous_callers_cannot_compare(
-    client: AsyncClient, comparison_board: ComparisonBoard
-) -> None:
+async def test_anonymous_callers_cannot_compare(client: AsyncClient, comparison_board: ComparisonBoard) -> None:
     """没有令牌就没有对比权: 401 且不读任何结果库."""
 
     response = await client.get(

@@ -200,9 +200,7 @@ def test_full_coverage_after_refresh_proceeds() -> None:
         ("2024-01-05", None, True),
     ],
 )
-def test_request_beyond_calendar(
-    end_day: str, calendar_last_day: str | None, expected: bool
-) -> None:
+def test_request_beyond_calendar(end_day: str, calendar_last_day: str | None, expected: bool) -> None:
     assert request_exceeds_calendar(end_day, calendar_last_day) is expected
 
 
@@ -427,9 +425,7 @@ def test_contract_without_any_bars_is_not_enough(quote_hub_root: Path) -> None:
     assert decide_after_refresh(verdict) is RefreshDecision.FAIL_INSUFFICIENT
 
 
-def test_a_ledger_span_that_starts_before_the_window_still_covers_it(
-    quote_hub_root: Path,
-) -> None:
+def test_a_ledger_span_that_starts_before_the_window_still_covers_it(quote_hub_root: Path) -> None:
     """账里的一段只要与区间相交就算数: 段是闭的, 两头都算, 不必整段落在区间里."""
 
     facts = quote_hub.read_coverage_facts(

@@ -83,19 +83,13 @@ async def admin_token(client: AsyncClient) -> str:
 
 
 @pytest_asyncio.fixture
-async def member_token(
-    database: PlatformDatabase, client: AsyncClient
-) -> str:
+async def member_token(database: PlatformDatabase, client: AsyncClient) -> str:
     """一个普通账号的令牌, 用于验证非管理员的拒绝路径."""
 
     return (await create_signed_in_account(database, client, MEMBER_USERNAME)).token
 
 
-def _product_payload(
-    exchange_id: str = "SSE",
-    product_id: str = "600519",
-    product_name: str = "贵州茅台",
-) -> dict[str, object]:
+def _product_payload(exchange_id: str = "SSE", product_id: str = "600519", product_name: str = "贵州茅台") -> dict[str, object]:
     """一份品种请求体, 只给自然键.
 
     其余七列交给 schema 的默认值 —— 它们同时也是"新建时不必逐列填"这条体验的断言对象.
@@ -108,21 +102,15 @@ def _product_payload(
     }
 
 
-def _commission_group_payload(
-    commission_group_id: int = 1, commission_group_name: str = "默认组"
-) -> dict[str, object]:
+def _commission_group_payload(commission_group_id: int = 1, commission_group_name: str = "默认组") -> dict[str, object]:
     return {
         "commission_group_id": commission_group_id,
         "commission_group_name": commission_group_name,
     }
 
 
-def _base_commission_payload(
-    commission_group_id: int = 1,
-    exchange_id: str = "SSE",
-    instrument_id: str = "600519",
-    direction: int = CommissionDirection.SELL.value,
-) -> dict[str, object]:
+def _base_commission_payload(commission_group_id: int = 1, exchange_id: str = "SSE", instrument_id: str = "600519",
+    direction: int = CommissionDirection.SELL.value) -> dict[str, object]:
     return {
         "commission_group_id": commission_group_id,
         "exchange_id": exchange_id,
@@ -134,9 +122,7 @@ def _base_commission_payload(
     }
 
 
-async def _create_product(
-    client: AsyncClient, token: str, **payload: object
-) -> ProductResponse:
+async def _create_product(client: AsyncClient, token: str, **payload: object) -> ProductResponse:
     response = await client.post(
         PRODUCTS_PATH,
         json=_product_payload(**payload),
@@ -148,9 +134,7 @@ async def _create_product(
     return ProductResponse.model_validate(response.json())
 
 
-async def _create_commission_group(
-    client: AsyncClient, token: str, **payload: object
-) -> CommissionGroupResponse:
+async def _create_commission_group(client: AsyncClient, token: str, **payload: object) -> CommissionGroupResponse:
     response = await client.post(
         COMMISSION_GROUPS_PATH,
         json=_commission_group_payload(**payload),
@@ -162,9 +146,7 @@ async def _create_commission_group(
     return CommissionGroupResponse.model_validate(response.json())
 
 
-async def _create_base_commission(
-    client: AsyncClient, token: str, **payload: object
-) -> BaseCommissionResponse:
+async def _create_base_commission(client: AsyncClient, token: str, **payload: object) -> BaseCommissionResponse:
     response = await client.post(
         BASE_COMMISSIONS_PATH,
         json=_base_commission_payload(**payload),
@@ -176,9 +158,7 @@ async def _create_base_commission(
     return BaseCommissionResponse.model_validate(response.json())
 
 
-async def test_creating_a_product_returns_it_and_lists_it(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_creating_a_product_returns_it_and_lists_it(client: AsyncClient, admin_token: str) -> None:
     """建一个品种: 回 201 与本行, 且它真的进了列表."""
 
     created_product = await _create_product(client, admin_token)
@@ -194,9 +174,7 @@ async def test_creating_a_product_returns_it_and_lists_it(
     assert page.total == len(SEEDED_PRODUCT_KEYS) + 1
 
 
-async def test_products_are_listed_by_exchange_then_code(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_products_are_listed_by_exchange_then_code(client: AsyncClient, admin_token: str) -> None:
     """列表按 (交易所, 品种代码) 排 —— 复合自然键, 故次序是稳定的、翻页不会跳行."""
 
     await _create_product(client, admin_token)
@@ -208,9 +186,7 @@ async def test_products_are_listed_by_exchange_then_code(
     ] == [SEEDED_PRODUCT_KEYS[0], ("SSE", "600519"), SEEDED_PRODUCT_KEYS[1]]
 
 
-async def test_the_same_product_code_cannot_be_entered_twice_for_one_exchange(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_the_same_product_code_cannot_be_entered_twice_for_one_exchange(client: AsyncClient, admin_token: str) -> None:
     """同一交易所下的同一品种代码只允许一行: 建第二次回 409, 报的是"已存在"."""
 
     await _create_product(client, admin_token)
@@ -225,9 +201,7 @@ async def test_the_same_product_code_cannot_be_entered_twice_for_one_exchange(
     assert response.json()["detail"] == PRODUCT_DUPLICATED_MESSAGE
 
 
-async def test_a_product_update_replaces_the_whole_row(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_a_product_update_replaces_the_whole_row(client: AsyncClient, admin_token: str) -> None:
     """改单是整行替换: 请求里没给的列回到 schema 默认值, 不是"只改给的这几列".
 
     这条行为是刻意的 (与提交、存模板共用的那套"建单改单同一份字段定义"一脉相承), 故值得钉住:
@@ -252,9 +226,7 @@ async def test_a_product_update_replaces_the_whole_row(
     assert updated_product.volume_multiple == 1
 
 
-async def test_deleting_a_product_twice_reports_it_as_absent_the_second_time(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_deleting_a_product_twice_reports_it_as_absent_the_second_time(client: AsyncClient, admin_token: str) -> None:
     """删两次: 第一次 200, 第二次 404 —— 第二次点的那个人要知道它已经不在了."""
 
     created_product = await _create_product(client, admin_token)
@@ -277,9 +249,7 @@ async def test_deleting_a_product_twice_reports_it_as_absent_the_second_time(
     assert second_response.json()["detail"] == PRODUCT_NOT_FOUND_MESSAGE
 
 
-async def test_a_rate_row_needs_its_commission_group_to_exist_first(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_a_rate_row_needs_its_commission_group_to_exist_first(client: AsyncClient, admin_token: str) -> None:
     """费率行指向一个不存在的组时回 409, 且说的是"组不存在".
 
     这两句报错分得开是要紧的: 外键兜底那句是"这个组、交易所、合约与方向下已有一条费率", 对着
@@ -298,9 +268,7 @@ async def test_a_rate_row_needs_its_commission_group_to_exist_first(
     assert response.json()["detail"] == COMMISSION_GROUP_ABSENT_MESSAGE
 
 
-async def test_a_rate_row_is_unique_per_group_exchange_instrument_and_direction(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_a_rate_row_is_unique_per_group_exchange_instrument_and_direction(client: AsyncClient, admin_token: str) -> None:
     """同一组、交易所、合约与方向只能有一条费率; 换个方向就是另一条.
 
     方向在键里而不是"选哪一列": 印花税只在卖出侧收, 只写一行的话另一个方向整笔取不到费率.
@@ -331,9 +299,7 @@ async def test_a_rate_row_is_unique_per_group_exchange_instrument_and_direction(
     assert sell_row.direction == CommissionDirection.SELL.value
 
 
-async def test_deleting_a_commission_group_that_is_still_referenced_is_rejected(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_deleting_a_commission_group_that_is_still_referenced_is_rejected(client: AsyncClient, admin_token: str) -> None:
     """删一个还挂着费率明细的组: 回 409, 且报出被几条引用着; 那些明细一条都不能少.
 
     不级联删是刻意的: 用户点的是"删这个组", 而级联顺手删掉的是别处录进来的费率数据.
@@ -364,9 +330,7 @@ async def test_deleting_a_commission_group_that_is_still_referenced_is_rejected(
     assert record_ids(group_page) == [commission_group.id]
 
 
-async def test_renumbering_a_referenced_commission_group_is_rejected(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_renumbering_a_referenced_commission_group_is_rejected(client: AsyncClient, admin_token: str) -> None:
     """改一个还挂着费率明细的组的组号: 回 409, 且字面说的是"改组号"而不是"组号已存在".
 
     费率行存的是**组号**(不是组的主键), 而外键指向组的组号列且未声明 `ON UPDATE`, 于是改号会让
@@ -403,9 +367,7 @@ async def test_renumbering_a_referenced_commission_group_is_rejected(
     assert record_ids(rate_page) == [rate_row.id]
 
 
-async def test_renumbering_an_unreferenced_commission_group_succeeds(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_renumbering_an_unreferenced_commission_group_succeeds(client: AsyncClient, admin_token: str) -> None:
     """没人引用的组改得动号, 新号就地生效.
 
     改号一个行数都没变, 故它只能看列表里那一行 —— 没有任何按行数比对的判据会对它起作用.
@@ -437,9 +399,7 @@ async def test_renumbering_an_unreferenced_commission_group_succeeds(
     ] == [(8, "自有费率")]
 
 
-async def test_deleting_an_unreferenced_commission_group_succeeds(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_deleting_an_unreferenced_commission_group_succeeds(client: AsyncClient, admin_token: str) -> None:
     """没人引用的组删得掉."""
 
     commission_group = await _create_commission_group(client, admin_token)
@@ -462,9 +422,7 @@ async def test_deleting_an_unreferenced_commission_group_succeeds(
     assert group_page.total == 0
 
 
-async def test_deleting_a_rate_row_succeeds(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_deleting_a_rate_row_succeeds(client: AsyncClient, admin_token: str) -> None:
     """删一条费率明细: 回 200, 列表里也跟着少一条."""
 
     await _create_commission_group(client, admin_token)
@@ -489,9 +447,7 @@ async def test_deleting_a_rate_row_succeeds(
     assert rate_page.total == 0
 
 
-async def test_deleting_a_rate_row_that_is_gone_reports_it_as_absent(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_deleting_a_rate_row_that_is_gone_reports_it_as_absent(client: AsyncClient, admin_token: str) -> None:
     """删一条不存在的费率明细回 404, 而不是 200 —— 假装成功会让界面认为数据变了."""
 
     response = await client.delete(
@@ -506,9 +462,7 @@ async def test_deleting_a_rate_row_that_is_gone_reports_it_as_absent(
     "path",
     [PRODUCTS_PATH, COMMISSION_GROUPS_PATH, BASE_COMMISSIONS_PATH],
 )
-async def test_a_member_cannot_even_read_the_reference_data(
-    client: AsyncClient, member_token: str, path: str
-) -> None:
+async def test_a_member_cannot_even_read_the_reference_data(client: AsyncClient, member_token: str, path: str) -> None:
     """普通账号读都读不到这三个管理列表 —— 这三张表是整个平台的算钱依据, 不是租户数据.
 
     `/commission-group-options` **不在这条断言里**: 它是唯一那条只要登录的只读投影 (提交页要选
@@ -521,9 +475,7 @@ async def test_a_member_cannot_even_read_the_reference_data(
     assert response.json()["detail"] == ADMIN_REQUIRED_DETAIL
 
 
-async def test_a_member_can_read_the_commission_group_options(
-    client: AsyncClient, admin_token: str, member_token: str
-) -> None:
+async def test_a_member_can_read_the_commission_group_options(client: AsyncClient, admin_token: str, member_token: str) -> None:
     """普通账号取得回选组的选项, 且那条投影只有组号与组名.
 
     普通用户有权提交回测, 而提交时必须选一个手续费组 —— 把"有哪几个组"也锁在管理员后面, 等于让
@@ -548,9 +500,7 @@ async def test_a_member_can_read_the_commission_group_options(
     ]
 
 
-async def test_a_member_cannot_write_reference_data(
-    client: AsyncClient, member_token: str
-) -> None:
+async def test_a_member_cannot_write_reference_data(client: AsyncClient, member_token: str) -> None:
     """普通账号写自然也不行: 三张表各验一次建单 (改单、删单走的是同一条依赖)."""
 
     write_requests = [
@@ -576,9 +526,7 @@ async def test_a_member_cannot_write_reference_data(
         assert response.json()["detail"] == ADMIN_REQUIRED_DETAIL
 
 
-async def test_an_over_long_product_code_is_rejected(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_an_over_long_product_code_is_rejected(client: AsyncClient, admin_token: str) -> None:
     """字符串超出引擎 `char[n]` 的宽度时回 422, 不是写进库再在装载时被引擎截断.
 
     截断的后果不是"这行短了一点": 引擎按定长比较, 截断后的品种代码与成交里那个对不上, 于是
@@ -602,9 +550,7 @@ async def test_an_over_long_product_code_is_rejected(
     assert over_long_product_response.status_code == 422, over_long_product_response.text
 
 
-async def test_a_direction_outside_the_engine_values_is_rejected(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_a_direction_outside_the_engine_values_is_rejected(client: AsyncClient, admin_token: str) -> None:
     """方向只收买 (0) / 卖 (1) / 双向 (-1) 三档, 别的取值回 422.
 
     引擎拿成交方向去查行, 库里多存一个 2 只会是一条谁也查不到的记录.
@@ -624,9 +570,7 @@ async def test_a_direction_outside_the_engine_values_is_rejected(
     assert response.status_code == 422, response.text
 
 
-async def test_the_both_directions_wildcard_is_a_rule_that_is_accepted(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_the_both_directions_wildcard_is_a_rule_that_is_accepted(client: AsyncClient, admin_token: str) -> None:
     """`-1` (双向) 收得下、读得回: 一条规则管买卖两边.
 
     它是**平台侧**的那一档 —— 写种子库时被摊成买、卖两行, 引擎只看得到 0 与 1
@@ -649,9 +593,7 @@ async def test_the_both_directions_wildcard_is_a_rule_that_is_accepted(
     assert [row.direction for row in rate_page.records] == [BOTH_DIRECTIONS]
 
 
-async def test_a_negative_rate_is_rejected(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_a_negative_rate_is_rejected(client: AsyncClient, admin_token: str) -> None:
     """费率不能为负: 负费率会让"手续费"反过来变成收益, 而那是核不出来的数."""
 
     await _create_commission_group(client, admin_token)
@@ -668,9 +610,7 @@ async def test_a_negative_rate_is_rejected(
     assert response.status_code == 422, response.text
 
 
-async def test_an_empty_instrument_code_is_accepted_as_the_exchange_level(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_an_empty_instrument_code_is_accepted_as_the_exchange_level(client: AsyncClient, admin_token: str) -> None:
     """合约格留空是**交易所级**那一档, 不是漏填.
 
     空串在引擎那张表里从来查不到 (它拿成交合约去查), 它的唯一用途就是被平台展开时兜底 —— 故
@@ -688,9 +628,7 @@ async def test_an_empty_instrument_code_is_accepted_as_the_exchange_level(
     assert created_rate_row.exchange_id == REGISTERED_PRODUCT_EXCHANGE_ID
 
 
-async def test_a_blank_instrument_code_is_trimmed_to_the_exchange_level(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_a_blank_instrument_code_is_trimmed_to_the_exchange_level(client: AsyncClient, admin_token: str) -> None:
     """带空白的"空"也当归成交易所级 —— 从表格里粘贴时很容易带上格式空白."""
 
     await _create_commission_group(client, admin_token)
@@ -702,9 +640,7 @@ async def test_a_blank_instrument_code_is_trimmed_to_the_exchange_level(
     assert created_rate_row.instrument_id == EXCHANGE_LEVEL_INSTRUMENT_ID
 
 
-async def test_an_unregistered_short_product_code_is_rejected(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_an_unregistered_short_product_code_is_rejected(client: AsyncClient, admin_token: str) -> None:
     """短码没在品种表里登记过时回 400, 文案给出两条出路.
 
     放行的话它会以"合约级"的身份躺在表里, 而展开时它既配不上任何合约、又遮不住任何品种级规则
@@ -730,9 +666,7 @@ async def test_an_unregistered_short_product_code_is_rejected(
     )
 
 
-async def test_a_product_code_registered_on_another_exchange_is_rejected(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_a_product_code_registered_on_another_exchange_is_rejected(client: AsyncClient, admin_token: str) -> None:
     """品种码是**按交易所**登记的: `SSE` 下建得出 `600`, 不代表 `SZSE` 下也有它."""
 
     await _create_commission_group(client, admin_token)
@@ -749,9 +683,7 @@ async def test_a_product_code_registered_on_another_exchange_is_rejected(
     assert response.status_code == 400, response.text
 
 
-async def test_a_registered_product_code_is_accepted_as_the_product_level(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_a_registered_product_code_is_accepted_as_the_product_level(client: AsyncClient, admin_token: str) -> None:
     """已登记的品种码 (这里是初始化 CSV 里的 `SSE / 600`) 走品种级, 放行."""
 
     await _create_commission_group(client, admin_token)
@@ -763,9 +695,7 @@ async def test_a_registered_product_code_is_accepted_as_the_product_level(
     assert created_rate_row.instrument_id == REGISTERED_PRODUCT_ID
 
 
-async def test_a_code_longer_than_the_product_threshold_is_treated_as_a_contract(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_a_code_longer_than_the_product_threshold_is_treated_as_a_contract(client: AsyncClient, admin_token: str) -> None:
     """长于阈值的代码一律当合约码放行 —— 合约清单不在平台手里, 无从核实它是否存在.
 
     平台能核的只有品种表那一份, 故这条守门是**启发式**: 它拦得住"打错的短码", 拦不住"打错的
@@ -781,9 +711,7 @@ async def test_a_code_longer_than_the_product_threshold_is_treated_as_a_contract
     assert created_rate_row.instrument_id == SHORTEST_CONTRACT_INSTRUMENT_ID
 
 
-async def test_an_over_long_instrument_code_is_rejected(
-    client: AsyncClient, admin_token: str
-) -> None:
+async def test_an_over_long_instrument_code_is_rejected(client: AsyncClient, admin_token: str) -> None:
     """字符串超出引擎 `char[n]` 的宽度时回 422, 不是写进库再在装载时被引擎截断.
 
     截断的后果不是"这行短了一点": 引擎按定长比较, 截断后的合约代码与成交里那个对不上, 于是这行

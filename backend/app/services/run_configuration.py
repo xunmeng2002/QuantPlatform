@@ -162,9 +162,7 @@ def validate_commission_group_id(raw_value: int) -> int:
     return int(raw_value)
 
 
-def validate_trading_day_range(
-    start_trading_day: str, end_trading_day: str
-) -> tuple[str, str]:
+def validate_trading_day_range(start_trading_day: str, end_trading_day: str) -> tuple[str, str]:
     """校验两个交易日各自合法且 `start <= end`, 返回规范化后的取值.
 
     两件事合成一个入口: 分成两步的话, 调用方可以只做前一步, 而"起止倒置"那种提交会照常入队
@@ -194,9 +192,7 @@ def validate_match_mode(requested_match_mode: MarketDataType) -> MarketDataType:
     return requested_match_mode
 
 
-def resolve_run_field_values(
-    submitted_values: RunConfigurationRequest,
-) -> dict[str, str]:
+def resolve_run_field_values(submitted_values: RunConfigurationRequest) -> dict[str, str]:
     """三个运行级字段的**唯一一份**取值; 空值一律收成空串.
 
     三项现在**恒被收下**: 平台按固定键名把它们写进策略配置, 模板里有没有这几个键都一样.
@@ -230,9 +226,7 @@ def resolve_run_field_values(
     }
 
 
-def validate_submitted_parameters(
-    template: Mapping[str, object], submitted_parameters: Mapping[str, object]
-) -> dict[str, object]:
+def validate_submitted_parameters(template: Mapping[str, object], submitted_parameters: Mapping[str, object]) -> dict[str, object]:
     """提交的参数: 每一个键都必须是模板里已有的、且不是平台那三个.
 
     键集由**上传的那份文件**固定, 提交只有"改值"这一种权利. 于是"多传了一个键"不再是"多存一个
@@ -258,11 +252,8 @@ def validate_submitted_parameters(
     return dict(submitted_parameters)
 
 
-def build_strategy_configuration(
-    template: Mapping[str, object],
-    run_field_values: Mapping[str, str],
-    submitted_parameters: Mapping[str, object],
-) -> dict[str, object]:
+def build_strategy_configuration(template: Mapping[str, object], run_field_values: Mapping[str, str],
+    submitted_parameters: Mapping[str, object]) -> dict[str, object]:
     """渲染策略配置: 模板 + 用户改过的参数 + 平台覆写的三个运行级键.
 
     三条性质都由这三行保证, 每条都值得一条用例:
@@ -321,10 +312,7 @@ class DecodedRunFields:
     parameter_values: dict[str, object]
 
 
-def decode_run_fields(
-    engine_configuration: Mapping[str, object],
-    strategy_configuration: Mapping[str, object],
-) -> DecodedRunFields:
+def decode_run_fields(engine_configuration: Mapping[str, object], strategy_configuration: Mapping[str, object]) -> DecodedRunFields:
     """把渲染好的两份配置文本读回取值. 它是 `build_strategy_configuration` 的逆.
 
     **两个来源不能互换**: 撮合模式、两个交易日与手续费组在引擎那份里, 合约与订阅周期在策略那份里.
@@ -358,9 +346,7 @@ def _read_text(configuration: Mapping[str, object], key_name: str) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _read_finite_number(
-    configuration: Mapping[str, object], key_name: str
-) -> float | None:
+def _read_finite_number(configuration: Mapping[str, object], key_name: str) -> float | None:
     """取一个有限数值; 类型不符或非有限 (JSON 允许 `Infinity` 字面量) 时回 `None`."""
 
     value = configuration.get(key_name)

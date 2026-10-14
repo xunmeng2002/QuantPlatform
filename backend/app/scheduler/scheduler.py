@@ -47,13 +47,7 @@ class RunScheduler:
     即不挂任何东西, 于是不关心磁盘清理的调用方 (以及绝大多数用例) 构造出来的调度器行为不变.
     """
 
-    def __init__(
-        self,
-        settings: PlatformSettings,
-        database: PlatformDatabase,
-        *,
-        retention_sweep: RetentionSweep | None = None,
-    ) -> None:
+    def __init__(self, settings: PlatformSettings, database: PlatformDatabase, *, retention_sweep: RetentionSweep | None = None) -> None:
         self._settings = settings
         self._database = database
         self._registry = RunningJobRegistry()
@@ -66,13 +60,11 @@ class RunScheduler:
         self._retention_task: asyncio.Task[None] | None = None
         self._loop_task: asyncio.Task[None] | None = None
         self._stopping = True
-
     @property
     def registry(self) -> RunningJobRegistry:
         """在跑的作业句柄表, 供取消端点取句柄."""
 
         return self._registry
-
     async def start(self) -> None:
         """起常驻循环. 在此之前提交的作业由第一轮派发捡起, 不需要额外的补扫."""
 
@@ -84,7 +76,6 @@ class RunScheduler:
         self._stopping = False
         self._loop_task = asyncio.create_task(self._run_loop(), name=SCHEDULER_TASK_NAME)
         self._loop_task.add_done_callback(_report_loop_exit)
-
     async def stop(self, timeout_seconds: float = SHUTDOWN_GRACE_SECONDS) -> None:
         """停循环、等在跑的作业收尾, 最后收掉保留清理任务.
 
@@ -114,7 +105,6 @@ class RunScheduler:
             logger.warning("停机时限内仍有作业在跑, 它们会在下次启动时被标为中断")
 
         await self._cancel_retention_sweep()
-
     async def _cancel_retention_sweep(self) -> None:
         """取消在跑的保留清理并等它退出."""
 
@@ -127,7 +117,6 @@ class RunScheduler:
         retention_task.cancel()
 
         await asyncio.gather(retention_task, return_exceptions=True)
-
     def wake(self) -> None:
         """催一次派发.
 
@@ -136,7 +125,6 @@ class RunScheduler:
         """
 
         self._wake_signal.set()
-
     async def wait_until_idle(self, timeout_seconds: float | None = None) -> bool:
         """等在跑的作业任务全部结束, 超时返回 False.
 
@@ -152,7 +140,6 @@ class RunScheduler:
             return False
 
         return True
-
     async def _run_loop(self) -> None:
         """常驻循环: 先清信号 → 再扫库 → 后等唤醒.
 
@@ -179,7 +166,6 @@ class RunScheduler:
                 pass
 
         logger.info("调度器已停止")
-
     async def _dispatch_available_jobs(self) -> None:
         """占用空槽并派发, 直到没有空槽或没有排队作业.
 
@@ -209,7 +195,6 @@ class RunScheduler:
             self._job_tasks.add(job_task)
             self._job_run_ids[job_task] = run_id
             job_task.add_done_callback(self._on_job_task_done)
-
     async def _claim_next_run(self) -> str | None:
         """取件并**条件更新**成 `running`; 取不到或抢输了返回 None.
 
@@ -249,7 +234,6 @@ class RunScheduler:
             return None
 
         return candidate_id
-
     def _on_job_task_done(self, job_task: asyncio.Task[None]) -> None:
         """作业任务结束: 还槽位, 记异常, 起一次保留清理.
 
@@ -271,7 +255,6 @@ class RunScheduler:
 
         if finished_run_id is not None:
             self._start_retention_sweep(finished_run_id)
-
     def _start_retention_sweep(self, finished_run_id: str) -> None:
         """让清理任务游离地跑起来, 绝不 await.
 
@@ -295,7 +278,6 @@ class RunScheduler:
             self._retention_sweep(finished_run_id), name=RETENTION_TASK_NAME
         )
         self._retention_task.add_done_callback(self._on_retention_task_done)
-
     def _on_retention_task_done(self, retention_task: asyncio.Task[None]) -> None:
         """清理任务收尾: 放开单飞护栏, 记异常.
 

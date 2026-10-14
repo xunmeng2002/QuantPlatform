@@ -276,9 +276,7 @@ class CoverageFacts:
     calendar_last_day: str | None
 
 
-def read_coverage_facts(
-    quote_hub_root: Path, code: str, frequency: str, start_day: str, end_day: str
-) -> CoverageFacts:
+def read_coverage_facts(quote_hub_root: Path, code: str, frequency: str, start_day: str, end_day: str) -> CoverageFacts:
     """四张表一次连接读完: 分开读要开四次 40 MB 的库, 而它们本来就是同一次判断的输入."""
 
     with open_quote_hub_database_readonly(quote_hub_root) as connection:
@@ -321,9 +319,7 @@ def read_coverage_facts(
     )
 
 
-def _read_queried_day_spans(
-    connection: sqlite3.Connection, code: str, frequency: str, start_day: str, end_day: str
-) -> list[tuple[str, str]]:
+def _read_queried_day_spans(connection: sqlite3.Connection, code: str, frequency: str, start_day: str, end_day: str) -> list[tuple[str, str]]:
     """该合约该频率下与区间相交的已问日区间; **账表不在时回空**.
 
     表不在 = 组件还停在 v2.3.0 之前, 账还没开始记, 于是退化成"一段都没问过、每次都得取".
@@ -363,9 +359,7 @@ def format_component_day(platform_day: str) -> str:
     return f"{platform_day[:4]}-{platform_day[4:6]}-{platform_day[6:8]}"
 
 
-def build_download_command(
-    frequency: str, start_day: str, end_day: str, codes: list[str], output_root: Path
-) -> list[str]:
+def build_download_command(frequency: str, start_day: str, end_day: str, codes: list[str], output_root: Path) -> list[str]:
     """拼出 `backfill` 的命令行. 日期是组件格式 (`YYYY-MM-DD`).
 
     用 `backfill` 而不是 `update`: 前者按 argparse 的帮助原文"区间入库并**直接写出年度 Parquet**
@@ -405,12 +399,7 @@ class DownloadOutcome:
     timed_out: bool
 
 
-async def run_download_command(
-    command: list[str],
-    quote_hub_root: Path,
-    cancel_signal: asyncio.Event,
-    timeout_seconds: int,
-) -> DownloadOutcome:
+async def run_download_command(command: list[str], quote_hub_root: Path, cancel_signal: asyncio.Event, timeout_seconds: int) -> DownloadOutcome:
     """跑一次下载, 直到它退出、被取消、或到时限.
 
     三件事同时竞速 (退出 / 取消信号 / 时限), **不用"取消这个协程"来实现超时**: 那样子进程会
@@ -490,9 +479,7 @@ async def _stop_process(process: asyncio.subprocess.Process) -> None:
         await process.wait()
 
 
-async def _drain_readers(
-    stdout_reader: asyncio.Task[None], stderr_reader: asyncio.Task[None]
-) -> None:
+async def _drain_readers(stdout_reader: asyncio.Task[None], stderr_reader: asyncio.Task[None]) -> None:
     """等两条读泵收拢, 但有界.
 
     进程退出 ≠ 输出读完, 退出瞬间仍在管道里的最后几行往往正是失败原因, 故要等一下; 而子进程

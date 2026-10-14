@@ -128,39 +128,26 @@ def build_multipart_body(parts: dict[str, tuple[str | None, str]]) -> bytes:
 
 
 @pytest_asyncio.fixture
-async def owner_account(
-    client: AsyncClient, database: PlatformDatabase
-) -> SignedInAccount:
+async def owner_account(client: AsyncClient, database: PlatformDatabase) -> SignedInAccount:
     return await create_signed_in_account(database, client, OWNER_USERNAME)
 
 
 @pytest_asyncio.fixture
-async def other_account(
-    client: AsyncClient, database: PlatformDatabase
-) -> SignedInAccount:
+async def other_account(client: AsyncClient, database: PlatformDatabase) -> SignedInAccount:
     return await create_signed_in_account(database, client, OTHER_USERNAME)
 
 
-def build_configuration_text(
-    template: dict[str, object] | None = None,
-) -> str:
+def build_configuration_text(template: dict[str, object] | None = None) -> str:
     return json.dumps(
         CONFIGURATION_TEMPLATE if template is None else template,
         ensure_ascii=False,
     )
 
 
-async def post_strategy(
-    client: AsyncClient,
-    token: str,
-    *,
-    configuration_text: str | None = None,
-    source_bytes: bytes = STRATEGY_SOURCE.encode("utf-8"),
-    name: str = STRATEGY_NAME,
-    entry_filename: str = ENTRY_FILENAME,
-    configuration_filename: str = CONFIG_FILENAME,
-    **form_overrides: str,
-) -> Response:
+async def post_strategy(client: AsyncClient, token: str, *, configuration_text: str | None = None,
+    source_bytes: bytes = STRATEGY_SOURCE.encode("utf-8"), name: str = STRATEGY_NAME,
+    entry_filename: str = ENTRY_FILENAME, configuration_filename: str = CONFIG_FILENAME,
+    **form_overrides: str) -> Response:
     """经接口上传一个新策略.
 
     两个分部的文件名**就是载荷**: 平台拿它们当作业目录里的文件名, 故这里默认给的是"作者在策略
@@ -186,14 +173,8 @@ async def post_strategy(
     )
 
 
-async def post_strategy_version(
-    client: AsyncClient,
-    token: str,
-    strategy_id: str,
-    *,
-    configuration_text: str | None = None,
-    source_bytes: bytes = STRATEGY_SOURCE.encode("utf-8"),
-) -> Response:
+async def post_strategy_version(client: AsyncClient, token: str, strategy_id: str, *,
+    configuration_text: str | None = None, source_bytes: bytes = STRATEGY_SOURCE.encode("utf-8")) -> Response:
     """给既有策略上传一个版本."""
 
     resolved_configuration_text = (
@@ -214,13 +195,7 @@ async def post_strategy_version(
     )
 
 
-async def post_raw_upload(
-    client: AsyncClient,
-    token: str,
-    *,
-    entry_filename: str | None,
-    configuration_filename: str,
-) -> Response:
+async def post_raw_upload(client: AsyncClient, token: str, *, entry_filename: str | None, configuration_filename: str) -> Response:
     """按**线上原样的字节**发一次上传, 绕开 `httpx` 的 multipart 编码器.
 
     编码器会替客户端"规整"文件名: 空名降级成普通字段, 引号与控制字符被抹掉. 于是它写不出的那些
@@ -259,9 +234,7 @@ async def create_strategy(client: AsyncClient, token: str) -> StrategyDetailResp
     return StrategyDetailResponse.model_validate(response.json())
 
 
-def version_directory(
-    settings: PlatformSettings, owner_user_id: str, strategy_id: str, version_no: int
-) -> Path:
+def version_directory(settings: PlatformSettings, owner_user_id: str, strategy_id: str, version_no: int) -> Path:
     """版本目录的期望路径, 按 platform-plan.md §7.4 的布局独立写出.
 
     刻意不复用服务端的构造函数: 复用等于用实现验证实现, 布局偏了也照样绿.
@@ -276,17 +249,13 @@ def version_directory(
     )
 
 
-def strategy_directory(
-    settings: PlatformSettings, owner_user_id: str, strategy_id: str
-) -> Path:
+def strategy_directory(settings: PlatformSettings, owner_user_id: str, strategy_id: str) -> Path:
     """一个策略在策略库里的目录."""
 
     return settings.user_library_root / owner_user_id / "strategies" / strategy_id
 
 
-async def test_upload_creates_the_strategy_and_its_first_version(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_upload_creates_the_strategy_and_its_first_version(client: AsyncClient, owner_account: SignedInAccount) -> None:
     response = await post_strategy(client, owner_account.token)
 
     assert response.status_code == 201, response.text
@@ -303,11 +272,8 @@ async def test_upload_creates_the_strategy_and_its_first_version(
     assert detail.versions[0].config_filename == CONFIG_FILENAME
 
 
-async def test_both_uploads_land_on_disk_byte_for_byte(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_both_uploads_land_on_disk_byte_for_byte(client: AsyncClient, owner_account: SignedInAccount,
+    platform_settings: PlatformSettings) -> None:
     """两份原文都按上传的字节落盘, 平台一个字都不改.
 
     这是"上传的配置即模板"的前提: 作者照着自己在版本目录里看到的文件核对, 必须与提交页的参数
@@ -327,11 +293,8 @@ async def test_both_uploads_land_on_disk_byte_for_byte(
     )
 
 
-async def test_the_stored_filenames_are_the_uploaded_part_filenames(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_the_stored_filenames_are_the_uploaded_part_filenames(client: AsyncClient, owner_account: SignedInAccount,
+    platform_settings: PlatformSettings) -> None:
     """文件名由**上传方**给定, 平台照抄, 不另起名字.
 
     这两个名字各有下游: 入口名会成为 job 目录里的裸文件名与 `argv[0]`, 配置名是策略硬编码
@@ -355,9 +318,7 @@ async def test_the_stored_filenames_are_the_uploaded_part_filenames(
     assert detail.versions[0].config_filename == CONFIG_FILENAME
 
 
-async def test_uploaded_strategy_shows_up_in_the_owners_list(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_uploaded_strategy_shows_up_in_the_owners_list(client: AsyncClient, owner_account: SignedInAccount) -> None:
     await create_strategy(client, owner_account.token)
 
     page = await fetch_page(
@@ -367,11 +328,8 @@ async def test_uploaded_strategy_shows_up_in_the_owners_list(
     assert [record.name for record in page.records] == [STRATEGY_NAME]
 
 
-async def test_a_second_version_gets_the_next_version_number(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_second_version_gets_the_next_version_number(client: AsyncClient, owner_account: SignedInAccount,
+    platform_settings: PlatformSettings) -> None:
     detail = await create_strategy(client, owner_account.token)
 
     response = await post_strategy_version(
@@ -396,9 +354,7 @@ async def test_a_second_version_gets_the_next_version_number(
         ).is_file()
 
 
-async def test_identical_content_reuses_the_version_instead_of_minting_a_new_one(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_identical_content_reuses_the_version_instead_of_minting_a_new_one(client: AsyncClient, owner_account: SignedInAccount) -> None:
     detail = await create_strategy(client, owner_account.token)
 
     response = await post_strategy_version(client, owner_account.token, detail.strategy.id)
@@ -411,9 +367,7 @@ async def test_identical_content_reuses_the_version_instead_of_minting_a_new_one
     ) == 1
 
 
-async def test_changing_only_the_configuration_mints_a_new_version(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_changing_only_the_configuration_mints_a_new_version(client: AsyncClient, owner_account: SignedInAccount) -> None:
     """同一份源码配不同配置模板是一份新版本.
 
     判重若只看源码, 这条路径要么被判成"内容未变"而吞掉, 要么撞上唯一约束——两者都逼着用户
@@ -437,9 +391,7 @@ async def test_changing_only_the_configuration_mints_a_new_version(
     assert StrategyVersionResponse.model_validate(response.json()).version_no == 2
 
 
-async def test_the_same_source_under_another_strategy_is_a_separate_version(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_the_same_source_under_another_strategy_is_a_separate_version(client: AsyncClient, owner_account: SignedInAccount) -> None:
     """判重的作用域是单个策略: 两个策略各有一份同样的源码, 各占各自的 1 号版本."""
 
     first = await create_strategy(client, owner_account.token)
@@ -455,9 +407,7 @@ async def test_the_same_source_under_another_strategy_is_a_separate_version(
     assert second.versions[0].id != first.versions[0].id
 
 
-async def test_rotating_the_strategy_marks_it_as_updated(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_rotating_the_strategy_marks_it_as_updated(client: AsyncClient, owner_account: SignedInAccount) -> None:
     detail = await create_strategy(client, owner_account.token)
 
     await post_strategy_version(
@@ -472,9 +422,7 @@ async def test_rotating_the_strategy_marks_it_as_updated(
     assert reread.strategy.updated_at > detail.strategy.updated_at
 
 
-async def test_reusing_a_version_does_not_claim_the_strategy_was_updated(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_reusing_a_version_does_not_claim_the_strategy_was_updated(client: AsyncClient, owner_account: SignedInAccount) -> None:
     """没有新内容落库, "最近变更"就不该往前动."""
 
     detail = await create_strategy(client, owner_account.token)
@@ -486,11 +434,8 @@ async def test_reusing_a_version_does_not_claim_the_strategy_was_updated(
     assert reread.strategy.updated_at == detail.strategy.updated_at
 
 
-async def test_the_stored_configuration_is_the_uploaded_text_verbatim(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_the_stored_configuration_is_the_uploaded_text_verbatim(client: AsyncClient,
+    owner_account: SignedInAccount, platform_settings: PlatformSettings) -> None:
     """落盘的配置与上传的**逐字节**相同——平台不补默认值、不重排键、不改取值类型.
 
     提交页的参数区直接由这份文本渲染, 故任何归一化都会让"我上传的 JSON"与"表单上看到的"对不
@@ -518,9 +463,7 @@ async def test_the_stored_configuration_is_the_uploaded_text_verbatim(
         assert type(stored_template[key_name]) is type(template_value), key_name
 
 
-async def test_the_detail_endpoint_exposes_the_stored_configuration(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_the_detail_endpoint_exposes_the_stored_configuration(client: AsyncClient, owner_account: SignedInAccount) -> None:
     """版本视图里带着配置全文: 提交页要按它的键生成参数控件.
 
     期望值取**盘上那份**而不是请求体, 两者的一致性由上一条管; 这一条只管"接口把库里的快照原样
@@ -534,11 +477,8 @@ async def test_the_detail_endpoint_exposes_the_stored_configuration(
     assert json.loads(version.configuration_json) == CONFIGURATION_TEMPLATE
 
 
-async def test_a_pre_change_version_exposes_a_null_configuration(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    owner_account: SignedInAccount,
-) -> None:
+async def test_a_pre_change_version_exposes_a_null_configuration(client: AsyncClient, database: PlatformDatabase,
+    owner_account: SignedInAccount) -> None:
     """改形态之前落的版本, 配置是 NULL —— 详情页必须照样出得来.
 
     这一列若写成非可选, 每一个旧版本的详情都会被响应模型拒掉而变成 500: 用户看到的不是"这个版本
@@ -566,11 +506,8 @@ async def test_a_pre_change_version_exposes_a_null_configuration(
     assert [version.configuration_json for version in exposed_versions] == [None]
 
 
-async def test_template_values_the_form_cannot_render_survive_verbatim(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_template_values_the_form_cannot_render_survive_verbatim(client: AsyncClient,
+    owner_account: SignedInAccount, platform_settings: PlatformSettings) -> None:
     """控件渲染不出来的那几类取值 (对象、数组、`null`) 一个不丢, 也不被"顺手"改掉.
 
     平台不是按声明渲染的, 所以它**没有**一份"这个键我管不了"的名单可查; 于是保证只剩一条:
@@ -624,12 +561,8 @@ async def test_template_values_the_form_cannot_render_survive_verbatim(
         (ENTRY_FILENAME, "result.json"),
     ],
 )
-async def test_a_filename_that_cannot_be_a_bare_argv0_is_rejected(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    entry_filename: str,
-    configuration_filename: str,
-) -> None:
+async def test_a_filename_that_cannot_be_a_bare_argv0_is_rejected(client: AsyncClient, owner_account: SignedInAccount,
+    entry_filename: str, configuration_filename: str) -> None:
     """带分隔符的 `argv[0]` 会让引擎日志器打不开文件, 宿主在启动期终止; 堵在上传口最省事.
 
     配置名多两条约束: 后缀必须是 `.json`, 且不得与引擎、平台写进同一个目录的文件重名——重名的
@@ -649,9 +582,7 @@ async def test_a_filename_that_cannot_be_a_bare_argv0_is_rejected(
     assert response.status_code == 400, response.text
 
 
-async def test_an_upload_part_without_a_filename_is_rejected(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_an_upload_part_without_a_filename_is_rejected(client: AsyncClient, owner_account: SignedInAccount) -> None:
     """`filename` 是空的分部照样能发出, 而文件名是**载荷**: 没有它这次上传就不完整.
 
     兜底在这里而不是在校验函数里: 空名在"路径分隔符/非法字符/后缀"那几条上都查不出问题, 会一路
@@ -669,9 +600,7 @@ async def test_an_upload_part_without_a_filename_is_rejected(
     assert response.json()["detail"] == MISSING_UPLOAD_FILENAME_MESSAGE
 
 
-async def test_a_part_that_is_not_a_file_still_gets_a_json_422(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_a_part_that_is_not_a_file_still_gets_a_json_422(client: AsyncClient, owner_account: SignedInAccount) -> None:
     """分部不带 `filename` 时框架回 422, 而那条回执**必须是 JSON**.
 
     `UploadFile` 的校验器对收到的普通字段抛 `ValueError`, 该异常对象会原样躺进校验错误的 `ctx`;
@@ -702,11 +631,8 @@ async def test_a_part_that_is_not_a_file_still_gets_a_json_422(
         "",
     ],
 )
-async def test_a_configuration_that_is_not_a_json_object_is_rejected(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    configuration_text: str,
-) -> None:
+async def test_a_configuration_that_is_not_a_json_object_is_rejected(client: AsyncClient,
+    owner_account: SignedInAccount, configuration_text: str) -> None:
     """顶层必须是一个对象.
 
     数组或标量照样会被原样写进策略配置, 而它在提交页渲染不出任何控件——症状是"参数区是空的,
@@ -720,9 +646,7 @@ async def test_a_configuration_that_is_not_a_json_object_is_rejected(
     assert response.status_code == 400, response.text
 
 
-async def test_a_malformed_configuration_is_named_and_located(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_a_malformed_configuration_is_named_and_located(client: AsyncClient, owner_account: SignedInAccount) -> None:
     response = await post_strategy(
         client, owner_account.token, configuration_text='{\n  "GridStep": ,\n}'
     )
@@ -743,11 +667,8 @@ async def test_a_malformed_configuration_is_named_and_located(
         build_configuration_text({"": 1}),
     ],
 )
-async def test_a_configuration_the_form_cannot_render_is_rejected(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    configuration_text: str,
-) -> None:
+async def test_a_configuration_the_form_cannot_render_is_rejected(client: AsyncClient, owner_account: SignedInAccount,
+    configuration_text: str) -> None:
     """形状约束只有三条, 且都与"表单能不能渲染"直接相关: 一个键一个控件, 键名是那格控件的唯一
     标识——键太多、键名太长、键名为空, 都会让参数区渲染不出来或渲染出两块分不清的格子.
 
@@ -761,9 +682,7 @@ async def test_a_configuration_the_form_cannot_render_is_rejected(
     assert response.status_code == 400, response.text
 
 
-async def test_a_configuration_that_is_not_utf8_is_rejected(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_a_configuration_that_is_not_utf8_is_rejected(client: AsyncClient, owner_account: SignedInAccount) -> None:
     """非 UTF-8 的配置两份读者都读不动, 早一点说清楚好过留一句"策略报告说读不到配置"."""
 
     response = await client.post(
@@ -784,9 +703,7 @@ async def test_a_configuration_that_is_not_utf8_is_rejected(
     assert response.json()["detail"] == CONFIGURATION_NOT_UTF8_MESSAGE
 
 
-async def test_an_oversized_configuration_is_rejected(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_an_oversized_configuration_is_rejected(client: AsyncClient, owner_account: SignedInAccount) -> None:
     """键名受限而取值不受限, 故撑爆配置靠一个长字符串取值即可."""
 
     oversized_configuration = build_configuration_text(
@@ -801,9 +718,7 @@ async def test_an_oversized_configuration_is_rejected(
     assert response.json()["detail"] == CONFIGURATION_TOO_LARGE_MESSAGE
 
 
-async def test_an_empty_configuration_is_rejected(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_an_empty_configuration_is_rejected(client: AsyncClient, owner_account: SignedInAccount) -> None:
     response = await post_strategy(client, owner_account.token, configuration_text="")
 
     assert response.status_code == 400
@@ -817,11 +732,8 @@ async def test_an_empty_configuration_is_rejected(
         build_configuration_text({VALUE_MARKER * 20: 1}),
     ],
 )
-async def test_configuration_errors_never_echo_the_configuration_text(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    configuration_text: str,
-) -> None:
+async def test_configuration_errors_never_echo_the_configuration_text(client: AsyncClient,
+    owner_account: SignedInAccount, configuration_text: str) -> None:
     """报错只回位置与原因: 回显原文等于把整份配置抄进响应体与接入层日志, 而配置里可能写着
     账户号一类的东西.
 
@@ -839,11 +751,8 @@ async def test_configuration_errors_never_echo_the_configuration_text(
     assert VALUE_MARKER not in response.text
 
 
-async def test_an_unparsable_source_is_rejected_before_it_reaches_the_disk(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_an_unparsable_source_is_rejected_before_it_reaches_the_disk(client: AsyncClient,
+    owner_account: SignedInAccount, platform_settings: PlatformSettings) -> None:
     """语法错误留到运行期只会以"宿主退出码 1"的面目出现, 归因要翻 stdout."""
 
     response = await post_strategy(
@@ -855,18 +764,14 @@ async def test_an_unparsable_source_is_rejected_before_it_reaches_the_disk(
     assert not platform_settings.user_library_root.exists()
 
 
-async def test_an_empty_source_is_rejected(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_an_empty_source_is_rejected(client: AsyncClient, owner_account: SignedInAccount) -> None:
     response = await post_strategy(client, owner_account.token, source_bytes=b"")
 
     assert response.status_code == 400
     assert response.json()["detail"] == EMPTY_SOURCE_MESSAGE
 
 
-async def test_an_oversized_source_is_rejected(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_an_oversized_source_is_rejected(client: AsyncClient, owner_account: SignedInAccount) -> None:
     response = await post_strategy(
         client, owner_account.token, source_bytes=b"#" * (MAXIMUM_SOURCE_BYTES + 1)
     )
@@ -875,11 +780,8 @@ async def test_an_oversized_source_is_rejected(
     assert response.json()["detail"] == SOURCE_TOO_LARGE_MESSAGE
 
 
-async def test_a_request_body_beyond_the_cap_is_rejected_before_it_is_parsed(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_request_body_beyond_the_cap_is_rejected_before_it_is_parsed(client: AsyncClient,
+    owner_account: SignedInAccount, platform_settings: PlatformSettings) -> None:
     """两道闸各管一段, 这一条钉的是外面那道.
 
     两份原文各有一道自己的闸, 它们都在处理函数里: 挡得住内存, 挡不住磁盘——它们执行时整个
@@ -948,12 +850,8 @@ OVERSIZED_CONTENT_LENGTH = str(MAXIMUM_REQUEST_BODY_BYTES + 1).encode()
         (b"9" * 5000, status.HTTP_400_BAD_REQUEST, INVALID_CONTENT_LENGTH_DETAIL),
     ],
 )
-async def test_a_malformed_content_length_cannot_skip_the_body_guard(
-    application: FastAPI,
-    declared_content_length: bytes,
-    expected_status: int,
-    expected_detail: str,
-) -> None:
+async def test_a_malformed_content_length_cannot_skip_the_body_guard(application: FastAPI,
+    declared_content_length: bytes, expected_status: int, expected_detail: str) -> None:
     """成帧层按 OWS 裁掉首尾空白后解析该值, 但 ASGI scope 里放的是**未裁剪的原文**.
 
     拿 `str.isdigit()` 当守卫就漏在这: `"1179649 "` 的 `isdigit()` 为假, 闸整条跳过, 请求被
@@ -998,9 +896,7 @@ async def test_a_malformed_content_length_cannot_skip_the_body_guard(
     assert receive_call_count == 0
 
 
-async def test_a_legal_upload_at_both_size_limits_is_accepted(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_a_legal_upload_at_both_size_limits_is_accepted(client: AsyncClient, owner_account: SignedInAccount) -> None:
     """体积闸的余量必须装得下**两份原文各自的合法上限**.
 
     只钉"超限被拒"是不够的: 把余量改小到装不下"源码 1 MB + 配置 64 KB"这个**允许**的组合, 全部
@@ -1038,9 +934,7 @@ async def test_a_legal_upload_at_both_size_limits_is_accepted(
     )
 
 
-async def test_the_same_name_under_one_owner_is_rejected(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_the_same_name_under_one_owner_is_rejected(client: AsyncClient, owner_account: SignedInAccount) -> None:
     await create_strategy(client, owner_account.token)
 
     response = await post_strategy(client, owner_account.token)
@@ -1049,9 +943,8 @@ async def test_the_same_name_under_one_owner_is_rejected(
     assert response.json()["detail"] == STRATEGY_NAME_TAKEN_MESSAGE
 
 
-async def test_the_same_name_under_another_owner_is_allowed(
-    client: AsyncClient, owner_account: SignedInAccount, other_account: SignedInAccount
-) -> None:
+async def test_the_same_name_under_another_owner_is_allowed(client: AsyncClient, owner_account: SignedInAccount,
+    other_account: SignedInAccount) -> None:
     """策略名只在归属人内部唯一: 甲取的名字不该挡住乙."""
 
     await create_strategy(client, owner_account.token)
@@ -1061,9 +954,7 @@ async def test_the_same_name_under_another_owner_is_allowed(
     assert response.status_code == 201, response.text
 
 
-async def test_a_name_differing_only_by_surrounding_space_is_rejected(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_a_name_differing_only_by_surrounding_space_is_rejected(client: AsyncClient, owner_account: SignedInAccount) -> None:
     """不归一化的话, "网格" 与 "网格 " 会各占一个策略, 而界面上看是同一个."""
 
     await create_strategy(client, owner_account.token)
@@ -1073,9 +964,7 @@ async def test_a_name_differing_only_by_surrounding_space_is_rejected(
     assert response.status_code == 409
 
 
-async def test_a_blank_name_is_rejected(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_a_blank_name_is_rejected(client: AsyncClient, owner_account: SignedInAccount) -> None:
     response = await post_strategy(client, owner_account.token, name="   ")
 
     assert response.status_code == 400
@@ -1090,9 +979,7 @@ async def test_a_blank_name_is_rejected(
         {"visibility_type": "everyone"},
     ],
 )
-async def test_out_of_range_metadata_is_rejected(
-    client: AsyncClient, owner_account: SignedInAccount, form_overrides: dict[str, str]
-) -> None:
+async def test_out_of_range_metadata_is_rejected(client: AsyncClient, owner_account: SignedInAccount, form_overrides: dict[str, str]) -> None:
     response = await post_strategy(client, owner_account.token, **form_overrides)
 
     assert response.status_code == 422
@@ -1115,9 +1002,8 @@ async def test_an_anonymous_upload_is_rejected(client: AsyncClient) -> None:
     assert response.status_code == 401
 
 
-async def test_a_version_cannot_be_added_to_another_owners_strategy(
-    client: AsyncClient, owner_account: SignedInAccount, other_account: SignedInAccount
-) -> None:
+async def test_a_version_cannot_be_added_to_another_owners_strategy(client: AsyncClient, owner_account: SignedInAccount,
+    other_account: SignedInAccount) -> None:
     detail = await create_strategy(client, owner_account.token)
 
     response = await post_strategy_version(
@@ -1127,9 +1013,7 @@ async def test_a_version_cannot_be_added_to_another_owners_strategy(
     assert response.status_code == 404
 
 
-async def test_a_version_cannot_be_added_to_an_absent_strategy(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_a_version_cannot_be_added_to_an_absent_strategy(client: AsyncClient, owner_account: SignedInAccount) -> None:
     response = await post_strategy_version(
         client, owner_account.token, "no-such-strategy-identifier"
     )
@@ -1137,11 +1021,8 @@ async def test_a_version_cannot_be_added_to_an_absent_strategy(
     assert response.status_code == 404
 
 
-async def test_a_rejected_upload_never_touches_the_disk(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_rejected_upload_never_touches_the_disk(client: AsyncClient, owner_account: SignedInAccount,
+    platform_settings: PlatformSettings) -> None:
     detail = await create_strategy(client, owner_account.token)
 
     response = await post_strategy(client, owner_account.token)
@@ -1156,12 +1037,8 @@ async def test_a_rejected_upload_never_touches_the_disk(
     ] == ["1"]
 
 
-async def test_a_database_failure_rolls_the_written_version_directory_back(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    platform_settings: PlatformSettings,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_a_database_failure_rolls_the_written_version_directory_back(client: AsyncClient,
+    owner_account: SignedInAccount, platform_settings: PlatformSettings, monkeypatch: pytest.MonkeyPatch) -> None:
     """落库失败必须把刚落成的版本目录撤掉.
 
     孤儿目录会占住那个版本号, 使下一次同号重试的整目录改名失败——一次瞬时故障就此变成
@@ -1192,9 +1069,7 @@ async def test_a_database_failure_rolls_the_written_version_directory_back(
     ] == ["1"]
 
 
-async def test_the_owner_can_delete_a_strategy(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_the_owner_can_delete_a_strategy(client: AsyncClient, owner_account: SignedInAccount) -> None:
     detail = await create_strategy(client, owner_account.token)
 
     response = await client.delete(
@@ -1217,9 +1092,7 @@ async def test_the_owner_can_delete_a_strategy(
     assert page.total == 0
 
 
-async def test_deleting_a_strategy_twice_is_not_found(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_deleting_a_strategy_twice_is_not_found(client: AsyncClient, owner_account: SignedInAccount) -> None:
     detail = await create_strategy(client, owner_account.token)
     path = f"{STRATEGIES_PATH}/{detail.strategy.id}"
 
@@ -1230,11 +1103,8 @@ async def test_deleting_a_strategy_twice_is_not_found(
     assert repeated.status_code == 404
 
 
-async def test_deleting_a_strategy_keeps_the_version_files(
-    client: AsyncClient,
-    owner_account: SignedInAccount,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_deleting_a_strategy_keeps_the_version_files(client: AsyncClient, owner_account: SignedInAccount,
+    platform_settings: PlatformSettings) -> None:
     """历史运行要复现就得靠那份原文, 清掉目录会让旧结果失去可追溯的依据."""
 
     detail = await create_strategy(client, owner_account.token)
@@ -1255,9 +1125,7 @@ async def test_deleting_a_strategy_keeps_the_version_files(
     assert (directory / CONFIG_FILENAME).is_file()
 
 
-async def test_another_owner_cannot_delete_a_strategy(
-    client: AsyncClient, owner_account: SignedInAccount, other_account: SignedInAccount
-) -> None:
+async def test_another_owner_cannot_delete_a_strategy(client: AsyncClient, owner_account: SignedInAccount, other_account: SignedInAccount) -> None:
     detail = await create_strategy(client, owner_account.token)
 
     response = await client.delete(
@@ -1268,9 +1136,7 @@ async def test_another_owner_cannot_delete_a_strategy(
     assert response.status_code == 404
 
 
-async def test_deleting_a_strategy_releases_its_name(
-    client: AsyncClient, owner_account: SignedInAccount
-) -> None:
+async def test_deleting_a_strategy_releases_its_name(client: AsyncClient, owner_account: SignedInAccount) -> None:
     """名字只在**在用的**策略之间唯一.
 
     删掉的策略在列表与详情里都看不见了, 若名字仍被占住, 用户看到的现象是"没人用这个名字,
@@ -1295,9 +1161,8 @@ async def test_deleting_a_strategy_releases_its_name(
     assert detail.versions[0].version_no == 1
 
 
-async def test_deleting_a_strategy_does_not_release_another_owners_name(
-    client: AsyncClient, owner_account: SignedInAccount, other_account: SignedInAccount
-) -> None:
+async def test_deleting_a_strategy_does_not_release_another_owners_name(client: AsyncClient,
+    owner_account: SignedInAccount, other_account: SignedInAccount) -> None:
     """释放只落在归属人自己那一格: 重名判据是 (归属人, 名字), 不是全局名字.
 
     与上一条配对: 上一条钉"该释放的必须释放", 这一条钉"不该释放的仍要拦住"——只把索引去掉也

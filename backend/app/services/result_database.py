@@ -126,12 +126,7 @@ def read_capital_series(database_file: Path) -> list[CapitalPointRecord]:
     ]
 
 
-def read_result_table_page(
-    database_file: Path,
-    table_name: str,
-    offset: int,
-    limit: int,
-) -> ResultTablePage:
+def read_result_table_page(database_file: Path, table_name: str, offset: int, limit: int) -> ResultTablePage:
     """结果表的一页, 按交易日升序.
 
     **表名先过白名单再引用**: 校验与拼接同处一函数, 是让"先白名单、后拼接"这条在代码上

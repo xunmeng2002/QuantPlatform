@@ -77,9 +77,7 @@ class CoverageVerdict:
         return bool(self.expected_days) and not self.missing_days and self.has_bars
 
 
-def judge_coverage(
-    expected_days: list[str], asked_days: list[str], has_bars: bool
-) -> CoverageVerdict:
+def judge_coverage(expected_days: list[str], asked_days: list[str], has_bars: bool) -> CoverageVerdict:
     """按交易日集合算出判定. 入参可含重复, 这里统一去重排序."""
 
     expected = tuple(sorted(set(expected_days)))
@@ -111,9 +109,7 @@ def decide_after_refresh(verdict: CoverageVerdict) -> RefreshDecision:
     return RefreshDecision.PROCEED_WITH_GAPS
 
 
-def request_exceeds_calendar(
-    end_day: str, calendar_last_trading_day: str | None
-) -> bool:
+def request_exceeds_calendar(end_day: str, calendar_last_trading_day: str | None) -> bool:
     """请求区间的末端是否超过了组件交易日历的末日.
 
     超了说明上游日历没同步到最近, 那段区间的"应有交易日"会算少. 这**不改变**判定 (判定按

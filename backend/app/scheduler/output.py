@@ -38,7 +38,6 @@ class OutputStreamTail:
         self._destination_file = destination_file
         self._maximum_tail_bytes = maximum_tail_bytes
         self._recent_bytes = bytearray()
-
     def append(self, chunk: bytes) -> None:
         """落盘一个读取块, 并把它并入内存尾部."""
 
@@ -54,13 +53,11 @@ class OutputStreamTail:
 
         if excess_bytes > 0:
             del self._recent_bytes[:excess_bytes]
-
     @property
     def tail(self) -> str:
         """最近 maximum_tail_bytes 字节对应的文本."""
 
         return decode_tail(bytes(self._recent_bytes[-self._maximum_tail_bytes :]))
-
     def close(self) -> None:
         """关闭落盘文件."""
 
@@ -74,45 +71,32 @@ class JobOutputCapture:
     取消) 都要走到这里.
     """
 
-    def __init__(
-        self, stdout_path: Path, stderr_path: Path, maximum_tail_bytes: int
-    ) -> None:
+    def __init__(self, stdout_path: Path, stderr_path: Path, maximum_tail_bytes: int) -> None:
         self._stdout_stream = OutputStreamTail(
             stdout_path.open("wb"), maximum_tail_bytes
         )
         self._stderr_stream = OutputStreamTail(
             stderr_path.open("wb"), maximum_tail_bytes
         )
-
     def __enter__(self) -> JobOutputCapture:
         return self
-
-    def __exit__(
-        self,
-        exception_type: type[BaseException] | None,
-        exception_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
+    def __exit__(self, exception_type: type[BaseException] | None, exception_value: BaseException | None, traceback: TracebackType | None) -> None:
         self._stdout_stream.close()
         self._stderr_stream.close()
-
     @property
     def stdout_tail(self) -> str:
         """标准输出尾部."""
 
         return self._stdout_stream.tail
-
     @property
     def stderr_tail(self) -> str:
         """标准错误尾部."""
 
         return self._stderr_stream.tail
-
     def append_stdout(self, chunk: bytes) -> None:
         """落盘一段标准输出."""
 
         self._stdout_stream.append(chunk)
-
     def append_stderr(self, chunk: bytes) -> None:
         """落盘一段标准错误."""
 

@@ -86,9 +86,7 @@ def _read_generated_primary_key(database_path: Path, table_name: str) -> tuple[s
 
 
 @pytest_asyncio.fixture
-async def generated_seed_database_path(
-    database: PlatformDatabase, platform_settings: PlatformSettings
-) -> Path:
+async def generated_seed_database_path(database: PlatformDatabase, platform_settings: PlatformSettings) -> Path:
     """按当前 catalog 生成的一份种子库 (未交付给任何一轮, 只是一个临时文件).
 
     经 `generate_run_seed_database` 而不是直接调写文件那个私有函数: 这一条路径才是产品真正走的
@@ -135,9 +133,7 @@ def test_the_contract_pins_the_engine_table_names() -> None:
     assert tuple(table.table_name for table in SEED_TABLES) == ENGINE_SEED_TABLE_NAMES
 
 
-def test_the_file_holds_exactly_the_three_engine_tables(
-    generated_seed_database_path: Path,
-) -> None:
+def test_the_file_holds_exactly_the_three_engine_tables(generated_seed_database_path: Path) -> None:
     """文件里恰有三张引擎表, 没有任何平台表.
 
     `Users` / `Runs` 那类平台表若被一起写进来, 引擎不会反对 —— 它只挑自己认识的表读; 但种子库
@@ -150,9 +146,7 @@ def test_the_file_holds_exactly_the_three_engine_tables(
 
 
 @pytest.mark.parametrize("table", SEED_TABLES, ids=lambda table: table.table_name)
-def test_each_table_matches_the_contract_column_for_column(
-    generated_seed_database_path: Path, table: SeedTable
-) -> None:
+def test_each_table_matches_the_contract_column_for_column(generated_seed_database_path: Path, table: SeedTable) -> None:
     """列名、列序、列数、列类型逐列相符.
 
     这是本文件的核心断言: 引擎按列下标绑定, 列序就是契约. 多一列在前面 (平台自造的 `Id` 恰好

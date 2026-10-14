@@ -54,7 +54,6 @@ class LoginFailureRecord:
         # 向上取整且最小 1: 向下取整会让调用方在解锁前就重试, 而 `Retry-After: 0` 的语义是
         # "立刻重试", 等于把客户端的重试变成忙等.
         return max(1, math.ceil(self.locked_until - now))
-
     def is_stale(self, now: float, failure_window_seconds: float) -> bool:
         """既不处于锁定期, 又超过一个失效窗口没有再失败——逻辑上等价于"这条计数不存在"."""
 
@@ -92,14 +91,12 @@ class LoginAttemptThrottle:
         )
         self._failures_by_username: dict[str, LoginFailureRecord] = {}
         self._failures_by_client_address: dict[str, LoginFailureRecord] = {}
-
     def client_address_for(self, forwarded_for: str | None, peer_host: str | None) -> str:
         """按配置的可信代理白名单解析出用于分桶的客户端地址."""
 
         return resolve_client_address(
             forwarded_for, peer_host, self._trusted_proxy_networks
         )
-
     def remaining_lock_seconds(self, username: str, client_address: str) -> int:
         """两个桶中较长的剩余锁定秒数: 要等到两个都解锁才算真的能登."""
 
@@ -111,7 +108,6 @@ class LoginAttemptThrottle:
                 self._failures_by_client_address.get(client_address), now
             ),
         )
-
     def record_failure(self, username: str, client_address: str) -> None:
         """记一次凭据失败. 两个维度各自加一, 互不影响."""
 
@@ -120,7 +116,6 @@ class LoginAttemptThrottle:
         self._record(
             self._failures_by_client_address, CLIENT_ADDRESS_DIMENSION, client_address, now
         )
-
     def record_successful_login(self, username: str) -> None:
         """登录成功后清空用户名桶.
 
@@ -129,14 +124,7 @@ class LoginAttemptThrottle:
         """
 
         self._failures_by_username.pop(username, None)
-
-    def _record(
-        self,
-        store: dict[str, LoginFailureRecord],
-        dimension: str,
-        key: str,
-        now: float,
-    ) -> None:
+    def _record(self, store: dict[str, LoginFailureRecord], dimension: str, key: str, now: float) -> None:
         record = store.get(key)
 
         if record is None:
@@ -156,7 +144,6 @@ class LoginAttemptThrottle:
             logger.warning(
                 "登录失败达阈值, 按%s锁定 %d 秒: %r", dimension, self._lock_seconds, key
             )
-
     def _make_room(self, store: dict[str, LoginFailureRecord], now: float) -> None:
         """为一条新计数腾出位置. 只在桶已满时才会真的做事."""
 
@@ -196,11 +183,7 @@ def parse_trusted_proxy_networks(addresses: tuple[str, ...]) -> tuple[IPNetwork,
     return tuple(ipaddress.ip_network(address, strict=False) for address in addresses)
 
 
-def resolve_client_address(
-    forwarded_for: str | None,
-    peer_host: str | None,
-    trusted_proxy_networks: tuple[IPNetwork, ...],
-) -> str:
+def resolve_client_address(forwarded_for: str | None, peer_host: str | None, trusted_proxy_networks: tuple[IPNetwork, ...]) -> str:
     """取出用于分桶的客户端地址.
 
     只有当**对端地址本身可信**时才去看 `X-Forwarded-For`, 且从最右往左跳过可信项: 每一跳代理

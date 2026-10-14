@@ -64,11 +64,7 @@ RATE_DIRECTION_INDEX = BASE_COMMISSION_TABLE.column_names().index("Direction")
 GENERATED_RUN_DIRECTORY_NAME = "generated-run"
 
 
-def _build_product(
-    exchange_id: str = "SSE",
-    product_id: str = "600519",
-    product_name: str = "贵州茅台",
-) -> ProductModel:
+def _build_product(exchange_id: str = "SSE", product_id: str = "600519", product_name: str = "贵州茅台") -> ProductModel:
     """造一行品种, 只换自然键.
 
     其余九列取值固定: 它们不是各用例要验的东西, 十一列逐处重复只会让"这个用例动的是哪一列"
@@ -99,11 +95,8 @@ def _build_commission_group(commission_group_id: int = 1) -> CommissionGroupMode
     )
 
 
-def _build_base_commission(
-    instrument_id: str = "600519",
-    direction: int = CommissionDirection.SELL,
-    commission_group_id: int = 1,
-) -> BaseCommissionModel:
+def _build_base_commission(instrument_id: str = "600519", direction: int = CommissionDirection.SELL,
+    commission_group_id: int = 1) -> BaseCommissionModel:
     """造一行费率明细.
 
     方向收的是**裸 `int`** 而不是枚举: 库里这一列允许存平台侧的第三档 `双向` (`-1`), 它不在
@@ -174,11 +167,7 @@ def _generated_path(platform_settings: PlatformSettings) -> Path:
     )
 
 
-async def _generate(
-    session: AsyncSession,
-    platform_settings: PlatformSettings,
-    contracts: tuple[RunContract, ...] = (RUN_CONTRACT,),
-) -> Path:
+async def _generate(session: AsyncSession, platform_settings: PlatformSettings, contracts: tuple[RunContract, ...] = (RUN_CONTRACT,)) -> Path:
     destination = _generated_path(platform_settings)
 
     await generate_run_seed_database(
@@ -188,10 +177,7 @@ async def _generate(
     return destination
 
 
-async def test_the_generated_file_carries_the_expanded_contract_rows(
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_the_generated_file_carries_the_expanded_contract_rows(database: PlatformDatabase, platform_settings: PlatformSettings) -> None:
     """交易所级的规则被展开成该轮合约的两行 (买、卖各一行), 且逐列等于库里那一行.
 
     展开掉的是**合约格**: 库里那一行的 `InstrumentId` 是空串 (交易所级), 文件里必须变成具体合约
@@ -247,10 +233,7 @@ async def test_the_generated_file_carries_the_expanded_contract_rows(
     ]
 
 
-async def test_a_both_directions_rule_reaches_the_file_as_two_engine_rows(
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_both_directions_rule_reaches_the_file_as_two_engine_rows(database: PlatformDatabase, platform_settings: PlatformSettings) -> None:
     """库里只录**一条双向**的费率, 文件里是买、卖两行, 且方向格只有 0 与 1.
 
     这一条是"平台侧的第三档不会漏进引擎面"的第二张网: 第一张在写库那一步 (`seed_database` 里
@@ -293,10 +276,7 @@ async def test_a_both_directions_rule_reaches_the_file_as_two_engine_rows(
     ]
 
 
-async def test_an_unexpanded_rate_row_is_refused_before_any_file_is_written(
-    database: PlatformDatabase,
-    tmp_path: Path,
-) -> None:
+async def test_an_unexpanded_rate_row_is_refused_before_any_file_is_written(database: PlatformDatabase, tmp_path: Path) -> None:
     """把**没展开**的行直接交给写函数 → 当场抛, 且连那个目录都不建.
 
     这道断言管的是"绕过展开器的那条路": `write_seed_database` 是公开函数, 谁都可以把 catalog 里
@@ -333,10 +313,7 @@ async def test_an_unexpanded_rate_row_is_refused_before_any_file_is_written(
     assert not destination.parent.exists()
 
 
-async def test_a_run_without_a_contract_gets_an_empty_rate_table(
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_run_without_a_contract_gets_an_empty_rate_table(database: PlatformDatabase, platform_settings: PlatformSettings) -> None:
     """该轮没指名合约时, 费率表整个留空, 另两张表照抄.
 
     空合约无从展开 (见 `RunContract`): 引擎只在有具体合约时才查费率, 展开出一行空合约的费率谁也
@@ -355,10 +332,7 @@ async def test_a_run_without_a_contract_gets_an_empty_rate_table(
     assert read_seed_database_rows(generated_path, "CommissionGroups") == [(1, "默认组")]
 
 
-async def test_an_empty_table_is_written_as_an_empty_table(
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_an_empty_table_is_written_as_an_empty_table(database: PlatformDatabase, platform_settings: PlatformSettings) -> None:
     """库里的表是空的, 生成的文件里那张表也要在, 只是没有行.
 
     "没有行"与"没有表"对引擎不是一回事: 表缺失会让开库那一步失败, 整轮降级成无基本数据.
@@ -374,10 +348,7 @@ async def test_an_empty_table_is_written_as_an_empty_table(
     assert read_seed_database_rows(generated_path, "BaseCommissions") == []
 
 
-async def test_rows_of_another_commission_group_never_reach_the_file(
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_rows_of_another_commission_group_never_reach_the_file(database: PlatformDatabase, platform_settings: PlatformSettings) -> None:
     """别组的费率行不进这个文件.
 
     读取那一步就在 SQL 里按组号过滤 (`read_seed_rows`): 引擎每轮只看一个组, 多读进来的行会让
@@ -415,10 +386,7 @@ async def test_rows_of_another_commission_group_never_reach_the_file(
     ] == [1, 1]
 
 
-async def test_missing_rates_are_reported_but_the_file_is_still_written(
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_missing_rates_are_reported_but_the_file_is_still_written(database: PlatformDatabase, platform_settings: PlatformSettings) -> None:
     """三档都没命中时, 缺失清单如实报出; 文件照写 (只是那两张表里没有这一轮的行).
 
     拦不拦由调用方决定 (提交期回 400, 调度期让这一轮失败), 故生成器本身不抛 —— 而它也不能悄悄
@@ -448,9 +416,7 @@ async def test_missing_rates_are_reported_but_the_file_is_still_written(
     assert read_seed_database_rows(_generated_path(platform_settings), "BaseCommissions") == []
 
 
-async def test_read_seed_rows_keeps_only_the_named_group(
-    database: PlatformDatabase,
-) -> None:
+async def test_read_seed_rows_keeps_only_the_named_group(database: PlatformDatabase) -> None:
     """`read_seed_rows` 只取指定组的费率行 —— 提交期校验与调度期生成读的是同一份这一份."""
 
     async with database.session_scope() as session:
@@ -478,9 +444,7 @@ async def test_read_seed_rows_keeps_only_the_named_group(
     assert len(seed_rows.base_commissions) == 2
 
 
-def test_the_staging_path_sits_under_the_runs_root_with_a_recognisable_name(
-    platform_settings: PlatformSettings,
-) -> None:
+def test_the_staging_path_sits_under_the_runs_root_with_a_recognisable_name(platform_settings: PlatformSettings) -> None:
     """暂存路径落在运行根**之内**.
 
     作业目录构造那一步是把它搬进作业目录 (`os.replace`), 而跨卷改名在 Windows 上必然失败 ——
@@ -494,9 +458,7 @@ def test_the_staging_path_sits_under_the_runs_root_with_a_recognisable_name(
     assert staging_path.name.endswith(SEED_DATABASE_FILENAME)
 
 
-def test_discarding_a_staging_file_is_a_no_op_when_it_is_gone(
-    tmp_path: Path,
-) -> None:
+def test_discarding_a_staging_file_is_a_no_op_when_it_is_gone(tmp_path: Path) -> None:
     """文件已经不在时"丢弃"什么都不做, 也不抛.
 
     成功那一路就是这样收场的: 文件早被搬进作业目录, 随后那次清理是幂等的空操作 —— 它抛出来的话,

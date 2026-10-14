@@ -14,14 +14,9 @@ DEFAULT_PAGE_SIZE = 20
 MAXIMUM_PAGE_SIZE = 100
 
 
-async def fetch_page[RecordType](
-    session: AsyncSession,
-    base_query: Select[tuple[object]],
-    response_model: type[RecordType],
-    offset: int,
-    limit: int,
-    order_by: ColumnElement[object] | None = None,
-) -> PageResponse[RecordType]:
+async def fetch_page[RecordType](session: AsyncSession, base_query: Select[tuple[object]],
+    response_model: type[RecordType], offset: int, limit: int,
+    order_by: ColumnElement[object] | None = None) -> PageResponse[RecordType]:
     """取一页记录, 连同符合筛选条件的总数.
 
     总数由 base_query 的子查询得出, 故筛选条件对总数与当页始终一致; 不传 order_by 时按

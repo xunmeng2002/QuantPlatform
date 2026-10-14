@@ -67,12 +67,7 @@ MISSING_RATE_MESSAGE_TEMPLATE = (
 )
 
 
-async def submit_run(
-    session: AsyncSession,
-    settings: PlatformSettings,
-    current_user: UserModel,
-    request_body: RunSubmitRequest,
-) -> RunModel:
+async def submit_run(session: AsyncSession, settings: PlatformSettings, current_user: UserModel, request_body: RunSubmitRequest) -> RunModel:
     """校验并落一行 `queued`; 调用方负责在这之后提交 `scheduler.wake()`.
 
     唤醒**必须**排在本次提交落库之后. 反过来的话调度器可能扫不到尚未提交的行, 一次提交就要等
@@ -148,11 +143,7 @@ async def submit_run(
     return run
 
 
-async def _ensure_run_rates_available(
-    session: AsyncSession,
-    commission_group_id: int,
-    run_field_values: Mapping[str, str],
-) -> None:
+async def _ensure_run_rates_available(session: AsyncSession, commission_group_id: int, run_field_values: Mapping[str, str]) -> None:
     """该轮那个合约的费率必须能在三级 (合约 / 品种 / 交易所) 之内命中.
 
     **这是把"静默按 0 计费"变成"提交被拦"的那一步**: 引擎查不到费率时不报错, 它照跑完, 只把缺口
@@ -203,9 +194,7 @@ def _ensure_engine_inputs_available(settings: PlatformSettings) -> None:
         raise InvalidRequestError(SESSION_FILE_MISSING_MESSAGE)
 
 
-async def resolve_strategy_version(
-    session: AsyncSession, strategy_id: str, requested_version_id: str | None
-) -> StrategyVersionModel:
+async def resolve_strategy_version(session: AsyncSession, strategy_id: str, requested_version_id: str | None) -> StrategyVersionModel:
     """取要跑的版本: 指定了就用指定的 (必须属于该策略), 没指定就用最新的.
 
     公开给存模板路径: 模板不绑版本, 但它存的参数要按**最新版本**的配置模板校验, 故那条路
@@ -235,9 +224,7 @@ async def resolve_strategy_version(
     return version
 
 
-def parse_version_configuration_template(
-    version: StrategyVersionModel,
-) -> dict[str, object]:
+def parse_version_configuration_template(version: StrategyVersionModel) -> dict[str, object]:
     """取回该版本落库时的配置模板.
 
     两种解不动的情形**共用一条路径**, 但它们的原因不同, 一个 400 得同时罩住:

@@ -73,9 +73,7 @@ class RetentionBoard:
 
 
 @pytest_asyncio.fixture
-async def retention_database(
-    platform_settings: PlatformSettings,
-) -> AsyncIterator[PlatformDatabase]:
+async def retention_database(platform_settings: PlatformSettings) -> AsyncIterator[PlatformDatabase]:
     """指向同一份库、但**没有调度器**的数据库门面.
 
     与 `database` 夹具的差别只有这一点. 建表走与线上同一条路径 (`initialize()`), 保留策略本身由
@@ -93,9 +91,7 @@ async def retention_database(
 
 
 @pytest_asyncio.fixture
-async def retention_board(
-    retention_database: PlatformDatabase,
-) -> RetentionBoard:
+async def retention_board(retention_database: PlatformDatabase) -> RetentionBoard:
     owner = await create_user_record(retention_database, OWNER_USERNAME)
     other_owner = await create_user_record(retention_database, OTHER_OWNER_USERNAME)
     strategy = await create_strategy_record(retention_database, owner, STRATEGY_NAME)
@@ -109,11 +105,7 @@ async def retention_board(
     )
 
 
-def retention_settings(
-    platform_settings: PlatformSettings,
-    retained_run_count: int,
-    enabled: bool = True,
-) -> PlatformSettings:
+def retention_settings(platform_settings: PlatformSettings, retained_run_count: int, enabled: bool = True) -> PlatformSettings:
     """派生一份保留策略配置."""
 
     return settings_with(
@@ -123,14 +115,8 @@ def retention_settings(
     )
 
 
-async def create_run_with_directory(
-    database: PlatformDatabase,
-    settings: PlatformSettings,
-    board: RetentionBoard,
-    sequence: int,
-    owner: UserModel | None = None,
-    status: RunStatus = RunStatus.SUCCEEDED,
-) -> RunModel:
+async def create_run_with_directory(database: PlatformDatabase, settings: PlatformSettings, board: RetentionBoard,
+    sequence: int, owner: UserModel | None = None, status: RunStatus = RunStatus.SUCCEEDED) -> RunModel:
     """造一行运行, 并把它的作业目录真的写到盘上.
 
     `sequence` 是"第几新": 保留的判据是"最新的 N 轮", 得先有可比的提交次序. 同秒提交时次序落到
@@ -151,13 +137,8 @@ async def create_run_with_directory(
     return run
 
 
-async def create_runs(
-    database: PlatformDatabase,
-    settings: PlatformSettings,
-    board: RetentionBoard,
-    run_count: int,
-    owner: UserModel | None = None,
-) -> list[RunModel]:
+async def create_runs(database: PlatformDatabase, settings: PlatformSettings, board: RetentionBoard, run_count: int,
+    owner: UserModel | None = None) -> list[RunModel]:
     """造 `run_count` 轮, 返回由新到旧的行 (下标即"第几新")."""
 
     return [
@@ -168,9 +149,7 @@ async def create_runs(
     ]
 
 
-async def assert_runs_survive(
-    database: PlatformDatabase, settings: PlatformSettings, runs: Sequence[RunModel]
-) -> None:
+async def assert_runs_survive(database: PlatformDatabase, settings: PlatformSettings, runs: Sequence[RunModel]) -> None:
     """这些行与它们的作业目录都还在."""
 
     for run in runs:
@@ -178,9 +157,7 @@ async def assert_runs_survive(
         assert job_directory(settings, run.id).exists(), run.id
 
 
-async def assert_runs_are_gone(
-    database: PlatformDatabase, settings: PlatformSettings, runs: Sequence[RunModel]
-) -> None:
+async def assert_runs_are_gone(database: PlatformDatabase, settings: PlatformSettings, runs: Sequence[RunModel]) -> None:
     """这些行与它们的作业目录都没了.
 
     目录一并断言: 只删行不删目录的话, 磁盘占用一点没少——而回收磁盘正是这个功能存在的理由.
@@ -191,12 +168,8 @@ async def assert_runs_are_gone(
         assert not job_directory(settings, run.id).exists(), run.id
 
 
-async def test_nothing_is_pruned_while_the_policy_is_off(
-    retention_database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    retention_board: RetentionBoard,
-    caplog,
-) -> None:
+async def test_nothing_is_pruned_while_the_policy_is_off(retention_database: PlatformDatabase,
+    platform_settings: PlatformSettings, retention_board: RetentionBoard, caplog) -> None:
     """默认关就是真的什么都不做: 行、目录一个不少, 连一条日志都不留.
 
     保留轮数给 1 而造了 5 轮, 远在配额之外——"关着就不动"必须与"超没超"无关.
@@ -225,11 +198,8 @@ async def test_nothing_is_pruned_while_the_policy_is_off(
     ]
 
 
-async def test_only_the_newest_runs_are_kept(
-    retention_database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    retention_board: RetentionBoard,
-) -> None:
+async def test_only_the_newest_runs_are_kept(retention_database: PlatformDatabase, platform_settings: PlatformSettings,
+    retention_board: RetentionBoard) -> None:
     """开 N 之后: 最新的 N 轮留下, 更旧的连作业目录一起消失, 返回值如实报数."""
 
     runs = await create_runs(
@@ -250,11 +220,8 @@ async def test_only_the_newest_runs_are_kept(
     )
 
 
-async def test_the_quota_is_counted_per_user(
-    retention_database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    retention_board: RetentionBoard,
-) -> None:
+async def test_the_quota_is_counted_per_user(retention_database: PlatformDatabase, platform_settings: PlatformSettings,
+    retention_board: RetentionBoard) -> None:
     """配额按用户各算各的: 一个用户轮数再多, 也不该动到别人的行.
 
     另一个账号**恰好**造 N 轮, 于是它的每一行都该原样保留. 按全局算的实现 (把两人的行排在一起数
@@ -286,11 +253,8 @@ async def test_the_quota_is_counted_per_user(
     )
 
 
-async def test_a_second_sweep_has_nothing_left_to_do(
-    retention_database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    retention_board: RetentionBoard,
-) -> None:
+async def test_a_second_sweep_has_nothing_left_to_do(retention_database: PlatformDatabase,
+    platform_settings: PlatformSettings, retention_board: RetentionBoard) -> None:
     """配额为 1 时只留最新一轮; 紧接着再扫一次是 0 且不再动任何东西.
 
     第二次清扫是真实存在的路径 (每轮作业收尾都会触发一次), 它必须是幂等的: 库里已经没有"第 2
@@ -308,11 +272,8 @@ async def test_a_second_sweep_has_nothing_left_to_do(
     await assert_runs_survive(retention_database, platform_settings, runs[:1])
 
 
-async def test_unfinished_runs_are_never_pruned(
-    retention_database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    retention_board: RetentionBoard,
-) -> None:
+async def test_unfinished_runs_are_never_pruned(retention_database: PlatformDatabase,
+    platform_settings: PlatformSettings, retention_board: RetentionBoard) -> None:
     """排队与运行中的轮无论多旧都不入选: 它们正被调度器或引擎握着.
 
     造的是库里最旧的两行——按保留轮数它们早该没了. 判据是**状态列**, 不是"它刚好排进了最新的 N
@@ -360,11 +321,8 @@ async def test_unfinished_runs_are_never_pruned(
     )
 
 
-async def test_protected_runs_are_exempt_from_the_sweep(
-    retention_database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    retention_board: RetentionBoard,
-) -> None:
+async def test_protected_runs_are_exempt_from_the_sweep(retention_database: PlatformDatabase,
+    platform_settings: PlatformSettings, retention_board: RetentionBoard) -> None:
     """被保护的那一轮不删, 且**不占**保留名额.
 
     清扫由某一轮收尾触发时, 刚结束的那一轮经保护名单排除: 用户此刻看的多半就是它. "不占名额"是
@@ -388,12 +346,8 @@ async def test_protected_runs_are_exempt_from_the_sweep(
     await assert_runs_are_gone(retention_database, platform_settings, runs[2:3])
 
 
-async def test_a_row_whose_directory_cannot_be_removed_keeps_its_row(
-    retention_database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    retention_board: RetentionBoard,
-    tmp_path: Path,
-) -> None:
+async def test_a_row_whose_directory_cannot_be_removed_keeps_its_row(retention_database: PlatformDatabase,
+    platform_settings: PlatformSettings, retention_board: RetentionBoard, tmp_path: Path) -> None:
     """作业目录列越界时删不掉: 行保留, 下次清扫仍会尝试, 金丝雀一个字节都没少.
 
     与删除端点共用同一个删除原语, 故这一格测的正是"两条路径的 fail-closed 方向一致". 没有它的话,
@@ -444,11 +398,8 @@ async def test_a_row_whose_directory_cannot_be_removed_keeps_its_row(
     assert (canary_directory / CANARY_FILENAME).exists()
 
 
-async def test_a_row_without_a_recorded_directory_is_still_pruned(
-    retention_database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    retention_board: RetentionBoard,
-) -> None:
+async def test_a_row_without_a_recorded_directory_is_still_pruned(retention_database: PlatformDatabase,
+    platform_settings: PlatformSettings, retention_board: RetentionBoard) -> None:
     """目录列是空串的行照删: 它名下没有目录可移, 不该因此永远留在库里.
 
     这一格真实可达 (提交路径在极早的失败下会留下它), 而两条删除路径共用同一份可删判据
@@ -480,11 +431,8 @@ async def test_a_row_without_a_recorded_directory_is_still_pruned(
     )
 
 
-async def test_the_startup_sweep_runs_after_the_recovery(
-    retention_database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    retention_board: RetentionBoard,
-) -> None:
+async def test_the_startup_sweep_runs_after_the_recovery(retention_database: PlatformDatabase,
+    platform_settings: PlatformSettings, retention_board: RetentionBoard) -> None:
     """启动时清一次盘, 且发生在恢复**之后**.
 
     上一届留下的 `queued` 行要先被恢复改写成 `interrupted` (那一刻起才算终态), 才轮得到清理收掉

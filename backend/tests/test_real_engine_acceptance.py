@@ -279,9 +279,7 @@ def build_real_configuration_template() -> dict[str, object]:
     }
 
 
-async def create_real_owner(
-    database: PlatformDatabase, client: AsyncClient, username: str
-) -> SignedInAccount:
+async def create_real_owner(database: PlatformDatabase, client: AsyncClient, username: str) -> SignedInAccount:
     """登一个账号, 并把这一轮要提交的合约的费率备好.
 
     费率那一步不是"用例自己造数据": 提交侧会按该轮选定的那个组把三级规则展开, 三档都没命中就 400 (见
@@ -296,9 +294,7 @@ async def create_real_owner(
     return owner
 
 
-async def upload_real_strategy(
-    client: AsyncClient, token: str
-) -> tuple[str, str]:
+async def upload_real_strategy(client: AsyncClient, token: str) -> tuple[str, str]:
     """经上传接口落一份真策略, 返回 (策略 id, 版本 id).
 
     上传的是**两份文件**, 而它们的文件名就是作业目录里的文件名——策略源码里 `open("TestStrategyGrid.json")`
@@ -385,9 +381,7 @@ async def await_engine_started(settings: PlatformSettings, run_id: str) -> None:
     )
 
 
-async def test_a_real_bar_backtest_runs_through_the_platform(
-    real_settings: PlatformSettings,
-) -> None:
+async def test_a_real_bar_backtest_runs_through_the_platform(real_settings: PlatformSettings) -> None:
     """① 真引擎一轮 Bar 回测跑通, 平台递过去的输入逐件对得上.
 
     这是 P2「上传后能跑通」的结清点: 策略经**上传接口**落盘, 作业目录由**调度侧**构造, 引擎由
@@ -541,9 +535,7 @@ async def test_a_real_bar_backtest_runs_through_the_platform(
     assert order_table_response.json()["total"] == finished.order_count
 
 
-async def test_a_subscription_period_finer_than_the_dataset_is_aggregated(
-    real_settings: PlatformSettings,
-) -> None:
+async def test_a_subscription_period_finer_than_the_dataset_is_aggregated(real_settings: PlatformSettings) -> None:
     """② 用户选 15m 时跑得通: 引擎那份 `BarPreces` 仍是落盘精度, 聚合发生在读之后.
 
     这一条直接钉住本轮修掉的类别错误. 磁盘上的行情只有 5m, 引擎按 `BackTest.json.BarPreces` 去
@@ -592,9 +584,7 @@ async def test_a_subscription_period_finer_than_the_dataset_is_aggregated(
     assert strategy_configuration["BarPreces"] == AGGREGATED_SUBSCRIPTION_BAR_PERIOD
 
 
-async def test_two_real_runs_at_once_keep_their_databases_apart(
-    real_settings: PlatformSettings,
-) -> None:
+async def test_two_real_runs_at_once_keep_their_databases_apart(real_settings: PlatformSettings) -> None:
     """③ 两轮真回测并发跑: 每个作业目录里**只有一个**库, 且那个库的名字嵌着自己的 RunId.
 
     这是"写路径必须相对"在真引擎上的那一面: 若渲染器写出绝对路径 (或写出同一个固定位置), 两个
@@ -657,9 +647,7 @@ async def test_two_real_runs_at_once_keep_their_databases_apart(
     assert second_finished.started_at < first_finished.finished_at
 
 
-async def test_a_real_run_that_exceeds_its_limit_is_killed(
-    real_settings: PlatformSettings,
-) -> None:
+async def test_a_real_run_that_exceeds_its_limit_is_killed(real_settings: PlatformSettings) -> None:
     """④ 真引擎跑不完时限时被真的杀掉: 没有 `result.json`, 也没有引擎自己那句"结果已写出".
 
     超时路径在桩上已测过, 这里换真引擎是要证**`TerminateProcess` 停得住那个 C++ 宿主**——桩是纯
@@ -728,9 +716,7 @@ async def test_a_real_run_that_exceeds_its_limit_is_killed(
     assert (job_directory(impatient_settings, submitted.id) / STDERR_FILENAME).is_file()
 
 
-async def test_cancelling_a_running_real_engine_job_stops_it(
-    real_settings: PlatformSettings,
-) -> None:
+async def test_cancelling_a_running_real_engine_job_stops_it(real_settings: PlatformSettings) -> None:
     """⑤ 取消一个正在跑的真引擎作业: 进程停住, 且**没有** `result.json`.
 
     `result.json` 的缺席是陈旧结果防护生效的证据: 作业目录里那一份是宿主在启动时删掉的, 故"本轮

@@ -54,7 +54,6 @@ class RunningJobRegistry:
     def __init__(self) -> None:
         self._handles: dict[str, JobHandle] = {}
         self._lock = asyncio.Lock()
-
     async def register(self, run_id: str) -> JobHandle:
         """登记一个新句柄.
 
@@ -71,10 +70,7 @@ class RunningJobRegistry:
             self._handles[run_id] = handle
 
         return handle
-
-    async def attach_process(
-        self, run_id: str, process: asyncio.subprocess.Process
-    ) -> None:
+    async def attach_process(self, run_id: str, process: asyncio.subprocess.Process) -> None:
         """把刚起的进程挂到句柄上.
 
         句柄按不变量必然在表里; 真取不到说明有人违反了它, 而那种情况下这个进程**已经没有人
@@ -90,13 +86,11 @@ class RunningJobRegistry:
                 return
 
             handle.process = process
-
     async def get(self, run_id: str) -> JobHandle | None:
         """取句柄; 不在表里即返回 None."""
 
         async with self._lock:
             return self._handles.get(run_id)
-
     async def request_cancel(self, run_id: str) -> JobHandle | None:
         """置取消标志并交出句柄.
 
@@ -113,7 +107,6 @@ class RunningJobRegistry:
             handle.cancel_signal.set()
 
         return handle
-
     async def retire(self, run_id: str) -> None:
         """作业任务结束后出表, 并唤醒所有等待者.
 

@@ -175,9 +175,7 @@ def test_a_table_absent_from_the_database_is_skipped() -> None:
         ).first() is None
 
 
-def test_a_not_null_column_without_a_renderable_default_is_left_alone(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_a_not_null_column_without_a_renderable_default_is_left_alone(caplog: pytest.LogCaptureFixture) -> None:
     """可调用的默认值渲染不进 DDL, 故该列补不上——而**补不上时必须说出来**并点名.
 
     `default=utc_now` 是真实存在的情形 (`Runs.SubmittedAt` 就是), 静默跳过的话症状会推迟到

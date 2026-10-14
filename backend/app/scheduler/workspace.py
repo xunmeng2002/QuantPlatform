@@ -86,9 +86,7 @@ def build_job_directory(settings: PlatformSettings, job_files: JobFileSet) -> Pa
     return target_directory
 
 
-def _write_job_files(
-    staging_directory: Path, settings: PlatformSettings, job_files: JobFileSet
-) -> None:
+def _write_job_files(staging_directory: Path, settings: PlatformSettings, job_files: JobFileSet) -> None:
     """把五个文件与 `Dump/` 父目录写进临时目录."""
 
     (staging_directory / ENGINE_CONFIG_FILENAME).write_text(

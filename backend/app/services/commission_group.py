@@ -25,9 +25,7 @@ UNKNOWN_COMMISSION_GROUP_MESSAGE_TEMPLATE = (
 )
 
 
-async def commission_group_exists(
-    session: AsyncSession, commission_group_id: int
-) -> bool:
+async def commission_group_exists(session: AsyncSession, commission_group_id: int) -> bool:
     """这个组号是否已登记."""
 
     existing_group_id = await session.scalar(
@@ -39,9 +37,7 @@ async def commission_group_exists(
     return existing_group_id is not None
 
 
-async def ensure_commission_group_exists(
-    session: AsyncSession, commission_group_id: int
-) -> None:
+async def ensure_commission_group_exists(session: AsyncSession, commission_group_id: int) -> None:
     """组不存在即 400, 文案点名组号.
 
     拦在这里而不是留给引擎: 引擎对一个不存在的组**不报错**, 它照跑完、费用全按 0 计, 而配置里

@@ -167,12 +167,8 @@ def _primary_key_attribute_names(table: SeedTable, model: type[Base]) -> tuple[s
     )
 
 
-async def _read_table_rows(
-    session: AsyncSession,
-    table: SeedTable,
-    model: type[Base],
-    where_clause: ColumnElement[bool] | None = None,
-) -> tuple[SeedRow, ...]:
+async def _read_table_rows(session: AsyncSession, table: SeedTable, model: type[Base],
+    where_clause: ColumnElement[bool] | None = None) -> tuple[SeedRow, ...]:
     """读出这张表的行, 列序按契约.
 
     行序按契约主键排: 同一份数据每次导出的字节因此相同, 文件之间可以直接比对 —— 一个会随
@@ -198,9 +194,7 @@ async def _read_table_rows(
     return tuple(tuple(row) for row in result.all())
 
 
-async def read_seed_rows(
-    session: AsyncSession, commission_group_id: int
-) -> SeedRows:
+async def read_seed_rows(session: AsyncSession, commission_group_id: int) -> SeedRows:
     """读出这份种子库该有的行: 品种与手续费组整体, 费率只取**一个组**的.
 
     组号是这里的过滤条件 (而不是展开时的事): 引擎每轮只看一个组 (那一轮的 `CommissionGroupId`),
@@ -240,9 +234,7 @@ _INSTRUMENT_ID_INDEX = _COMMISSION_COLUMN_NAMES.index("InstrumentId")
 _DIRECTION_INDEX = _COMMISSION_COLUMN_NAMES.index("Direction")
 
 
-def _ensure_base_commissions_are_expanded(
-    base_commission_rows: Sequence[SeedRow],
-) -> None:
+def _ensure_base_commissions_are_expanded(base_commission_rows: Sequence[SeedRow]) -> None:
     """费率行必须是**展开过**的: 方向只许 0 / 1, 合约格不许为空.
 
     挡的是"某个调用方把 catalog 的行直接灌进来"这条路 —— 那类行带着平台专有的取值 (`-1` 的双向、
@@ -270,10 +262,7 @@ def _ensure_base_commissions_are_expanded(
             )
 
 
-def _write_seed_database_file(
-    database_path: Path,
-    table_rows: tuple[tuple[SeedTable, tuple[SeedRow, ...]], ...],
-) -> None:
+def _write_seed_database_file(database_path: Path, table_rows: tuple[tuple[SeedTable, tuple[SeedRow, ...]], ...]) -> None:
     """在一个新建的 SQLite 文件里建三张表并灌行. 同步实现, 由调用方丢进线程."""
 
     with closing(sqlite3.connect(database_path)) as connection:
@@ -314,11 +303,7 @@ async def write_seed_database(destination: Path, rows: SeedRows) -> None:
     await asyncio.to_thread(_write_seed_database_file, destination, table_rows)
 
 
-def expand_seed_rows(
-    seed_rows: SeedRows,
-    commission_group_id: int,
-    contracts: Sequence[RunContract],
-) -> RateExpansion:
+def expand_seed_rows(seed_rows: SeedRows, commission_group_id: int, contracts: Sequence[RunContract]) -> RateExpansion:
     """把一份读好的种子数据里的费率三级展开掉. 纯函数: 不碰库, 也不碰文件.
 
     提交期的校验与调度期的生成都经它 —— 那一串实参 (哪三份行、按哪个组、展开到哪些合约) 只有
@@ -333,12 +318,8 @@ def expand_seed_rows(
     )
 
 
-async def generate_run_seed_database(
-    session: AsyncSession,
-    destination: Path,
-    commission_group_id: int,
-    contracts: Sequence[RunContract],
-) -> RateExpansion:
+async def generate_run_seed_database(session: AsyncSession, destination: Path, commission_group_id: int,
+    contracts: Sequence[RunContract]) -> RateExpansion:
     """给这一轮生成种子库: 读 catalog → 展开三级规则 → 写到 `destination`.
 
     **缺费率不在这里拦**: 提交期与调度期的处置不同 (前者回 400 让用户补, 后者让这一轮失败),

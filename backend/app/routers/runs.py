@@ -101,16 +101,10 @@ DEFAULT_SORT_COLUMN = "submitted_at"
 
 
 @router.get("", response_model=PageResponse[RunSummaryResponse])
-async def list_runs_handler(
-    session: SessionDependency,
-    current_user: CurrentUserDependency,
-    status_filter: RunStatus | None = Query(None, alias="status"),
-    strategy_id: str | None = Query(None),
-    sort_by: str = Query(DEFAULT_SORT_COLUMN),
-    descending: bool = Query(True),
-    offset: int = Query(0, ge=0),
-    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE),
-) -> PageResponse[RunSummaryResponse]:
+async def list_runs_handler(session: SessionDependency, current_user: CurrentUserDependency,
+    status_filter: RunStatus | None = Query(None, alias="status"), strategy_id: str | None = Query(None),
+    sort_by: str = Query(DEFAULT_SORT_COLUMN), descending: bool = Query(True), offset: int = Query(0, ge=0),
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE)) -> PageResponse[RunSummaryResponse]:
     """本人运行列表, 可按状态与策略筛选、按指标排序.
 
     sort_by 经白名单映射到列对象后再排序, 绝不把请求里的字符串拼进 SQL; 未收录的取值
@@ -134,12 +128,8 @@ async def list_runs_handler(
 
 
 @router.get("/compare", response_model=RunComparisonResponse)
-async def compare_runs_handler(
-    session: SessionDependency,
-    settings: SettingsDependency,
-    current_user: CurrentUserDependency,
-    ids: str = Query(..., description="逗号分隔的运行号, 最多 6 个"),
-) -> RunComparisonResponse:
+async def compare_runs_handler(session: SessionDependency, settings: SettingsDependency,
+    current_user: CurrentUserDependency, ids: str = Query(..., description="逗号分隔的运行号, 最多 6 个")) -> RunComparisonResponse:
     """多轮并列: 每轮一份列表列 + 它自己的权益曲线. 响应列序 = 请求序.
 
     **本路由必须声明在 `@router.get("/{run_id}")` 之前**: `/compare` 与 `/{run_id}` 的形状
@@ -211,9 +201,7 @@ def _parse_comparison_run_ids(raw_ids: str) -> list[str]:
     return comparison_run_ids
 
 
-async def _read_comparison_equity(
-    settings: PlatformSettings, run: RunModel
-) -> tuple[list[EquityPointResponse], str | None]:
+async def _read_comparison_equity(settings: PlatformSettings, run: RunModel) -> tuple[list[EquityPointResponse], str | None]:
     """读一轮的权益曲线; 读不出来就回一句原因, **绝不抛**.
 
     与单轮权益端点的差别只有这一点: 那边读不出来即 404/409, 这边是"整页里少一条线", 逐轮降级
@@ -246,9 +234,7 @@ async def _read_comparison_equity(
     return _to_equity_point_responses(capital_points), None
 
 
-def _to_equity_point_responses(
-    capital_points: Sequence[CapitalPointRecord],
-) -> list[EquityPointResponse]:
+def _to_equity_point_responses(capital_points: Sequence[CapitalPointRecord]) -> list[EquityPointResponse]:
     """把结果库的权益行翻成对外视图.
 
     单轮权益端点与对比端点共用. 各写一遍的话, 将来多出一列只会加在其中一边, 而那种偏差在界面上
@@ -268,13 +254,8 @@ def _to_equity_point_responses(
 @router.post(
     "", response_model=RunDetailResponse, status_code=status.HTTP_201_CREATED
 )
-async def submit_run_handler(
-    request_body: RunSubmitRequest,
-    session: SessionDependency,
-    settings: SettingsDependency,
-    scheduler: SchedulerDependency,
-    current_user: CurrentUserDependency,
-) -> RunModel:
+async def submit_run_handler(request_body: RunSubmitRequest, session: SessionDependency, settings: SettingsDependency,
+    scheduler: SchedulerDependency, current_user: CurrentUserDependency) -> RunModel:
     """提交一次回测: 落一行 `queued`, 然后唤醒调度器.
 
     提交成功即 201, **即使作业目录还没构造**: 目录构造失败发生在调度侧, 那一轮会被标成
@@ -290,12 +271,8 @@ async def submit_run_handler(
 
 
 @router.post("/{run_id}/cancel", response_model=RunDetailResponse)
-async def cancel_run_handler(
-    run_id: str,
-    session: SessionDependency,
-    scheduler: SchedulerDependency,
-    current_user: CurrentUserDependency,
-) -> RunModel:
+async def cancel_run_handler(run_id: str, session: SessionDependency, scheduler: SchedulerDependency,
+    current_user: CurrentUserDependency) -> RunModel:
     """取消一个尚未结束的运行. 只归提交人, 非本人提交即 404.
 
     **不能写成"读一次 → 按读到的状态分支走到底"**: 状态在分支之间会变 (认领、收尾都在抢它),
@@ -386,12 +363,8 @@ async def _interrupt_unstarted_run(session: AsyncSession, run_id: str) -> bool:
 
 
 @router.delete("/{run_id}", response_model=MessageResponse)
-async def delete_run_handler(
-    run_id: str,
-    session: SessionDependency,
-    settings: SettingsDependency,
-    current_user: CurrentUserDependency,
-) -> MessageResponse:
+async def delete_run_handler(run_id: str, session: SessionDependency, settings: SettingsDependency,
+    current_user: CurrentUserDependency) -> MessageResponse:
     """删除一个已结束的运行: **先删作业目录, 后删行**. 非本人提交即 404.
 
     顺序不能反. 行是那个目录**唯一**的句柄 (目录名就是 `RunId`, 而知道它的只有这一列), 行先
@@ -427,23 +400,15 @@ async def delete_run_handler(
 
 
 @router.get("/{run_id}", response_model=RunDetailResponse)
-async def read_run_handler(
-    run_id: str,
-    session: SessionDependency,
-    current_user: CurrentUserDependency,
-) -> RunModel:
+async def read_run_handler(run_id: str, session: SessionDependency, current_user: CurrentUserDependency) -> RunModel:
     """运行详情. 非本人提交即 404."""
 
     return await load_owned_run(session, current_user, run_id)
 
 
 @router.get("/{run_id}/files", response_model=JobArtifactListResponse)
-async def list_run_artifacts_handler(
-    run_id: str,
-    session: SessionDependency,
-    settings: SettingsDependency,
-    current_user: CurrentUserDependency,
-) -> JobArtifactListResponse:
+async def list_run_artifacts_handler(run_id: str, session: SessionDependency, settings: SettingsDependency,
+    current_user: CurrentUserDependency) -> JobArtifactListResponse:
     """列出一次运行的作业目录里的全部文件. 非本人提交即 404.
 
     运行中的轮也能列: 这里读的是文件系统, 不碰库里的状态, 故没有"还没收尾"的限制.
@@ -475,13 +440,8 @@ async def list_run_artifacts_handler(
 
 
 @router.get("/{run_id}/files/{file_path:path}", response_class=FileResponse)
-async def download_run_artifact_handler(
-    run_id: str,
-    file_path: str,
-    session: SessionDependency,
-    settings: SettingsDependency,
-    current_user: CurrentUserDependency,
-) -> FileResponse:
+async def download_run_artifact_handler(run_id: str, file_path: str, session: SessionDependency,
+    settings: SettingsDependency, current_user: CurrentUserDependency) -> FileResponse:
     """按相对路径下载作业目录里的一个文件. 非本人提交即 404.
 
     路径参数写作 `{file_path:path}`: FastAPI 的普通路径参数**不匹配 `/`**,
@@ -511,12 +471,8 @@ async def download_run_artifact_handler(
 
 
 @router.get("/{run_id}/equity", response_model=RunEquityResponse)
-async def read_run_equity_handler(
-    run_id: str,
-    session: SessionDependency,
-    settings: SettingsDependency,
-    current_user: CurrentUserDependency,
-) -> RunEquityResponse:
+async def read_run_equity_handler(run_id: str, session: SessionDependency, settings: SettingsDependency,
+    current_user: CurrentUserDependency) -> RunEquityResponse:
     """逐日权益序列 (读结果库的 `Capitals` 表). 非本人提交即 404, 运行未结束即 409.
 
     只有轮结束之后才读: 引擎写库用的 `SqliteWrapper` 没设 `busy_timeout`, 边写边读会拿到
@@ -539,15 +495,9 @@ async def read_run_equity_handler(
 
 
 @router.get("/{run_id}/tables/{table_name}", response_model=ResultTableResponse)
-async def read_run_result_table_handler(
-    run_id: str,
-    table_name: str,
-    session: SessionDependency,
-    settings: SettingsDependency,
-    current_user: CurrentUserDependency,
-    offset: int = Query(0, ge=0),
-    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE),
-) -> ResultTableResponse:
+async def read_run_result_table_handler(run_id: str, table_name: str, session: SessionDependency,
+    settings: SettingsDependency, current_user: CurrentUserDependency, offset: int = Query(0, ge=0),
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE)) -> ResultTableResponse:
     """引擎结果表的一页. 非本人提交即 404, 未收录的表名即 404, 运行未结束即 409.
 
     表名白名单与它的 SQL 拼接同处一层 (`services/result_database`), 这里不重复判定:

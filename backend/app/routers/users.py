@@ -37,9 +37,7 @@ BLANK_DISPLAY_NAME_MESSAGE = "显示名不能为空白"
 MAXIMUM_DIRECTORY_QUERY_LENGTH = 128
 
 
-async def _ensure_another_active_admin_remains(
-    session: AsyncSession, target_user: UserModel, target_status: UserStatus
-) -> None:
+async def _ensure_another_active_admin_remains(session: AsyncSession, target_user: UserModel, target_status: UserStatus) -> None:
     """停用管理员前确认还有人能管.
 
     最后一个启用中的管理员被停用后, 播种逻辑按"库中是否存在管理员"判断, 不区分状态,
@@ -69,12 +67,8 @@ async def _ensure_another_active_admin_remains(
 
 
 @router.get("", response_model=PageResponse[UserResponse])
-async def list_users_handler(
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
-    offset: int = Query(0, ge=0),
-    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE),
-) -> PageResponse[UserResponse]:
+async def list_users_handler(session: SessionDependency, admin_user: AdminUserDependency, offset: int = Query(0, ge=0),
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE)) -> PageResponse[UserResponse]:
     """用户列表, 按建号时间倒序."""
 
     return await fetch_page(
@@ -88,13 +82,9 @@ async def list_users_handler(
 
 
 @router.get("/directory", response_model=PageResponse[UserDirectoryEntryResponse])
-async def list_user_directory_handler(
-    session: SessionDependency,
-    current_user: CurrentUserDependency,
-    query: str | None = Query(None, max_length=MAXIMUM_DIRECTORY_QUERY_LENGTH),
-    offset: int = Query(0, ge=0),
-    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE),
-) -> PageResponse[UserDirectoryEntryResponse]:
+async def list_user_directory_handler(session: SessionDependency, current_user: CurrentUserDependency,
+    query: str | None = Query(None, max_length=MAXIMUM_DIRECTORY_QUERY_LENGTH), offset: int = Query(0, ge=0),
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE)) -> PageResponse[UserDirectoryEntryResponse]:
     """受限用户目录: 给授权表单选人用, 只回 id 与显示名.
 
     **为什么这是一处有意的放宽.** 授权端点按 `user_id` 指定被授权人, 而平台没有别的路径让
@@ -140,11 +130,7 @@ async def list_user_directory_handler(
 
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def create_user_handler(
-    request_body: UserCreateRequest,
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
-) -> UserModel:
+async def create_user_handler(request_body: UserCreateRequest, session: SessionDependency, admin_user: AdminUserDependency) -> UserModel:
     """建号. 用户名唯一, 重复即拒; 显示名必填.
 
     先查重再插入只为给出干净的报错; 真正的保证来自唯一约束, 故仍接住并发下的完整性冲突.
@@ -183,12 +169,8 @@ async def create_user_handler(
 
 
 @router.patch("/{user_id}/status", response_model=MessageResponse)
-async def update_user_status_handler(
-    user_id: str,
-    request_body: UserStatusUpdateRequest,
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
-) -> MessageResponse:
+async def update_user_status_handler(user_id: str, request_body: UserStatusUpdateRequest, session: SessionDependency,
+    admin_user: AdminUserDependency) -> MessageResponse:
     """启用或停用账号.
 
     停用后既有令牌立即失效, 因为每个请求都会重查账号状态, 不依赖令牌里的快照.

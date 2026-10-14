@@ -41,9 +41,7 @@ def _coverage_query() -> dict[str, str]:
     }
 
 
-async def test_the_contract_list_lists_tradable_contracts(
-    client: AsyncClient, run_owner: SignedInAccount
-) -> None:
+async def test_the_contract_list_lists_tradable_contracts(client: AsyncClient, run_owner: SignedInAccount) -> None:
     response = await client.get(CONTRACTS_PATH, headers=bearer_headers(run_owner.token))
 
     assert response.status_code == 200
@@ -58,9 +56,8 @@ async def test_the_contract_list_lists_tradable_contracts(
     assert body["contracts"][0]["display_name"] == "贵州茅台"
 
 
-async def test_the_contract_list_degrades_when_the_component_database_is_missing(
-    client: AsyncClient, run_owner: SignedInAccount, quote_hub_root: Path
-) -> None:
+async def test_the_contract_list_degrades_when_the_component_database_is_missing(client: AsyncClient,
+    run_owner: SignedInAccount, quote_hub_root: Path) -> None:
     """列表只读库, 不看入口脚本 —— 故缺的是**库**时它才降级."""
 
     (quote_hub_root / quote_hub.QUOTE_HUB_DATABASE_FILENAME).unlink()
@@ -82,9 +79,7 @@ async def test_the_contract_list_requires_authentication(client: AsyncClient) ->
     assert response.status_code == 401
 
 
-async def test_coverage_is_sufficient_for_the_covered_window(
-    client: AsyncClient, run_owner: SignedInAccount
-) -> None:
+async def test_coverage_is_sufficient_for_the_covered_window(client: AsyncClient, run_owner: SignedInAccount) -> None:
     response = await client.get(
         COVERAGE_PATH, params=_coverage_query(), headers=bearer_headers(run_owner.token)
     )
@@ -98,9 +93,7 @@ async def test_coverage_is_sufficient_for_the_covered_window(
     assert body["missing_day_count"] == 0
 
 
-async def test_coverage_ignores_whatever_subscription_period_the_page_sends(
-    client: AsyncClient, run_owner: SignedInAccount
-) -> None:
+async def test_coverage_ignores_whatever_subscription_period_the_page_sends(client: AsyncClient, run_owner: SignedInAccount) -> None:
     """预检只回答"这份落盘数据在不在", 故带上订阅周期也不改变答案.
 
     这一条是原先那条"频率不同就必须报不够"的**反面**. 落盘精度恒为 5m, 15m 那根 bar 由引擎在

@@ -192,13 +192,8 @@ def enumerate_days(start_day: str, end_day: str) -> list[str]:
     ]
 
 
-def write_catalog_database(
-    quote_hub_root: Path,
-    *,
-    covered_contracts: dict[str, tuple[str, ...]],
-    calendar_days: tuple[str, ...],
-    contracts: tuple[tuple[str, str, str, str], ...],
-) -> None:
+def write_catalog_database(quote_hub_root: Path, *, covered_contracts: dict[str, tuple[str, ...]],
+    calendar_days: tuple[str, ...], contracts: tuple[tuple[str, str, str, str], ...]) -> None:
     """写一张只够判据用的桩库.
 
     `covered_contracts` 是 `{频率: (代码, ...)}`, 决定哪只合约在哪个频率下"有 bar";
@@ -286,13 +281,9 @@ def write_catalog_database(
     connection.close()
 
 
-def build_covered_component(
-    quote_hub_root: Path,
-    contract_code: str = DEFAULT_CONTRACT_CODE,
-    frequency: str = DEFAULT_FREQUENCY,
-    start_day: str = DEFAULT_COVERED_START_DAY,
-    end_day: str = DEFAULT_COVERED_END_DAY,
-) -> Path:
+def build_covered_component(quote_hub_root: Path, contract_code: str = DEFAULT_CONTRACT_CODE,
+    frequency: str = DEFAULT_FREQUENCY, start_day: str = DEFAULT_COVERED_START_DAY,
+    end_day: str = DEFAULT_COVERED_END_DAY) -> Path:
     """一个"该合约的行情早已落地"且在位的组件.
 
     共享夹具与"够用则零子进程"那条用例都用它: 库里既有日历又有 bar, 于是判据直接回够用, 一次

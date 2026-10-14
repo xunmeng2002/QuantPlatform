@@ -53,13 +53,8 @@ def throttled_login_error(remaining_lock_seconds: int) -> HTTPException:
 
 
 @router.post("/login", response_model=AccessTokenResponse)
-async def login_handler(
-    request: Request,
-    request_body: LoginRequest,
-    session: SessionDependency,
-    settings: SettingsDependency,
-    throttle: LoginThrottleDependency,
-) -> AccessTokenResponse:
+async def login_handler(request: Request, request_body: LoginRequest, session: SessionDependency,
+    settings: SettingsDependency, throttle: LoginThrottleDependency) -> AccessTokenResponse:
     """用户名口令换访问令牌.
 
     账号不存在时也照常走一遍口令校验, 并按**提交上来的那个用户名字符串**计数, 不论账号是否

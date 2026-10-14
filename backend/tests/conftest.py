@@ -72,11 +72,7 @@ def quote_hub_root(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def platform_settings(
-    tmp_path: Path,
-    engine_inputs: tuple[Path, Path],
-    quote_hub_root: Path,
-) -> PlatformSettings:
+def platform_settings(tmp_path: Path, engine_inputs: tuple[Path, Path], quote_hub_root: Path) -> PlatformSettings:
     """指向临时目录的配置."""
 
     market_data_root, session_file_path = engine_inputs
@@ -128,9 +124,7 @@ def database(application: FastAPI) -> PlatformDatabase:
 
 
 @pytest_asyncio.fixture
-async def run_owner(
-    database: PlatformDatabase, client: AsyncClient
-) -> SignedInAccount:
+async def run_owner(database: PlatformDatabase, client: AsyncClient) -> SignedInAccount:
     """一个已登录账号, 用来提交回测.
 
     放在 conftest 而不是各运行测试模块里: 提交、取消、恢复、并发四个模块都要它, 各抄一份的话

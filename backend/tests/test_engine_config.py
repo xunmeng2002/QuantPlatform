@@ -118,9 +118,7 @@ def assert_is_a_relative_path(job_directory_path: str) -> None:
     assert not job_directory_path.startswith(PATH_SEPARATORS), job_directory_path
 
 
-def test_the_job_directory_paths_are_relative(
-    rendered_configuration: dict[str, object],
-) -> None:
+def test_the_job_directory_paths_are_relative(rendered_configuration: dict[str, object]) -> None:
     """库、转储、会话表、种子库四处都落在作业目录之内.
 
     `DbInitHost` 与另外三条同判: 它是读数, 但读的正是平台**放进作业目录**的那份种子库, 故相对值
@@ -178,9 +176,7 @@ def test_the_renderer_takes_no_write_path_parameter() -> None:
     )
 
 
-def test_the_configuration_carries_exactly_the_engine_template_keys(
-    rendered_configuration: dict[str, object],
-) -> None:
+def test_the_configuration_carries_exactly_the_engine_template_keys(rendered_configuration: dict[str, object]) -> None:
     """键与次序照抄引擎自带模板, 含两个纯注释键与两个空串.
 
     `MatchModeType` / `DBTypeType` 是引擎模板里的取值提示注释, `DbUser` / `DbPassword` 对 SQLite
@@ -195,9 +191,7 @@ def test_the_configuration_carries_exactly_the_engine_template_keys(
     assert rendered_configuration["DbType"] == SQLITE_DATABASE_TYPE
 
 
-def test_the_run_identifier_lands_in_the_configuration_without_being_prefixed(
-    rendered_configuration: dict[str, object],
-) -> None:
+def test_the_run_identifier_lands_in_the_configuration_without_being_prefixed(rendered_configuration: dict[str, object]) -> None:
     """`RunId` 就是平台生成的主键, 且**不**被提前拼进库文件名.
 
     引擎自己按 `RunId` 派生结果库名 (`BackTest_<RunId>.db`). 平台若好心先拼一份, 会得到
@@ -209,9 +203,7 @@ def test_the_run_identifier_lands_in_the_configuration_without_being_prefixed(
     assert RUN_ID not in RELATIVE_DATABASE_HOST
 
 
-def test_the_run_level_values_land_where_the_engine_reads_them(
-    rendered_configuration: dict[str, object],
-) -> None:
+def test_the_run_level_values_land_where_the_engine_reads_them(rendered_configuration: dict[str, object]) -> None:
     """运行级取值逐项落到引擎读它们的键上.
 
     `BarPreces` 不在这里: 它是**平台常量**而不是运行级取值, 单独由下一条钉着.
@@ -228,9 +220,7 @@ def test_the_run_level_values_land_where_the_engine_reads_them(
     assert rendered_configuration["CommissionGroupId"] == RENDERED_COMMISSION_GROUP_ID
 
 
-def test_the_dataset_bar_period_is_a_constant_the_caller_cannot_reach(
-    rendered_configuration: dict[str, object],
-) -> None:
+def test_the_dataset_bar_period_is_a_constant_the_caller_cannot_reach(rendered_configuration: dict[str, object]) -> None:
     """引擎那份 `BarPreces` 恒为落盘精度, 且**形参表里没有任何入口**能改它.
 
     它决定引擎按 `Preces = '<值>'` 去读哪一族 parquet. 用户在提交页选的那个周期是**策略的订阅目标**

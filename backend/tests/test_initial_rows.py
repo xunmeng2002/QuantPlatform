@@ -101,9 +101,7 @@ def _write_csv(directory: Path, table: SeedTable, rows: list[list[str]]) -> None
     )
 
 
-async def _read_catalog_rows(
-    database: PlatformDatabase, table: SeedTable
-) -> list[tuple[object, ...]]:
+async def _read_catalog_rows(database: PlatformDatabase, table: SeedTable) -> list[tuple[object, ...]]:
     """把库里这张表读出来, 列序按契约.
 
     走生产用的那套列名对照, 而不是在测试里另写一份: 另写一份的话, 列名一旦对不上, 这里会跟着
@@ -153,9 +151,7 @@ def test_read_initial_rows_rejects_a_header_that_is_not_the_contract(tmp_path: P
         read_initial_rows(csv_path, PRODUCT_TABLE)
 
 
-async def test_an_empty_table_is_seeded_from_the_csv(
-    seed_csv_directory: Path, empty_database: PlatformDatabase
-) -> None:
+async def test_an_empty_table_is_seeded_from_the_csv(seed_csv_directory: Path, empty_database: PlatformDatabase) -> None:
     """三张表都空着时, 各自按 CSV 播种, 取值按列类型转好.
 
     两处空单元穿过这一整条路径后应当变成 `0.0` 与 `""`: 这是"CSV 文本 → 库里取值"的转换在起
@@ -197,9 +193,7 @@ async def test_an_empty_table_is_seeded_from_the_csv(
     ]
 
 
-async def test_a_table_that_already_has_rows_is_left_alone(
-    seed_csv_directory: Path, empty_database: PlatformDatabase
-) -> None:
+async def test_a_table_that_already_has_rows_is_left_alone(seed_csv_directory: Path, empty_database: PlatformDatabase) -> None:
     """非空的表一概不动 —— 人工改过的取值不会被初始化 CSV 冲掉.
 
     这是这个模块存在的全部理由的另一半: 若每启动一次就照 CSV 重灌一遍, 那这份 CSV 就不是"初始
@@ -232,9 +226,7 @@ async def test_a_table_that_already_has_rows_is_left_alone(
     ) == 2
 
 
-async def test_a_bad_header_leaves_every_table_untouched(
-    seed_csv_directory: Path, empty_database: PlatformDatabase
-) -> None:
+async def test_a_bad_header_leaves_every_table_untouched(seed_csv_directory: Path, empty_database: PlatformDatabase) -> None:
     """某一份 CSV 的表头不对时, 前面已经播进去的表也要一起回滚.
 
     三张表在同一事务里落库就是为了这个: 半播的库事后分不出哪几行是初始化带的、哪几行是人工录

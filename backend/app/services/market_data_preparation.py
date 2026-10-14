@@ -96,11 +96,7 @@ class MarketDataRequest:
     end_trading_day: str
 
 
-async def ensure_market_data_available(
-    settings: PlatformSettings,
-    request: MarketDataRequest,
-    cancel_signal: asyncio.Event,
-) -> MarketDataPrepared:
+async def ensure_market_data_available(settings: PlatformSettings, request: MarketDataRequest, cancel_signal: asyncio.Event) -> MarketDataPrepared:
     """确保这一轮要用的行情已在本地落地; 备不齐就抛 `MarketDataUnavailableError`."""
 
     quote_hub_root = settings.quote_hub_root
@@ -155,9 +151,7 @@ async def ensure_market_data_available(
     )
 
 
-async def _read_coverage_facts(
-    quote_hub_root: Path, contract_code: str, frequency: str, start_day: str, end_day: str
-) -> quote_hub.CoverageFacts:
+async def _read_coverage_facts(quote_hub_root: Path, contract_code: str, frequency: str, start_day: str, end_day: str) -> quote_hub.CoverageFacts:
     """读判定要用的事实. 读库是阻塞 IO, 且一次开 40 MB 的库, 故整个丢进线程."""
 
     try:
@@ -181,14 +175,8 @@ def _judge(facts: quote_hub.CoverageFacts) -> CoverageVerdict:
     return judge_coverage(facts.expected_days, facts.asked_days, facts.has_bars)
 
 
-async def _refresh_and_rejudge(
-    settings: PlatformSettings,
-    contract_code: str,
-    frequency: str,
-    start_day: str,
-    end_day: str,
-    cancel_signal: asyncio.Event,
-) -> MarketDataPrepared:
+async def _refresh_and_rejudge(settings: PlatformSettings, contract_code: str, frequency: str, start_day: str,
+    end_day: str, cancel_signal: asyncio.Event) -> MarketDataPrepared:
     """下载 + 复判. 下载期间只准一个作业在跑."""
 
     async with REFRESH_LOCK:
@@ -244,13 +232,7 @@ async def _refresh_and_rejudge(
         )
 
 
-def _finish_after_refresh(
-    verdict: CoverageVerdict,
-    contract_code: str,
-    frequency: str,
-    start_day: str,
-    end_day: str,
-) -> MarketDataPrepared:
+def _finish_after_refresh(verdict: CoverageVerdict, contract_code: str, frequency: str, start_day: str, end_day: str) -> MarketDataPrepared:
     """按收口那张判定表定这一轮的出口.
 
     **退出码 0 不等于有数据** (组件在库中无数据时只记一条 warning 仍以 0 退出), 故放行与否只能由
@@ -275,12 +257,7 @@ def _finish_after_refresh(
     return MarketDataPrepared.READY
 
 
-async def _run_download(
-    command: list[str],
-    quote_hub_root: Path,
-    cancel_signal: asyncio.Event,
-    timeout_seconds: int,
-) -> quote_hub.DownloadOutcome:
+async def _run_download(command: list[str], quote_hub_root: Path, cancel_signal: asyncio.Event, timeout_seconds: int) -> quote_hub.DownloadOutcome:
     """起一次下载子进程. 起不来 (入口脚本存在但解释器跑不动一类) 也要有确切文案."""
 
     try:
@@ -294,9 +271,7 @@ async def _run_download(
         ) from error
 
 
-async def _read_refresh_universe(
-    quote_hub_root: Path, contract_code: str
-) -> list[str]:
+async def _read_refresh_universe(quote_hub_root: Path, contract_code: str) -> list[str]:
     """本次要一并写进年度文件的全部合约: 库里下过的 ∪ 本次选中的.
 
     传全集而不是单合约, 是因为组件**只把传进去的代码写进文件**——传少了就把同所其他合约从文件里
@@ -329,12 +304,7 @@ def _merge_refresh_universe(ingested_codes: list[str], contract_code: str) -> li
     return universe
 
 
-def _resolve_download_window(
-    verdict: CoverageVerdict,
-    start_day: str,
-    end_day: str,
-    calendar_last_day: str | None,
-) -> tuple[str, str] | None:
+def _resolve_download_window(verdict: CoverageVerdict, start_day: str, end_day: str, calendar_last_day: str | None) -> tuple[str, str] | None:
     """下载区间: 把**没问过的那一段**对齐到年份边界, 末端掐在组件日历末日; 无处可问时回 `None`.
 
     取的是缺失段的极值而不是用户请求的全区间 (组件对传进去的每个代码都是整段重取, 没有"已有则

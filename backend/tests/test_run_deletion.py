@@ -103,11 +103,7 @@ def write_canary(directory: Path) -> Path:
 
 
 @pytest_asyncio.fixture
-async def deletion_board(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> DeletionBoard:
+async def deletion_board(client: AsyncClient, database: PlatformDatabase, platform_settings: PlatformSettings) -> DeletionBoard:
     member = await create_signed_in_account(database, client, RUN_OWNER_USERNAME)
     outsider = await create_signed_in_account(database, client, OTHER_MEMBER_USERNAME)
     strategy = await create_strategy_record(database, member.user, STRATEGY_NAME)
@@ -137,12 +133,8 @@ async def deletion_board(
     )
 
 
-async def create_finished_run(
-    database: PlatformDatabase,
-    board: DeletionBoard,
-    status: RunStatus = RunStatus.SUCCEEDED,
-    run_id: str | None = None,
-) -> RunModel:
+async def create_finished_run(database: PlatformDatabase, board: DeletionBoard, status: RunStatus = RunStatus.SUCCEEDED,
+    run_id: str | None = None) -> RunModel:
     """再落一行运行 (不建目录), 供只关心"行还在不在"的用例加点变量.
 
     `run_id` 只在守卫用例里给: 那条"上跳一级但末段名字对得上"的越界取值要靠**运行号本身**拼出
@@ -180,9 +172,7 @@ def assert_deleted(response: Response) -> None:
     assert payload.success
 
 
-async def set_workspace_path(
-    database: PlatformDatabase, run_id: str, workspace_path: str
-) -> None:
+async def set_workspace_path(database: PlatformDatabase, run_id: str, workspace_path: str) -> None:
     """把一行的作业目录列改成给定取值, 用于造出真实提交路径写不出来的那一格."""
 
     await update_record_by_id(
@@ -193,12 +183,8 @@ async def set_workspace_path(
     )
 
 
-async def test_a_finished_run_disappears_with_its_whole_job_directory(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    deletion_board: DeletionBoard,
-) -> None:
+async def test_a_finished_run_disappears_with_its_whole_job_directory(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, deletion_board: DeletionBoard) -> None:
     """正向: 行没了、整棵目录树没了, 邻居一行一目录不少; 再删一次是 404."""
 
     target_directory = job_directory(platform_settings, deletion_board.member_run.id)
@@ -231,12 +217,8 @@ async def test_a_finished_run_disappears_with_its_whole_job_directory(
     assert repeated.status_code == 404
 
 
-async def test_another_members_run_is_not_found(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    deletion_board: DeletionBoard,
-) -> None:
+async def test_another_members_run_is_not_found(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, deletion_board: DeletionBoard) -> None:
     """越权删除与删一个不存在的运行逐字不可分辨: 同状态码、同响应体, 且什么都不动."""
 
     outsider_directory = job_directory(
@@ -261,12 +243,8 @@ async def test_another_members_run_is_not_found(
     assert outsider_directory.exists()
 
 
-async def test_a_running_run_cannot_be_deleted(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    deletion_board: DeletionBoard,
-) -> None:
+async def test_a_running_run_cannot_be_deleted(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, deletion_board: DeletionBoard) -> None:
     """运行中的轮其目录正被引擎占着, 删它要么失败要么留下半死的作业: 409 且一行一目录保留.
 
     这一行直接用库造 (`status='running'`): 调度器只认领 `queued`, 故它不会自己往下走, 断言因此
@@ -288,9 +266,7 @@ async def test_a_running_run_cannot_be_deleted(
     assert job_directory(platform_settings, running_run.id).exists()
 
 
-async def test_a_queued_run_cannot_be_deleted_while_it_waits(
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_queued_run_cannot_be_deleted_while_it_waits(platform_settings: PlatformSettings) -> None:
     """排队中的轮同样删不掉: 它下一刻就会被派发, 删行等于让一次在飞的派发落空.
 
     这一格必须**真的**处在排队态: 库里直接造一个 `queued` 行是不稳的 (调度器的看门狗 5 秒内就
@@ -340,12 +316,8 @@ async def test_a_queued_run_cannot_be_deleted_while_it_waits(
             assert finished_run.status == RunStatus.SUCCEEDED.value
 
 
-async def test_a_directory_that_is_already_gone_does_not_block_deletion(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    deletion_board: DeletionBoard,
-) -> None:
+async def test_a_directory_that_is_already_gone_does_not_block_deletion(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, deletion_board: DeletionBoard) -> None:
     """目录已不在 (手工清过盘、或上一次删到一半) 时照常删行: 删的是"运行"这个对象."""
 
     target_directory = job_directory(platform_settings, deletion_board.member_run.id)
@@ -360,11 +332,8 @@ async def test_a_directory_that_is_already_gone_does_not_block_deletion(
     assert await read_run_or_none(database, deletion_board.member_run.id) is None
 
 
-async def test_a_row_without_a_recorded_directory_is_deletable(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    deletion_board: DeletionBoard,
-) -> None:
+async def test_a_row_without_a_recorded_directory_is_deletable(client: AsyncClient, database: PlatformDatabase,
+    deletion_board: DeletionBoard) -> None:
     """目录列是空串的行同样删得掉: 它本来就没有目录可移, 不该被永久卡住."""
 
     await set_workspace_path(database, deletion_board.member_run.id, "")
@@ -377,13 +346,8 @@ async def test_a_row_without_a_recorded_directory_is_deletable(
     assert await read_run_or_none(database, deletion_board.member_run.id) is None
 
 
-async def test_a_workspace_path_outside_this_run_is_refused(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    deletion_board: DeletionBoard,
-    tmp_path: Path,
-) -> None:
+async def test_a_workspace_path_outside_this_run_is_refused(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, deletion_board: DeletionBoard, tmp_path: Path) -> None:
     """守卫的结构性证明: 六种越界取值逐个来一遍, 每次都要求失败、探针还在、行还在.
 
     探针 (金丝雀、那个嵌套目录、另一个真实运行的产物) 都**真的存在**: 守卫若少一步, 它们就会被
@@ -477,12 +441,8 @@ async def test_a_workspace_path_outside_this_run_is_refused(
         assert neighbour_directory.exists(), escape_label
 
 
-async def test_a_file_where_the_directory_belongs_is_refused(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    deletion_board: DeletionBoard,
-) -> None:
+async def test_a_file_where_the_directory_belongs_is_refused(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, deletion_board: DeletionBoard) -> None:
     """目录名上是个**文件**时删不掉: 失败路径要把异常收进 409, 而不是漏成 500.
 
     这一格真实可达: 作业目录名与 `RunId` 相同, 而盘上先有个同名文件 (手工放的、或上一次异常中断
@@ -507,12 +467,8 @@ async def test_a_file_where_the_directory_belongs_is_refused(
     )
 
 
-async def test_anonymous_callers_cannot_delete(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    deletion_board: DeletionBoard,
-) -> None:
+async def test_anonymous_callers_cannot_delete(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, deletion_board: DeletionBoard) -> None:
     """没有令牌就没有删除权, 且这一行一目录都不动."""
 
     response = await client.delete(

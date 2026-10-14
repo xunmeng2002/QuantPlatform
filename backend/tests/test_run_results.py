@@ -276,9 +276,7 @@ def write_result_database(settings: PlatformSettings, run_id: str) -> None:
 
 
 @pytest_asyncio.fixture
-async def result_board(
-    client: AsyncClient, database: PlatformDatabase, platform_settings: PlatformSettings
-) -> ResultBoard:
+async def result_board(client: AsyncClient, database: PlatformDatabase, platform_settings: PlatformSettings) -> ResultBoard:
     member = await create_user_record(database, RUN_OWNER_USERNAME)
     outsider = await create_user_record(database, OTHER_MEMBER_USERNAME)
     strategy = await create_strategy_record(database, member, STRATEGY_NAME)
@@ -332,9 +330,7 @@ def _table_path(run_id: str, table_name: str) -> str:
     return f"{RUNS_PATH}/{run_id}/tables/{table_name}"
 
 
-async def test_the_equity_series_returns_every_trading_day_in_order(
-    client: AsyncClient, result_board: ResultBoard
-) -> None:
+async def test_the_equity_series_returns_every_trading_day_in_order(client: AsyncClient, result_board: ResultBoard) -> None:
     """权益曲线的判据: 逐日一行, 按交易日升序, 首点即初始资金, 末点即最后一行.
 
     「曲线与实测数据点吻合」这条验收, 在接口这一侧的落点就是这三个字段逐行对上——图上画的
@@ -355,9 +351,7 @@ async def test_the_equity_series_returns_every_trading_day_in_order(
     assert payload["points"][0]["balance"] == 1000000.0
 
 
-async def test_the_trade_table_page_returns_its_columns_and_rows(
-    client: AsyncClient, result_board: ResultBoard
-) -> None:
+async def test_the_trade_table_page_returns_its_columns_and_rows(client: AsyncClient, result_board: ResultBoard) -> None:
     """表头由 `columns` 给出且顺序即权威顺序, 行按列序落成对象.
 
     界面上不写死列: `Orders` 有 33 列, 写死就是 33 处会漂移的真相.
@@ -380,9 +374,7 @@ async def test_the_trade_table_page_returns_its_columns_and_rows(
     assert payload["records"] == expected_table_records("Trades")
 
 
-async def test_every_whitelisted_table_is_reachable_by_its_engine_name(
-    client: AsyncClient, result_board: ResultBoard
-) -> None:
+async def test_every_whitelisted_table_is_reachable_by_its_engine_name(client: AsyncClient, result_board: ResultBoard) -> None:
     """白名单里的 5 张表都要读得出来 —— 其中 `Orders` 是 33 列那张宽表.
 
     表名漂回单数 `Order` 时这条转红 (接口 404); 名字与引擎对不上, 这里是唯一的拦路点.
@@ -402,9 +394,7 @@ async def test_every_whitelisted_table_is_reachable_by_its_engine_name(
         assert payload["records"] == expected_table_records(table_name)
 
 
-async def test_paging_advances_without_repeating_or_skipping_records(
-    client: AsyncClient, result_board: ResultBoard
-) -> None:
+async def test_paging_advances_without_repeating_or_skipping_records(client: AsyncClient, result_board: ResultBoard) -> None:
     """7 行按 3 行一页走完, 三页合起来恰好是全部行且次序不变.
 
     "不重不漏"要靠一个**唯一的次序**才成立 (排序键含并列时, SQLite 的顺序未定义), 故这里
@@ -444,9 +434,7 @@ def test_the_whitelist_pins_the_engine_table_names() -> None:
 
 
 @pytest.mark.parametrize("table_name", UNLISTED_TABLE_NAMES)
-async def test_a_table_outside_the_whitelist_is_not_found(
-    client: AsyncClient, result_board: ResultBoard, table_name: str
-) -> None:
+async def test_a_table_outside_the_whitelist_is_not_found(client: AsyncClient, result_board: ResultBoard, table_name: str) -> None:
     """未收录的表名一律 404, 且**什么都没被执行**.
 
     `BarMarketDatas` 是引擎真有、但本轮界面没开的一张表; 其余三个分别是"平台自己的库"、
@@ -471,9 +459,7 @@ async def test_a_table_outside_the_whitelist_is_not_found(
 
 
 @pytest.mark.parametrize("table_name", UNLISTED_TABLE_NAMES)
-def test_a_rejected_table_name_never_opens_the_database(
-    platform_settings: PlatformSettings, table_name: str
-) -> None:
+def test_a_rejected_table_name_never_opens_the_database(platform_settings: PlatformSettings, table_name: str) -> None:
     """表名不合法时**连库都不该打开**.
 
     白名单不只是一句 404: 打开连接这个动作本身就该在放行之后. 判据是**拿一个不存在的文件
@@ -489,13 +475,8 @@ def test_a_rejected_table_name_never_opens_the_database(
 
 
 @pytest.mark.parametrize("status", [RunStatus.QUEUED, RunStatus.RUNNING])
-async def test_a_run_that_has_not_finished_has_no_readable_results(
-    client: AsyncClient,
-    result_board: ResultBoard,
-    database: PlatformDatabase,
-    monkeypatch: pytest.MonkeyPatch,
-    status: RunStatus,
-) -> None:
+async def test_a_run_that_has_not_finished_has_no_readable_results(client: AsyncClient, result_board: ResultBoard,
+    database: PlatformDatabase, monkeypatch: pytest.MonkeyPatch, status: RunStatus) -> None:
     """运行中(排队也算)一律 409, 且**不碰结果库**.
 
     引擎写库用的 `SqliteWrapper` 没设 `busy_timeout`, 边写边读要么拿到 SQLITE_BUSY, 要么拿到
@@ -537,9 +518,7 @@ async def test_a_run_that_has_not_finished_has_no_readable_results(
     assert opened_files == []
 
 
-async def test_another_users_result_database_is_out_of_reach(
-    client: AsyncClient, result_board: ResultBoard
-) -> None:
+async def test_another_users_result_database_is_out_of_reach(client: AsyncClient, result_board: ResultBoard) -> None:
     """非归属人读别人的权益与明细一律 404 (不是 403: 403 会确认这个 id 存在)."""
 
     outsider_headers = bearer_headers(result_board.outsider_token)
@@ -555,9 +534,7 @@ async def test_another_users_result_database_is_out_of_reach(
     assert table_response.status_code == 404
 
 
-async def test_result_reads_reject_an_anonymous_caller(
-    client: AsyncClient, result_board: ResultBoard
-) -> None:
+async def test_result_reads_reject_an_anonymous_caller(client: AsyncClient, result_board: ResultBoard) -> None:
     """匿名访问两条端点都是 401 (缺令牌时由 Starlette 层挡下, 响应体里没有 detail)."""
 
     equity_response = await client.get(_equity_path(result_board.member_run.id))
@@ -567,9 +544,7 @@ async def test_result_reads_reject_an_anonymous_caller(
     assert table_response.status_code == 401
 
 
-async def test_a_run_without_a_result_database_is_not_found(
-    client: AsyncClient, result_board: ResultBoard, database: PlatformDatabase
-) -> None:
+async def test_a_run_without_a_result_database_is_not_found(client: AsyncClient, result_board: ResultBoard, database: PlatformDatabase) -> None:
     """`DbPath` 为空 (失败的轮没写出 `result.json`) 时 404 而不是拿作业目录当库打开.
 
     空串拼出来的路径**就是作业目录本身**, 那种"打开"会以另一种面目失败.
@@ -591,9 +566,7 @@ async def test_a_run_without_a_result_database_is_not_found(
     assert response.json()["detail"] == RESULT_DATABASE_MISSING_MESSAGE
 
 
-async def test_a_missing_database_file_is_not_found(
-    client: AsyncClient, result_board: ResultBoard, database: PlatformDatabase
-) -> None:
+async def test_a_missing_database_file_is_not_found(client: AsyncClient, result_board: ResultBoard, database: PlatformDatabase) -> None:
     """路径合法但文件不在 (被人工清掉) → 404, 不是 500."""
 
     await update_record_by_id(
@@ -613,12 +586,8 @@ async def test_a_missing_database_file_is_not_found(
 
 
 @pytest.mark.parametrize("outside_template", OUTSIDE_JOB_DIRECTORY_PATHS)
-async def test_a_database_path_outside_the_job_directory_is_not_found(
-    client: AsyncClient,
-    result_board: ResultBoard,
-    database: PlatformDatabase,
-    outside_template: str,
-) -> None:
+async def test_a_database_path_outside_the_job_directory_is_not_found(client: AsyncClient, result_board: ResultBoard,
+    database: PlatformDatabase, outside_template: str) -> None:
     """`DbPath` 可以指向作业目录之外, 那种路径一律 404.
 
     这不是假想: `DbPath` 由引擎写进 `result.json`, 而策略是任意 Python 且与引擎同进程——
@@ -646,9 +615,7 @@ async def test_a_database_path_outside_the_job_directory_is_not_found(
     assert response.json()["detail"] == RESULT_DATABASE_MISSING_MESSAGE
 
 
-async def test_a_run_without_a_job_directory_is_not_found(
-    client: AsyncClient, result_board: ResultBoard, database: PlatformDatabase
-) -> None:
+async def test_a_run_without_a_job_directory_is_not_found(client: AsyncClient, result_board: ResultBoard, database: PlatformDatabase) -> None:
     """作业目录被清掉时也是 404: 结果库在目录里, 目录不在就无从谈起."""
 
     await update_record_by_id(
@@ -669,9 +636,7 @@ async def test_a_run_without_a_job_directory_is_not_found(
 @pytest.mark.parametrize(
     "params", [{"offset": -1}, {"limit": 0}, {"limit": 101}, {"limit": "many"}]
 )
-async def test_invalid_paging_parameters_are_rejected(
-    client: AsyncClient, result_board: ResultBoard, params: dict[str, object]
-) -> None:
+async def test_invalid_paging_parameters_are_rejected(client: AsyncClient, result_board: ResultBoard, params: dict[str, object]) -> None:
     """分页参数越界或不是整数一律 422 (上限与房规的 `MAXIMUM_PAGE_SIZE` 同值)."""
 
     response = await client.get(
@@ -683,9 +648,7 @@ async def test_invalid_paging_parameters_are_rejected(
     assert response.status_code == 422
 
 
-async def test_the_result_database_opens_read_only(
-    result_board: ResultBoard, platform_settings: PlatformSettings
-) -> None:
+async def test_the_result_database_opens_read_only(result_board: ResultBoard, platform_settings: PlatformSettings) -> None:
     """连接是只读的, 由 SQLite 自己强制.
 
     把"只读"钉成断言而不是注释: 写操作必须报 `attempt to write a readonly database`.

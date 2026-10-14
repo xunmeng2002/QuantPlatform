@@ -123,12 +123,8 @@ ENGINE_VERSION_TEXT = "build-2026.09.27"
 RESULT_LONG_TAIL_KEY = "MissingRateKeys"
 
 
-async def test_a_missing_rate_key_array_is_not_in_the_response_but_is_on_disk(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_missing_rate_key_array_is_not_in_the_response_but_is_on_disk(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """`MissingRateKeys` 是长尾数组: 留在结果文件里, 不进响应体.
 
     它按需读取 (详情页展开时才要), 塞进行宽会让每一行都拖着一条长度不可控的数组. 两面都断言:
@@ -161,12 +157,8 @@ async def test_a_missing_rate_key_array_is_not_in_the_response_but_is_on_disk(
     assert len(detail.json()["error_msg"]) <= MAXIMUM_ERROR_MESSAGE_LENGTH
 
 
-async def test_submitting_someone_elses_strategy_is_a_404_with_no_new_row(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_submitting_someone_elses_strategy_is_a_404_with_no_new_row(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """非归属人提交 → 404, 且库里不留行.
 
     404 而不是 403: 跨租户一律"不存在", 403 会说漏"这个 id 是真的". 同时断言库里没有新行——
@@ -192,13 +184,9 @@ async def test_submitting_someone_elses_strategy_is_a_404_with_no_new_row(
 @pytest.mark.parametrize(
     "permission_type", [GrantPermission.READ, GrantPermission.RUN]
 )
-async def test_a_grantee_may_submit_regardless_of_the_grant_permission(
-    permission_type: GrantPermission,
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_grantee_may_submit_regardless_of_the_grant_permission(permission_type: GrantPermission,
+    client: AsyncClient, database: PlatformDatabase, platform_settings: PlatformSettings,
+    run_owner: SignedInAccount) -> None:
     """被授权人可提交, 且 `read` 与 `run` **两档一样**可提交.
 
     两档参数化是这条用例的全部意义: 用户拍板的是"不区分 read/run, 授权即可跑". 只测一档的话,
@@ -229,12 +217,8 @@ async def test_a_grantee_may_submit_regardless_of_the_grant_permission(
     assert submitted.user_id == grantee.user_id
 
 
-async def test_a_public_strategy_is_submittable_by_a_stranger(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_public_strategy_is_submittable_by_a_stranger(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """`public` 隐含可跑: 一条授权行都没有的人也提交得了.
 
     这是一次有意的权限放宽, 故值得钉住: 若哪天有人"顺手"给提交补一道授权表检查, public 策略会
@@ -256,12 +240,8 @@ async def test_a_public_strategy_is_submittable_by_a_stranger(
     assert submitted.status == RunStatus.QUEUED
 
 
-async def test_a_match_mode_the_platform_cannot_submit_is_rejected(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_match_mode_the_platform_cannot_submit_is_rejected(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """提交 Tick → 400, 库里无新行, 运行根下无新目录.
 
     平台只开 Bar: Tick 侧引擎有三档撮合方式 (OrderBook / LastPrice / OppositePrice), 而平台的
@@ -287,12 +267,8 @@ async def test_a_match_mode_the_platform_cannot_submit_is_rejected(
     assert run_directory_names(platform_settings) == directories_before
 
 
-async def test_a_blank_bar_period_is_rejected(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_blank_bar_period_is_rejected(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """`bar_period` 留空 → 400.
 
     三个运行级字段里只有它是必填的: 合约可以留空 (那一轮不指名标的), 而周期决定策略收到多粗的
@@ -318,12 +294,8 @@ async def test_a_blank_bar_period_is_rejected(
     assert await count_run_rows(database) == rows_before
 
 
-async def test_a_bar_period_outside_the_subscription_list_is_rejected(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_bar_period_outside_the_subscription_list_is_rejected(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """`7m` 这种非 5m 整数倍的周期 → 400, 且文案里带上 `bar_period` 这个字段名.
 
     它必须**在这里**被拦下: 引擎装载期也会拒 (它聚不出 7 分钟), 但那时整轮已经起过进程、详情报的
@@ -346,12 +318,8 @@ async def test_a_bar_period_outside_the_subscription_list_is_rejected(
     assert await count_run_rows(database) == rows_before
 
 
-async def test_an_undeclared_parameter_is_rejected(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_an_undeclared_parameter_is_rejected(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """提交该版本配置里没有的键 → 400, 文案列出键名.
 
     键集由**上传的那份配置 JSON**固定, 提交只有"改值"这一种权利. 静默收下等于让用户以为参数生效
@@ -381,12 +349,8 @@ async def test_an_undeclared_parameter_is_rejected(
     assert await count_run_rows(database) == rows_before
 
 
-async def test_a_parameter_of_the_platform_is_rejected_before_the_unknown_key_check(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_parameter_of_the_platform_is_rejected_before_the_unknown_key_check(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """参数里写 `BarPreces` → 400, 报的是"别写它"而不是"没有这个键".
 
     两种说法在这份模板上都成立 (模板里确实没有这个键), 故**报哪一句**是要紧的: 说"键不存在", 用户
@@ -414,12 +378,8 @@ async def test_a_parameter_of_the_platform_is_rejected_before_the_unknown_key_ch
     assert await count_run_rows(database) == rows_before
 
 
-async def test_a_parameter_value_is_written_through_without_judgement(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_parameter_value_is_written_through_without_judgement(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """参数**取值**一律不判: 桩不认识的取值照旧 201, 且逐字进策略配置.
 
     这是用户拍板的取舍 —— 取值范围、类型、可选项全都不看, 参数合法性由策略自己守. 故这里断的是
@@ -456,12 +416,8 @@ async def test_a_parameter_value_is_written_through_without_judgement(
     assert failed_run.error_msg == HOST_STARTUP_FAILURE_MESSAGE
 
 
-async def test_the_template_values_are_written_verbatim(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_the_template_values_are_written_verbatim(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """一个参数都不改的一轮: 策略读到的就是**上传那份文件里写的值**.
 
     这是"上传的配置 JSON 即模板"在提交路径上的直接体现: 平台不替策略填默认值, 它只是把那份文件
@@ -487,11 +443,8 @@ async def test_the_template_values_are_written_verbatim(
     assert stored_configuration[FLOOD_BYTES_PARAMETER_KEY] == DEFAULT_FLOOD_BYTES_VALUE
 
 
-async def test_a_strategy_without_any_version_cannot_be_submitted(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_strategy_without_any_version_cannot_be_submitted(client: AsyncClient, database: PlatformDatabase,
+    run_owner: SignedInAccount) -> None:
     """还没有版本的策略 → 400, 而不是 500.
 
     这是"用户看得到但平台给不出答案"的一格: 策略建好了、源码还没传. 报 400 并说清原因, 否则
@@ -510,12 +463,8 @@ async def test_a_strategy_without_any_version_cannot_be_submitted(
     assert await count_run_rows(database) == rows_before
 
 
-async def test_a_version_of_another_strategy_is_rejected(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_version_of_another_strategy_is_rejected(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """指定的版本不属于该策略 → 400.
 
     不校验归属的话, 一次提交就能让甲策略的作业跑乙策略的代码——而授权是按策略发的. 用的那份版本
@@ -544,11 +493,7 @@ async def test_a_version_of_another_strategy_is_rejected(
     assert await count_run_rows(database) == rows_before
 
 
-async def test_a_pre_change_version_cannot_be_submitted(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_pre_change_version_cannot_be_submitted(client: AsyncClient, database: PlatformDatabase, run_owner: SignedInAccount) -> None:
     """改形态之前落的版本 → 400 说"重新上传该版本", 而不是 500.
 
     那种行没有配置模板 (`ConfigurationJson` 是 NULL), 于是平台压根渲染不出策略配置. 它是**最可能
@@ -575,12 +520,8 @@ async def test_a_pre_change_version_cannot_be_submitted(
     assert await count_run_rows(database) == rows_before
 
 
-async def test_a_contract_without_any_rate_rule_is_rejected_naming_both_directions(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_contract_without_any_rate_rule_is_rejected_naming_both_directions(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """三级规则一条都没有时提交 → 400, 库里无新行, 运行根下无新目录.
 
     这是把"静默按 0 计费"变成"提交被拦"的那一步: 引擎查不到费率不报错, 它照跑完, 只把一个计数
@@ -618,12 +559,8 @@ async def test_a_contract_without_any_rate_rule_is_rejected_naming_both_directio
     assert staging_seed_database_names(platform_settings) == set()
 
 
-async def test_a_contract_missing_only_one_direction_names_only_that_direction(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_contract_missing_only_one_direction_names_only_that_direction(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """只有买那一侧缺时, 文案里只有买 —— 方向不回退, 故缺口必须点得准.
 
     两句都报的实现在这里照样通过 (它报的是超集), 故断言用**相等**: "卖"那一侧明明有费率却被报
@@ -648,12 +585,8 @@ async def test_a_contract_missing_only_one_direction_names_only_that_direction(
     )
 
 
-async def test_adding_the_missing_rate_lets_the_same_submission_through(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_adding_the_missing_rate_lets_the_same_submission_through(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """拦下来之后按文案补一条交易所级费率, 同一次提交就过了.
 
     这一条与上面那条合起来才是"拦得住、也解得开": 只验拦的话, 一个把**所有**提交都拦掉的实现
@@ -674,12 +607,8 @@ async def test_adding_the_missing_rate_lets_the_same_submission_through(
     assert submitted.status == RunStatus.QUEUED
 
 
-async def test_a_single_both_directions_rule_is_enough_to_submit(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_single_both_directions_rule_is_enough_to_submit(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """整组只录**一条双向**的费率 → 提交照样过.
 
     双向那一条管的是买卖两侧 (`Direction = -1`, 展开时摊成 0 与 1 两行), 故"缺费率"那道拦截不该
@@ -702,12 +631,8 @@ async def test_a_single_both_directions_rule_is_enough_to_submit(
     assert submitted.status == RunStatus.QUEUED
 
 
-async def test_a_commission_group_that_does_not_exist_is_rejected(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_commission_group_that_does_not_exist_is_rejected(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """选一个没登记过的组 → 400, 库里无新行, 运行根下无新目录.
 
     引擎对一个不存在的组**不报错**: 它拿那个组号去费率哈希表里查, 一条都不命中, 于是照跑完一场
@@ -740,12 +665,8 @@ async def test_a_commission_group_that_does_not_exist_is_rejected(
     assert run_directory_names(platform_settings) == set()
 
 
-async def test_an_unknown_group_is_reported_before_the_missing_rates(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_an_unknown_group_is_reported_before_the_missing_rates(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """组不存在**且**该合约没有费率时, 报的是"组不存在".
 
     两句话都成立时先说哪一句, 决定了用户接下来去做什么: 说"这个组下没有 600519 的费率", 用户会去
@@ -773,12 +694,8 @@ async def test_an_unknown_group_is_reported_before_the_missing_rates(
     )
 
 
-async def test_a_negative_commission_group_id_is_rejected(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_negative_commission_group_id_is_rejected(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """负数组号 → 400, 且不去查库 —— 它是取值形状的问题, 不是"库里有没有"的问题."""
 
     runnable = await create_runnable_strategy(
@@ -799,12 +716,8 @@ async def test_a_negative_commission_group_id_is_rejected(
     assert await count_run_rows(database) == rows_before
 
 
-async def test_the_rates_of_another_group_do_not_count_for_this_run(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_the_rates_of_another_group_do_not_count_for_this_run(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """2 号组有费率、1 号组没有时, 用 1 号组提交 → 400, 且文案点的是 1 号组.
 
     这条是把前一批留下的常量彻底拿掉之后才可能成立的局面: 从前组号写死, "别的组"这种取值在库里
@@ -837,12 +750,8 @@ async def test_the_rates_of_another_group_do_not_count_for_this_run(
     )
 
 
-async def test_a_run_freezes_the_commission_group_it_was_submitted_with(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_run_freezes_the_commission_group_it_was_submitted_with(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """用 2 号组提交 (它才有费率) → 201, 且冻结进这一轮配置的就是 2.
 
     断言落在**落库的引擎配置文本**上而不是响应体上: 起进程时引擎读的是那一份, 组号若不在这里,
@@ -873,9 +782,7 @@ async def test_a_run_freezes_the_commission_group_it_was_submitted_with(
     )
 
 
-async def test_a_missing_market_data_root_is_rejected_pointing_at_the_input(
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_missing_market_data_root_is_rejected_pointing_at_the_input(platform_settings: PlatformSettings) -> None:
     """行情根不在位 → 400, 且点名缺的是哪一项 (不带路径).
 
     这两项缺失是**确定性**失败: 收下它只会让用户等一轮, 再收到一个与他的输入无关的 `failed`.
@@ -894,9 +801,7 @@ async def test_a_missing_market_data_root_is_rejected_pointing_at_the_input(
     assert_rejected(response, MARKET_DATA_MISSING_MESSAGE)
 
 
-async def test_a_missing_session_file_is_rejected_pointing_at_the_input(
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_missing_session_file_is_rejected_pointing_at_the_input(platform_settings: PlatformSettings) -> None:
     """会话表文件不在位 → 400, 且点名缺的是哪一项.
 
     与行情根分开两条: 文案若把两者写成同一句, "点名缺哪一项"这条要求就落空了.
@@ -934,9 +839,7 @@ async def submit_under_settings(settings: PlatformSettings) -> Response:
         )
 
 
-async def test_a_submitted_run_is_readable_from_another_session(
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_submitted_run_is_readable_from_another_session(platform_settings: PlatformSettings) -> None:
     """POST 返回时行已经落库且是 `queued`——另一个会话立刻读得到.
 
     只做 flush 不做 commit 的实现会让这一读落空: 行的可见性出不了请求所在的会话, 而调度器在
@@ -982,12 +885,8 @@ async def test_a_submitted_run_is_readable_from_another_session(
         assert stored_run.workspace_path == stored_run.id
 
 
-async def test_a_submitted_run_freezes_the_engine_version_it_will_launch(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_submitted_run_freezes_the_engine_version_it_will_launch(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """提交那一刻就把"用哪个引擎跑"冻进行里.
 
     不冻的话, 引擎原地换版之后历史轮与新轮在库里长得一模一样; `StrategyVersionId` 那条"供逐字
@@ -1018,12 +917,8 @@ async def test_a_submitted_run_freezes_the_engine_version_it_will_launch(
     assert stored_run.engine_version == ENGINE_VERSION_TEXT
 
 
-async def test_submitting_without_a_token_is_rejected(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_submitting_without_a_token_is_rejected(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """无令牌 → 401, 且库里无新行."""
 
     runnable = await create_runnable_strategy(

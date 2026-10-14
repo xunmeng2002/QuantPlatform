@@ -114,9 +114,7 @@ class TemplateBoard:
     other_strategy: StrategyModel
 
 
-def build_template_request(
-    strategy_id: str, name: str = TEMPLATE_NAME, **overrides: object
-) -> dict[str, object]:
+def build_template_request(strategy_id: str, name: str = TEMPLATE_NAME, **overrides: object) -> dict[str, object]:
     """一份合法的存模板请求体, 从**提交请求体**派生.
 
     派生而不另抄一遍: 两份请求体的取值字段是同一份产品契约, 抄一遍就等于在测试里多留一份会与
@@ -131,12 +129,7 @@ def build_template_request(
     return request_body
 
 
-async def post_template(
-    client: AsyncClient,
-    token: str | None,
-    strategy_id: str,
-    request_body: dict[str, object],
-):
+async def post_template(client: AsyncClient, token: str | None, strategy_id: str, request_body: dict[str, object]):
     """把一份存模板请求发出去, 原样返回响应; `token` 可为 None."""
 
     headers = bearer_headers(token) if token is not None else {}
@@ -146,13 +139,7 @@ async def post_template(
     )
 
 
-async def create_template(
-    client: AsyncClient,
-    token: str,
-    strategy_id: str,
-    name: str = TEMPLATE_NAME,
-    **overrides: object,
-) -> dict[str, object]:
+async def create_template(client: AsyncClient, token: str, strategy_id: str, name: str = TEMPLATE_NAME, **overrides: object) -> dict[str, object]:
     """经接口存一个模板, 断言 201 再解出响应体."""
 
     response = await post_template(
@@ -167,9 +154,7 @@ async def create_template(
     return response.json()
 
 
-async def list_templates(
-    client: AsyncClient, token: str, strategy_id: str
-) -> list[dict[str, object]]:
+async def list_templates(client: AsyncClient, token: str, strategy_id: str) -> list[dict[str, object]]:
     """列出某策略下本人的模板, 非 200 直接失败."""
 
     response = await client.get(
@@ -181,9 +166,7 @@ async def list_templates(
     return response.json()["templates"]
 
 
-async def read_template_rows(
-    database: PlatformDatabase, strategy_id: str
-) -> list[RunTemplateModel]:
+async def read_template_rows(database: PlatformDatabase, strategy_id: str) -> list[RunTemplateModel]:
     """直接从库里读模板行: 用例关心的是**入库的列** (比如 `ParamsJson` 里到底存了什么)."""
 
     async with database.session_scope() as session:
@@ -194,9 +177,7 @@ async def read_template_rows(
         return list(rows.scalars().all())
 
 
-async def rename_template(
-    client: AsyncClient, token: str, strategy_id: str, template_id: str, name: str
-):
+async def rename_template(client: AsyncClient, token: str, strategy_id: str, template_id: str, name: str):
     return await client.patch(
         template_item_path(strategy_id, template_id),
         json={"name": name},
@@ -204,17 +185,13 @@ async def rename_template(
     )
 
 
-async def delete_template(
-    client: AsyncClient, token: str, strategy_id: str, template_id: str
-):
+async def delete_template(client: AsyncClient, token: str, strategy_id: str, template_id: str):
     return await client.delete(
         template_item_path(strategy_id, template_id), headers=bearer_headers(token)
     )
 
 
-async def create_commission_group(
-    client: AsyncClient, admin_token: str, commission_group_id: int
-) -> dict[str, object]:
+async def create_commission_group(client: AsyncClient, admin_token: str, commission_group_id: int) -> dict[str, object]:
     """以管理员身份登记一个手续费组, 原样返回那一行 (含主键 `id`).
 
     模板与组是**两张表的字段级耦合** (模板那一列存的是组号, 没有外键), 故这组用例必须自己把组
@@ -235,9 +212,7 @@ async def create_commission_group(
     return response.json()
 
 
-async def delete_commission_group(
-    client: AsyncClient, admin_token: str, commission_group_record_id: str
-):
+async def delete_commission_group(client: AsyncClient, admin_token: str, commission_group_record_id: str):
     return await client.delete(
         f"{COMMISSION_GROUPS_PATH}/{commission_group_record_id}",
         headers=bearer_headers(admin_token),
@@ -253,9 +228,7 @@ async def publish_strategy(database: PlatformDatabase, strategy_id: str) -> None
         await session.commit()
 
 
-async def soft_delete_strategy(
-    client: AsyncClient, token: str, strategy_id: str
-) -> None:
+async def soft_delete_strategy(client: AsyncClient, token: str, strategy_id: str) -> None:
     response = await client.delete(
         f"{STRATEGIES_PATH}/{strategy_id}", headers=bearer_headers(token)
     )
@@ -263,13 +236,7 @@ async def soft_delete_strategy(
     assert response.status_code == 200, response.text
 
 
-async def persist_template_rows(
-    database: PlatformDatabase,
-    owner_id: str,
-    strategy_id: str,
-    count: int,
-    params_json: str = "{}",
-) -> None:
+async def persist_template_rows(database: PlatformDatabase, owner_id: str, strategy_id: str, count: int, params_json: str = "{}") -> None:
     """直落库造若干行模板, 供配额与坏数据两条用例用.
 
     不走接口造: 五十次 HTTP 往返只为把配额喂满, 而配额那道闸判的是库里**已有多少行**, 与它们
@@ -297,11 +264,7 @@ async def persist_template_rows(
 
 
 @pytest_asyncio.fixture
-async def template_board(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> TemplateBoard:
+async def template_board(client: AsyncClient, database: PlatformDatabase, platform_settings: PlatformSettings) -> TemplateBoard:
     """两个已登录账号, 三份可提交的桩策略."""
 
     owner = await create_signed_in_account(database, client, OWNER_USERNAME)
@@ -325,9 +288,7 @@ async def template_board(
     )
 
 
-async def test_a_saved_template_comes_back_whole(
-    client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard
-) -> None:
+async def test_a_saved_template_comes_back_whole(client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard) -> None:
     """正向全链: 存下 → 读回 → 改名 → 删掉 → 再读什么都没有."""
 
     board = template_board
@@ -372,9 +333,8 @@ async def test_a_saved_template_comes_back_whole(
     assert removed_again.status_code == 404
 
 
-async def test_submitted_parameters_are_stored_in_the_engine_value_form(
-    client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard
-) -> None:
+async def test_submitted_parameters_are_stored_in_the_engine_value_form(client: AsyncClient, database: PlatformDatabase,
+    template_board: TemplateBoard) -> None:
     """`ParamsJson` 与 `Runs.ParamsJson` 同形同义: **只存用户改过的键**、原类型, 不含运行级字段.
 
     不含运行级字段是关键: 那三个在这张表上各有具名列, 再写进参数块就有了两份真相, 而两份真相迟早
@@ -409,9 +369,7 @@ async def test_submitted_parameters_are_stored_in_the_engine_value_form(
     assert DEFAULT_BAR_PERIOD not in stored_parameters.values()
 
 
-async def test_a_run_field_override_reaches_the_named_column(
-    client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard
-) -> None:
+async def test_a_run_field_override_reaches_the_named_column(client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard) -> None:
     """改一个运行级取值, 落到的是它自己的列——不是参数块."""
 
     board = template_board
@@ -431,9 +389,8 @@ async def test_a_run_field_override_reaches_the_named_column(
     assert DEFAULT_BAR_PERIOD not in json.loads(rows[0].params_json).values()
 
 
-async def test_a_saved_template_keeps_the_chosen_commission_group(
-    client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard
-) -> None:
+async def test_a_saved_template_keeps_the_chosen_commission_group(client: AsyncClient, database: PlatformDatabase,
+    template_board: TemplateBoard) -> None:
     """所选的手续费组存进自己那一列, 读回时原样带出, 且不进参数块.
 
     组号与单根 K 线周期同路: 它是**运行级字段**, 决定这一轮按哪一套费率算钱 —— 存进 `ParamsJson`
@@ -460,9 +417,7 @@ async def test_a_saved_template_keeps_the_chosen_commission_group(
     assert SECOND_COMMISSION_GROUP_ID not in json.loads(rows[0].params_json).values()
 
 
-async def test_a_template_pointing_at_an_unknown_commission_group_is_rejected(
-    client: AsyncClient, template_board: TemplateBoard
-) -> None:
+async def test_a_template_pointing_at_an_unknown_commission_group_is_rejected(client: AsyncClient, template_board: TemplateBoard) -> None:
     """模板引用一个没登记的组 → 400, 文案与提交侧同一句.
 
     放它存下的话, 这份模板套用出来的每一次提交都会被同一句话拒掉 —— 用户在存模板那一刻什么提示
@@ -488,9 +443,8 @@ async def test_a_template_pointing_at_an_unknown_commission_group_is_rejected(
     )
 
 
-async def test_deleting_a_commission_group_a_template_points_at_is_rejected(
-    client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard
-) -> None:
+async def test_deleting_a_commission_group_a_template_points_at_is_rejected(client: AsyncClient,
+    database: PlatformDatabase, template_board: TemplateBoard) -> None:
     """被模板引用的组删不掉, 报出被几个模板引用; 那些模板删掉之后同一个组就删得动.
 
     模板那一列没有外键指向组表, 故删组在库层面不会报错 —— 拦不拦纯是策略: 放过去等于把一批"存得
@@ -534,9 +488,7 @@ async def test_deleting_a_commission_group_a_template_points_at_is_rejected(
     assert await read_template_rows(database, board.strategy.id) == []
 
 
-async def test_the_same_name_may_live_under_two_strategies(
-    client: AsyncClient, template_board: TemplateBoard
-) -> None:
+async def test_the_same_name_may_live_under_two_strategies(client: AsyncClient, template_board: TemplateBoard) -> None:
     """唯一键含 `StrategyId`: 同一个人在两个策略下各存一个同名模板是正常的."""
 
     board = template_board
@@ -550,9 +502,8 @@ async def test_the_same_name_may_live_under_two_strategies(
     assert first["name"] == second["name"] == TEMPLATE_NAME
 
 
-async def test_a_repeated_name_under_one_strategy_is_a_conflict(
-    client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard
-) -> None:
+async def test_a_repeated_name_under_one_strategy_is_a_conflict(client: AsyncClient, database: PlatformDatabase,
+    template_board: TemplateBoard) -> None:
     """同一策略下重名即 409, 且以唯一约束为准——被拒的那次没在库里留东西."""
 
     board = template_board
@@ -568,9 +519,7 @@ async def test_a_repeated_name_under_one_strategy_is_a_conflict(
     assert len(await read_template_rows(database, strategy_id)) == 1
 
 
-async def test_a_whitespace_only_name_is_rejected(
-    client: AsyncClient, template_board: TemplateBoard
-) -> None:
+async def test_a_whitespace_only_name_is_rejected(client: AsyncClient, template_board: TemplateBoard) -> None:
     """全是空白的名字拒在 400: pydantic 的 `min_length` 拦不住它 (`"  "` 长度为 2)."""
 
     board = template_board
@@ -585,9 +534,7 @@ async def test_a_whitespace_only_name_is_rejected(
     assert response.status_code == 400, response.text
 
 
-async def test_a_trailing_blank_is_stripped_rather_than_stored(
-    client: AsyncClient, template_board: TemplateBoard
-) -> None:
+async def test_a_trailing_blank_is_stripped_rather_than_stored(client: AsyncClient, template_board: TemplateBoard) -> None:
     """名字先去空白: 不去的话 `默认参数` 与 `默认参数 ` 会各占一个, 而界面上看是同一个."""
 
     board = template_board
@@ -606,9 +553,7 @@ async def test_a_trailing_blank_is_stripped_rather_than_stored(
     assert response.status_code == 409, response.text
 
 
-async def test_the_run_field_and_parameter_judgements_are_the_submission_ones(
-    client: AsyncClient, template_board: TemplateBoard
-) -> None:
+async def test_the_run_field_and_parameter_judgements_are_the_submission_ones(client: AsyncClient, template_board: TemplateBoard) -> None:
     """逐条拿提交侧的文案去对: 模式 / 必填 / 交易日 / 倒置 / 资金 / 未声明参数."""
 
     board = template_board
@@ -684,9 +629,7 @@ async def test_the_run_field_and_parameter_judgements_are_the_submission_ones(
     )
 
 
-async def test_a_parameter_key_of_the_platform_is_rejected(
-    client: AsyncClient, template_board: TemplateBoard
-) -> None:
+async def test_a_parameter_key_of_the_platform_is_rejected(client: AsyncClient, template_board: TemplateBoard) -> None:
     """参数里写平台那三个键 → 400, 且文案说的是"别写它", 不是"没有这个键".
 
     两者在模板里通常都成立 (模板一般不写那三个), 故**报哪一句**是要紧的: 说"键不存在", 用户的
@@ -710,9 +653,7 @@ async def test_a_parameter_key_of_the_platform_is_rejected(
     )
 
 
-async def test_another_tenant_cannot_read_or_write(
-    client: AsyncClient, template_board: TemplateBoard
-) -> None:
+async def test_another_tenant_cannot_read_or_write(client: AsyncClient, template_board: TemplateBoard) -> None:
     """跨租户一律 404: 取不到策略是 404, 拿得到模板 id 但不是自己的也是 404."""
 
     board = template_board
@@ -752,9 +693,8 @@ async def test_another_tenant_cannot_read_or_write(
     ).status_code == 404
 
 
-async def test_a_visible_strategy_lets_you_keep_your_own_templates(
-    client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard
-) -> None:
+async def test_a_visible_strategy_lets_you_keep_your_own_templates(client: AsyncClient, database: PlatformDatabase,
+    template_board: TemplateBoard) -> None:
     """共享/公开策略下也能存模板, 但列出来的**只有自己的那几份**."""
 
     board = template_board
@@ -777,9 +717,7 @@ async def test_a_visible_strategy_lets_you_keep_your_own_templates(
     assert owner_templates[0]["id"] != mine["id"]
 
 
-async def test_templates_stay_manageable_after_the_strategy_goes_away(
-    client: AsyncClient, template_board: TemplateBoard
-) -> None:
+async def test_templates_stay_manageable_after_the_strategy_goes_away(client: AsyncClient, template_board: TemplateBoard) -> None:
     """策略被软删之后, 我自己的模板仍读得到、改得动、删得掉.
 
     这条是"归属判定只按归属人"的可测形式: 若改名与删除也要求策略可见, 这些模板会在库里留成
@@ -812,9 +750,7 @@ async def test_templates_stay_manageable_after_the_strategy_goes_away(
     assert removed.status_code == 200, removed.text
 
 
-async def test_the_fifty_first_template_is_rejected(
-    client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard
-) -> None:
+async def test_the_fifty_first_template_is_rejected(client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard) -> None:
     """护栏: 单个策略下第 51 个模板 400, 而第 50 个仍能存下."""
 
     board = template_board
@@ -843,9 +779,7 @@ async def test_the_fifty_first_template_is_rejected(
     )
 
 
-async def test_the_quota_is_counted_per_strategy(
-    client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard
-) -> None:
+async def test_the_quota_is_counted_per_strategy(client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard) -> None:
     """配额按 (归属人, 策略) 算: 一个策略满了不影响另一个策略."""
 
     board = template_board
@@ -866,9 +800,8 @@ async def test_the_quota_is_counted_per_strategy(
     )["name"] == TEMPLATE_NAME
 
 
-async def test_a_corrupt_parameter_blob_degrades_to_an_empty_set(
-    client: AsyncClient, database: PlatformDatabase, template_board: TemplateBoard
-) -> None:
+async def test_a_corrupt_parameter_blob_degrades_to_an_empty_set(client: AsyncClient, database: PlatformDatabase,
+    template_board: TemplateBoard) -> None:
     """`ParamsJson` 读不动时只降级成空参数集, 不 500 也不让整页报错."""
 
     board = template_board
@@ -885,9 +818,7 @@ async def test_a_corrupt_parameter_blob_degrades_to_an_empty_set(
     assert listed[0]["name"] == f"{TEMPLATE_NAME}-0"
 
 
-async def test_an_anonymous_caller_is_rejected(
-    client: AsyncClient, template_board: TemplateBoard
-) -> None:
+async def test_an_anonymous_caller_is_rejected(client: AsyncClient, template_board: TemplateBoard) -> None:
     """不带令牌即 401——四个端点一个都不例外."""
 
     strategy_id = template_board.strategy.id

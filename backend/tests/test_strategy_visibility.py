@@ -50,9 +50,7 @@ class AccountPair:
 
 
 @pytest_asyncio.fixture
-async def owner_and_viewer(
-    database: PlatformDatabase, client: AsyncClient
-) -> AccountPair:
+async def owner_and_viewer(database: PlatformDatabase, client: AsyncClient) -> AccountPair:
     """归属人与旁观者两个账号."""
 
     return AccountPair(
@@ -61,11 +59,7 @@ async def owner_and_viewer(
     )
 
 
-async def test_public_strategy_is_visible_to_another_account(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    owner_and_viewer: AccountPair,
-) -> None:
+async def test_public_strategy_is_visible_to_another_account(client: AsyncClient, database: PlatformDatabase, owner_and_viewer: AccountPair) -> None:
     strategy = await create_strategy_record(
         database,
         owner_and_viewer.owner.user,
@@ -79,11 +73,7 @@ async def test_public_strategy_is_visible_to_another_account(
     assert await read_strategy_status_code(client, viewer_token, strategy.id) == 200
 
 
-async def test_shared_strategy_with_grant_is_visible(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    owner_and_viewer: AccountPair,
-) -> None:
+async def test_shared_strategy_with_grant_is_visible(client: AsyncClient, database: PlatformDatabase, owner_and_viewer: AccountPair) -> None:
     strategy = await create_strategy_record(
         database,
         owner_and_viewer.owner.user,
@@ -103,11 +93,7 @@ async def test_shared_strategy_with_grant_is_visible(
     assert await read_strategy_status_code(client, viewer_token, strategy.id) == 200
 
 
-async def test_shared_strategy_without_grant_is_hidden(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    owner_and_viewer: AccountPair,
-) -> None:
+async def test_shared_strategy_without_grant_is_hidden(client: AsyncClient, database: PlatformDatabase, owner_and_viewer: AccountPair) -> None:
     strategy = await create_strategy_record(
         database,
         owner_and_viewer.owner.user,
@@ -121,11 +107,8 @@ async def test_shared_strategy_without_grant_is_hidden(
     assert await read_strategy_status_code(client, viewer_token, strategy.id) == 404
 
 
-async def test_private_strategy_stays_hidden_even_when_granted(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    owner_and_viewer: AccountPair,
-) -> None:
+async def test_private_strategy_stays_hidden_even_when_granted(client: AsyncClient, database: PlatformDatabase,
+    owner_and_viewer: AccountPair) -> None:
     strategy = await create_strategy_record(
         database, owner_and_viewer.owner.user, "private-grid"
     )
@@ -142,11 +125,8 @@ async def test_private_strategy_stays_hidden_even_when_granted(
     assert await read_strategy_status_code(client, viewer_token, strategy.id) == 404
 
 
-async def test_owner_always_sees_own_strategy_regardless_of_visibility(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    owner_and_viewer: AccountPair,
-) -> None:
+async def test_owner_always_sees_own_strategy_regardless_of_visibility(client: AsyncClient, database: PlatformDatabase,
+    owner_and_viewer: AccountPair) -> None:
     owner = owner_and_viewer.owner.user
     private_strategy = await create_strategy_record(database, owner, "private-grid")
     shared_strategy = await create_strategy_record(
@@ -159,11 +139,7 @@ async def test_owner_always_sees_own_strategy_regardless_of_visibility(
     assert shared_strategy.id in visible_ids
 
 
-async def test_grant_list_is_returned_only_to_the_owner(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    owner_and_viewer: AccountPair,
-) -> None:
+async def test_grant_list_is_returned_only_to_the_owner(client: AsyncClient, database: PlatformDatabase, owner_and_viewer: AccountPair) -> None:
     strategy = await create_strategy_record(
         database,
         owner_and_viewer.owner.user,
@@ -191,11 +167,8 @@ async def test_grant_list_is_returned_only_to_the_owner(
     assert viewer_grants == []
 
 
-async def test_grantee_learning_one_grant_does_not_reveal_other_grantees(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    owner_and_viewer: AccountPair,
-) -> None:
+async def test_grantee_learning_one_grant_does_not_reveal_other_grantees(client: AsyncClient,
+    database: PlatformDatabase, owner_and_viewer: AccountPair) -> None:
     third_user = await create_user_record(database, "visibility-third")
     strategy = await create_strategy_record(
         database,
@@ -225,11 +198,8 @@ async def test_grantee_learning_one_grant_does_not_reveal_other_grantees(
     assert third_user.username not in response.text
 
 
-async def test_soft_deleted_strategy_disappears_for_owner_and_others(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    owner_and_viewer: AccountPair,
-) -> None:
+async def test_soft_deleted_strategy_disappears_for_owner_and_others(client: AsyncClient, database: PlatformDatabase,
+    owner_and_viewer: AccountPair) -> None:
     strategy = await create_strategy_record(
         database,
         owner_and_viewer.owner.user,
@@ -247,11 +217,8 @@ async def test_soft_deleted_strategy_disappears_for_owner_and_others(
     assert await read_strategy_status_code(client, owner_token, strategy.id) == 404
 
 
-async def test_deleted_strategy_reports_the_same_message_as_an_absent_one(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    owner_and_viewer: AccountPair,
-) -> None:
+async def test_deleted_strategy_reports_the_same_message_as_an_absent_one(client: AsyncClient,
+    database: PlatformDatabase, owner_and_viewer: AccountPair) -> None:
     strategy = await create_strategy_record(
         database, owner_and_viewer.owner.user, "public-grid"
     )
@@ -272,12 +239,8 @@ async def test_deleted_strategy_reports_the_same_message_as_an_absent_one(
     "visibility_type",
     [StrategyVisibility.PRIVATE, StrategyVisibility.SHARED, StrategyVisibility.PUBLIC],
 )
-async def test_strategy_visibility_survives_a_round_trip(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    owner_and_viewer: AccountPair,
-    visibility_type: StrategyVisibility,
-) -> None:
+async def test_strategy_visibility_survives_a_round_trip(client: AsyncClient, database: PlatformDatabase,
+    owner_and_viewer: AccountPair, visibility_type: StrategyVisibility) -> None:
     strategy = await create_strategy_record(
         database,
         owner_and_viewer.owner.user,

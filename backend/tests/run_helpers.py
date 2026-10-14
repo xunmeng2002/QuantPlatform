@@ -172,9 +172,7 @@ def build_stub_configuration_template() -> dict[str, object]:
     }
 
 
-def build_stub_configuration_text(
-    configuration_template: dict[str, object] | None = None,
-) -> str:
+def build_stub_configuration_text(configuration_template: dict[str, object] | None = None) -> str:
     """桩策略那份配置 JSON 的**落盘正文**, 即上传时那份文件的字节内容."""
 
     return json.dumps(
@@ -184,9 +182,7 @@ def build_stub_configuration_text(
     )
 
 
-def _build_rate_row(
-    exchange_id: str, direction: int, commission_group_id: int
-) -> BaseCommissionModel:
+def _build_rate_row(exchange_id: str, direction: int, commission_group_id: int) -> BaseCommissionModel:
     """交易所级 (合约格留空) 的一行费率.
 
     **交易所级而不是合约级**: 品种级的短码要先在品种表里登记才过得了守门, 而这里只是给用例铺一个
@@ -218,12 +214,8 @@ def _build_rate_row(
     )
 
 
-async def ensure_contract_rates(
-    database: PlatformDatabase,
-    exchange_id: str,
-    directions: Sequence[int] = ENGINE_RATE_DIRECTIONS,
-    commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID,
-) -> None:
+async def ensure_contract_rates(database: PlatformDatabase, exchange_id: str,
+    directions: Sequence[int] = ENGINE_RATE_DIRECTIONS, commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID) -> None:
     """给这个交易所备好该组的费率行, 使得该交易所下的合约提交得上去.
 
     提交侧会按**这一轮选中的那个组**把三级规则展开, 三档都没命中就 400 (见
@@ -278,11 +270,8 @@ async def ensure_contract_rates(
         await session.commit()
 
 
-async def drop_contract_rates(
-    database: PlatformDatabase,
-    direction: CommissionDirection | None = None,
-    commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID,
-) -> None:
+async def drop_contract_rates(database: PlatformDatabase, direction: CommissionDirection | None = None,
+    commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID) -> None:
     """把该组里所有**交易所级**的行撤掉 —— 给"缺费率就要被拦"那组用例用.
 
     `direction` 留空即全部撤掉; 指定一个就只撤那一侧, 用来验"只有买缺"这种半个缺口. 组号留空即
@@ -308,16 +297,10 @@ async def drop_contract_rates(
         await session.commit()
 
 
-async def create_runnable_strategy(
-    database: PlatformDatabase,
-    settings: PlatformSettings,
-    owner: UserModel,
-    name: str,
-    entry_filename: str = STUB_ENTRY_FILENAME,
-    config_filename: str = STUB_CONFIG_FILENAME,
+async def create_runnable_strategy(database: PlatformDatabase, settings: PlatformSettings, owner: UserModel, name: str,
+    entry_filename: str = STUB_ENTRY_FILENAME, config_filename: str = STUB_CONFIG_FILENAME,
     visibility_type: StrategyVisibility = StrategyVisibility.PRIVATE,
-    configuration_template: dict[str, object] | None = None,
-) -> RunnableStrategy:
+    configuration_template: dict[str, object] | None = None) -> RunnableStrategy:
     """建一个策略并把它的一份版本**真的写到盘上**, 顺带让默认交易所的合约提交得上去.
 
     版本走 `store_strategy_version`, 与上传接口同一条代码路径: 作业目录构造要从版本目录复制入口
@@ -366,19 +349,12 @@ async def create_runnable_strategy(
     )
 
 
-def build_run_request(
-    strategy_id: str,
-    strategy_version_id: str | None = None,
-    match_mode: MarketDataType = MarketDataType.BAR,
-    bar_period: str = DEFAULT_BAR_PERIOD,
-    exchange_id: str | None = DEFAULT_EXCHANGE_ID,
-    instrument_id: str | None = DEFAULT_INSTRUMENT_ID,
-    start_trading_day: str = DEFAULT_START_TRADING_DAY,
-    end_trading_day: str = DEFAULT_END_TRADING_DAY,
-    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
-    commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID,
-    params: dict[str, object] | None = None,
-) -> dict[str, object]:
+def build_run_request(strategy_id: str, strategy_version_id: str | None = None,
+    match_mode: MarketDataType = MarketDataType.BAR, bar_period: str = DEFAULT_BAR_PERIOD,
+    exchange_id: str | None = DEFAULT_EXCHANGE_ID, instrument_id: str | None = DEFAULT_INSTRUMENT_ID,
+    start_trading_day: str = DEFAULT_START_TRADING_DAY, end_trading_day: str = DEFAULT_END_TRADING_DAY,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL, commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID,
+    params: dict[str, object] | None = None) -> dict[str, object]:
     """一份合法的提交请求体.
 
     与 `submit_run` 分开: 校验用例要的是"把某一个字段改坏之后再发出去", 若请求体只能由
@@ -409,9 +385,7 @@ def build_run_request(
     return request_body
 
 
-async def post_run(
-    client: AsyncClient, token: str | None, request_body: dict[str, object]
-) -> Response:
+async def post_run(client: AsyncClient, token: str | None, request_body: dict[str, object]) -> Response:
     """把一份请求体发出去, 原样返回响应.
 
     `token` 可为 None: 无令牌那一档要的正是"连请求头都不带"的响应.
@@ -422,21 +396,12 @@ async def post_run(
     return await client.post(RUNS_PATH, json=request_body, headers=headers)
 
 
-async def submit_run(
-    client: AsyncClient,
-    token: str,
-    strategy_id: str,
-    strategy_version_id: str | None = None,
-    match_mode: MarketDataType = MarketDataType.BAR,
-    bar_period: str = DEFAULT_BAR_PERIOD,
-    exchange_id: str | None = DEFAULT_EXCHANGE_ID,
-    instrument_id: str | None = DEFAULT_INSTRUMENT_ID,
-    start_trading_day: str = DEFAULT_START_TRADING_DAY,
-    end_trading_day: str = DEFAULT_END_TRADING_DAY,
-    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
-    commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID,
-    params: dict[str, object] | None = None,
-) -> RunDetailResponse:
+async def submit_run(client: AsyncClient, token: str, strategy_id: str, strategy_version_id: str | None = None,
+    match_mode: MarketDataType = MarketDataType.BAR, bar_period: str = DEFAULT_BAR_PERIOD,
+    exchange_id: str | None = DEFAULT_EXCHANGE_ID, instrument_id: str | None = DEFAULT_INSTRUMENT_ID,
+    start_trading_day: str = DEFAULT_START_TRADING_DAY, end_trading_day: str = DEFAULT_END_TRADING_DAY,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL, commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID,
+    params: dict[str, object] | None = None) -> RunDetailResponse:
     """经接口提交一次回测, 断言 201 再解出响应体."""
 
     response = await post_run(
@@ -478,9 +443,7 @@ async def read_run_record(database: PlatformDatabase, run_id: str) -> RunModel:
         return run
 
 
-async def read_run_or_none(
-    database: PlatformDatabase, run_id: str
-) -> RunModel | None:
+async def read_run_or_none(database: PlatformDatabase, run_id: str) -> RunModel | None:
     """同上, 但行不在时返回 None.
 
     "行真的没了"是一整类用例的主结果 (删除、保留清理都是), 而拿一个会抛错的读取器去问它, 那些
@@ -491,12 +454,8 @@ async def read_run_or_none(
         return await session.get(RunModel, run_id)
 
 
-async def await_run_status(
-    database: PlatformDatabase,
-    run_id: str,
-    expected_status: RunStatus,
-    timeout_seconds: float = DEFAULT_TERMINAL_TIMEOUT_SECONDS,
-) -> RunModel:
+async def await_run_status(database: PlatformDatabase, run_id: str, expected_status: RunStatus,
+    timeout_seconds: float = DEFAULT_TERMINAL_TIMEOUT_SECONDS) -> RunModel:
     """轮询到行处于指定状态为止.
 
     轮询而不是等 `scheduler.wait_until_idle`: 后者判的是"作业任务集合空", 而提交之后、调度循环
@@ -522,11 +481,7 @@ async def await_run_status(
     )
 
 
-async def await_run_terminal(
-    database: PlatformDatabase,
-    run_id: str,
-    timeout_seconds: float = DEFAULT_TERMINAL_TIMEOUT_SECONDS,
-) -> RunModel:
+async def await_run_terminal(database: PlatformDatabase, run_id: str, timeout_seconds: float = DEFAULT_TERMINAL_TIMEOUT_SECONDS) -> RunModel:
     """轮询到终态为止."""
 
     deadline = asyncio.get_running_loop().time() + timeout_seconds
@@ -572,9 +527,7 @@ def write_job_directory(settings: PlatformSettings, run_id: str) -> Path:
 
 
 @contextmanager
-def open_result_database_for_writing(
-    database_file: Path,
-) -> Iterator[sqlite3.Connection]:
+def open_result_database_for_writing(database_file: Path) -> Iterator[sqlite3.Connection]:
     """以可写方式打开一份结果库, 出块即**关闭并提交**.
 
     直接用 `with sqlite3.connect(...)` 是不行的: `Connection.__exit__` 只提交或回滚, **不关闭
@@ -589,11 +542,7 @@ def open_result_database_for_writing(
         connection.commit()
 
 
-async def await_process_started(
-    settings: PlatformSettings,
-    run_id: str,
-    timeout_seconds: float = DEFAULT_TERMINAL_TIMEOUT_SECONDS,
-) -> None:
+async def await_process_started(settings: PlatformSettings, run_id: str, timeout_seconds: float = DEFAULT_TERMINAL_TIMEOUT_SECONDS) -> None:
     """等到桩**自己**写下 `span.txt` 为止, 即"进程确实开始执行了".
 
     行的状态是 `running` 挡不住这一条: 认领之后、起进程之前有一段真实的窗口 (读上下文、构造作业
@@ -613,9 +562,7 @@ async def await_process_started(
     raise TimeoutError(f"作业在 {timeout_seconds} 秒内没有写出 {SPAN_FILENAME}")
 
 
-def read_job_json(
-    settings: PlatformSettings, run_id: str, filename: str
-) -> dict[str, object]:
+def read_job_json(settings: PlatformSettings, run_id: str, filename: str) -> dict[str, object]:
     """读作业目录里的一个 JSON 文件."""
 
     return json.loads(
@@ -643,9 +590,7 @@ def read_reported_argv0(settings: PlatformSettings, run_id: str) -> str:
     return read_job_text(settings, run_id, ARGV0_FILENAME)
 
 
-def read_span_intervals(
-    settings: PlatformSettings, run_id: str
-) -> list[tuple[float, float]]:
+def read_span_intervals(settings: PlatformSettings, run_id: str) -> list[tuple[float, float]]:
     """一个作业的 `[start, end]` 区间; 没有 end 行时区间到正无穷.
 
     桩被杀时不会写 end 行, 于是"它到底跑没跑完"是可判的——超时用例正是靠这一点断言进程真的死了.
@@ -699,9 +644,7 @@ def maximum_overlap(intervals: Sequence[tuple[float, float]]) -> int:
     return highest_count
 
 
-def settings_with(
-    settings: PlatformSettings, **overrides: object
-) -> PlatformSettings:
+def settings_with(settings: PlatformSettings, **overrides: object) -> PlatformSettings:
     """派生一份配置副本; `__post_init__` 会重新跑一遍校验."""
 
     return dataclasses.replace(settings, **overrides)
@@ -722,9 +665,7 @@ async def running_application(settings: PlatformSettings) -> AsyncIterator[FastA
 
 
 @asynccontextmanager
-async def running_client(
-    settings: PlatformSettings,
-) -> AsyncIterator[tuple[FastAPI, AsyncClient]]:
+async def running_client(settings: PlatformSettings) -> AsyncIterator[tuple[FastAPI, AsyncClient]]:
     """自建应用 + 经 ASGI 直连的客户端, 库与应用都从返回值里取."""
 
     async with running_application(settings) as application:

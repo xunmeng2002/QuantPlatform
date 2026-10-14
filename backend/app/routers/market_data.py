@@ -68,10 +68,7 @@ class MarketDataCoverageResponse(BaseModel):
 
 
 @router.get("/contracts", response_model=MarketDataContractListResponse)
-async def read_contracts_handler(
-    settings: SettingsDependency,
-    current_user: CurrentUserDependency,
-) -> MarketDataContractListResponse:
+async def read_contracts_handler(settings: SettingsDependency, current_user: CurrentUserDependency) -> MarketDataContractListResponse:
     """下拉框的全部选项: 现在能回测哪些合约."""
 
     try:
@@ -100,14 +97,10 @@ async def read_contracts_handler(
 
 
 @router.get("/coverage", response_model=MarketDataCoverageResponse)
-async def read_coverage_handler(
-    settings: SettingsDependency,
-    current_user: CurrentUserDependency,
-    exchange_id: str = Query(..., max_length=64),
-    instrument_id: str = Query(..., max_length=64),
+async def read_coverage_handler(settings: SettingsDependency, current_user: CurrentUserDependency,
+    exchange_id: str = Query(..., max_length=64), instrument_id: str = Query(..., max_length=64),
     start_trading_day: str = Query(..., min_length=8, max_length=8),
-    end_trading_day: str = Query(..., min_length=8, max_length=8),
-) -> MarketDataCoverageResponse:
+    end_trading_day: str = Query(..., min_length=8, max_length=8)) -> MarketDataCoverageResponse:
     """这一轮要不要先下载. 组件不在位或参数拼不出合约时回 `available=false`, 不阻断提交.
 
     **不问用户在提交页选的订阅周期**: 覆盖判据问的是"这段问过上游没有", 而落盘精度是平台常量

@@ -49,9 +49,7 @@ async def health_token(client: AsyncClient) -> str:
 
 
 @pytest_asyncio.fixture
-async def member_token(
-    client: AsyncClient, database: PlatformDatabase
-) -> str:
+async def member_token(client: AsyncClient, database: PlatformDatabase) -> str:
     """建一个普通账号并登录, 用于验证非管理员的拒绝路径."""
 
     await create_user_record(database, HEALTH_MEMBER_USERNAME)
@@ -100,9 +98,7 @@ async def test_health_requires_authentication(client: AsyncClient) -> None:
     assert response.headers["www-authenticate"] == "Bearer"
 
 
-async def test_health_is_closed_to_a_signed_in_non_admin(
-    client: AsyncClient, member_token: str
-) -> None:
+async def test_health_is_closed_to_a_signed_in_non_admin(client: AsyncClient, member_token: str) -> None:
     """普通用户能做的动作里没有一项需要这份内部布局清单."""
 
     response = await client.get(HEALTH_PATH, headers=bearer_headers(member_token))
@@ -112,9 +108,7 @@ async def test_health_is_closed_to_a_signed_in_non_admin(
     assert "engine" not in response.text.lower()
 
 
-async def test_health_reports_ready_when_engine_is_complete(
-    client: AsyncClient, application: FastAPI, health_token: str
-) -> None:
+async def test_health_reports_ready_when_engine_is_complete(client: AsyncClient, application: FastAPI, health_token: str) -> None:
     settings = _settings(application)
 
     _write_binding(settings.engine_root, BINDING_FILENAME)
@@ -129,9 +123,7 @@ async def test_health_reports_ready_when_engine_is_complete(
     assert health.runs_root_writable is True
 
 
-async def test_health_reports_the_engine_version_it_will_launch(
-    client: AsyncClient, application: FastAPI, health_token: str
-) -> None:
+async def test_health_reports_the_engine_version_it_will_launch(client: AsyncClient, application: FastAPI, health_token: str) -> None:
     """"跑的是哪一版"与"能不能跑"是两件事: 前者即使在后者的判据齐备时也未必是人读得懂的版本号."""
 
     settings = _settings(application)
@@ -145,9 +137,7 @@ async def test_health_reports_the_engine_version_it_will_launch(
     assert health.engine_version.startswith(VERSION_DIGEST_PREFIX)
 
 
-async def test_health_prefers_a_declared_engine_version_over_the_digest(
-    client: AsyncClient, application: FastAPI, health_token: str
-) -> None:
+async def test_health_prefers_a_declared_engine_version_over_the_digest(client: AsyncClient, application: FastAPI, health_token: str) -> None:
     """引擎包自己带版本号时以它为准——那才是精确口径, 摘要是盖不住整个包的."""
 
     settings = _settings(application)
@@ -163,9 +153,7 @@ async def test_health_prefers_a_declared_engine_version_over_the_digest(
     assert health.engine_version == "build-2026.09.26"
 
 
-async def test_health_reports_an_empty_engine_version_when_there_is_nothing_to_read(
-    client: AsyncClient, health_token: str
-) -> None:
+async def test_health_reports_an_empty_engine_version_when_there_is_nothing_to_read(client: AsyncClient, health_token: str) -> None:
     """空串是"不知道", 不是错误: 这个端点的其余判据照常给出, 由调用方分辨."""
 
     health = await _read_health(client, health_token)
@@ -174,9 +162,7 @@ async def test_health_reports_an_empty_engine_version_when_there_is_nothing_to_r
     assert health.ready is False
 
 
-async def test_health_reports_not_ready_without_the_extension_module(
-    client: AsyncClient, application: FastAPI, health_token: str
-) -> None:
+async def test_health_reports_not_ready_without_the_extension_module(client: AsyncClient, application: FastAPI, health_token: str) -> None:
     settings = _settings(application)
 
     _write_runtime_libraries(settings.engine_root)
@@ -189,12 +175,8 @@ async def test_health_reports_not_ready_without_the_extension_module(
 
 
 @pytest.mark.parametrize("foreign_interpreter_tag", ["cp39", "cp310", "cp312"])
-async def test_health_rejects_a_binding_built_for_another_interpreter(
-    client: AsyncClient,
-    application: FastAPI,
-    health_token: str,
-    foreign_interpreter_tag: str,
-) -> None:
+async def test_health_rejects_a_binding_built_for_another_interpreter(client: AsyncClient, application: FastAPI,
+    health_token: str, foreign_interpreter_tag: str) -> None:
     """扩展模块带的是**本平台本解释器**的 ABI 标签, 别的标签一律不可用; 按文件名判, 不靠 import 试错."""
 
     settings = _settings(application)
@@ -211,9 +193,7 @@ async def test_health_rejects_a_binding_built_for_another_interpreter(
     assert health.python_binding_filename is None
 
 
-async def test_health_reports_a_binding_missing_only_its_suffix(
-    client: AsyncClient, application: FastAPI, health_token: str
-) -> None:
+async def test_health_reports_a_binding_missing_only_its_suffix(client: AsyncClient, application: FastAPI, health_token: str) -> None:
     settings = _settings(application)
 
     settings.engine_root.mkdir(parents=True, exist_ok=True)
@@ -224,9 +204,7 @@ async def test_health_reports_a_binding_missing_only_its_suffix(
     assert health.python_binding_filename is None
 
 
-async def test_health_lists_every_missing_runtime_library(
-    client: AsyncClient, application: FastAPI, health_token: str
-) -> None:
+async def test_health_lists_every_missing_runtime_library(client: AsyncClient, application: FastAPI, health_token: str) -> None:
     settings = _settings(application)
 
     _write_binding(settings.engine_root, BINDING_FILENAME)
@@ -239,9 +217,7 @@ async def test_health_lists_every_missing_runtime_library(
     assert health.missing_runtime_filenames == list(ENGINE_RUNTIME_FILENAMES[1:])
 
 
-async def test_health_reports_a_runs_root_that_cannot_be_created(
-    client: AsyncClient, application: FastAPI, health_token: str
-) -> None:
+async def test_health_reports_a_runs_root_that_cannot_be_created(client: AsyncClient, application: FastAPI, health_token: str) -> None:
     """运行根被一个同名文件占位时无法建目录, 该判定必须为假而非抛错."""
 
     settings = _settings(application)
@@ -257,9 +233,7 @@ async def test_health_reports_a_runs_root_that_cannot_be_created(
     assert health.runs_root_writable is False
 
 
-async def test_health_probe_creates_the_runs_root(
-    client: AsyncClient, application: FastAPI, health_token: str
-) -> None:
+async def test_health_probe_creates_the_runs_root(client: AsyncClient, application: FastAPI, health_token: str) -> None:
     """运行根本就该存在, 探针顺带把它建出来."""
 
     settings = _settings(application)
@@ -271,18 +245,15 @@ async def test_health_probe_creates_the_runs_root(
     assert settings.runs_root.is_dir() is True
 
 
-async def test_health_reports_the_interpreter_it_ran_under(
-    client: AsyncClient, health_token: str
-) -> None:
+async def test_health_reports_the_interpreter_it_ran_under(client: AsyncClient, health_token: str) -> None:
     health = await _read_health(client, health_token)
 
     assert health.interpreter_tag == interpreter_tag()
     assert health.python_version.startswith(f"{interpreter_tag().removeprefix('cp')[0]}.")
 
 
-async def test_unexpected_failure_is_reported_without_leaking_internals(
-    application: FastAPI, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_unexpected_failure_is_reported_without_leaking_internals(application: FastAPI, client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch) -> None:
     """兜底 500 只回固定文案: 堆栈、路径与库结构一律不出现."""
 
     token = await login(client, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD)

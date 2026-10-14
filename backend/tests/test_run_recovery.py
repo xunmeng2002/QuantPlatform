@@ -62,9 +62,7 @@ STDOUT_FILENAME = "stdout.txt"
 
 
 @asynccontextmanager
-async def _stopped_platform_database(
-    settings: PlatformSettings,
-) -> AsyncIterator[PlatformDatabase]:
+async def _stopped_platform_database(settings: PlatformSettings) -> AsyncIterator[PlatformDatabase]:
     """一个指向同一份库文件、但**没有调度器在跑**的数据库门面.
 
     两届共用同一份 settings 与同一个库文件, 故两届之间不留任何内存状态——那正是重启的定义.
@@ -81,9 +79,7 @@ async def _stopped_platform_database(
         await database.close()
 
 
-async def _seed_unfinished_runs(
-    database: PlatformDatabase, settings: PlatformSettings
-) -> tuple[str, str]:
+async def _seed_unfinished_runs(database: PlatformDatabase, settings: PlatformSettings) -> tuple[str, str]:
     """造一行 `queued` + 一行 `running`, 并给后者建好作业目录.
 
     两行的 `RunnerPid` 取得不同: 恢复**原样保留**这一列 (它是"当时是谁在跑"的唯一证据), 若恢复
@@ -183,9 +179,7 @@ def _mark_as_successfully_finished(run: RunModel) -> None:
     run.hostname = PREVIOUS_HOSTNAME
 
 
-async def test_restarting_the_backend_interrupts_every_unfinished_run(
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_restarting_the_backend_interrupts_every_unfinished_run(platform_settings: PlatformSettings) -> None:
     """重启后: 两行都 `interrupted`, 结束时间填上, 文案是恢复文案, 进程号原样保留."""
 
     async with _stopped_platform_database(platform_settings) as previous_database:
@@ -217,9 +211,7 @@ async def test_restarting_the_backend_interrupts_every_unfinished_run(
         assert running_run.started_at is not None
 
 
-async def test_recovery_does_not_start_anything(
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_recovery_does_not_start_anything(platform_settings: PlatformSettings) -> None:
     """恢复只改库: 不起进程, 不建目录, 也不凭空多出行来.
 
     防的是"顺手把恢复写成续跑": 上一届的作业目录可能只建了一半, 续跑会读到一个残缺的作业环境,
@@ -252,9 +244,7 @@ async def test_recovery_does_not_start_anything(
             assert not (job_path / STDOUT_FILENAME).exists(), directory_name
 
 
-async def test_a_run_that_already_finished_is_left_alone(
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_run_that_already_finished_is_left_alone(platform_settings: PlatformSettings) -> None:
     """已落终态的行不归恢复管: 状态、结束时间、文案一个字段都不许动.
 
     恢复的条件更新若漏掉 `WHERE Status IN ('queued','running')`, 它会把**上一次跑完的成功轮**

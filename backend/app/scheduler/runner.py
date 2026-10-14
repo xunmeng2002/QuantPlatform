@@ -112,14 +112,8 @@ class TerminalVerdict:
     error_message: str
 
 
-def arbitrate_terminal_state(
-    *,
-    exit_code: int | None,
-    timed_out: bool,
-    cancel_requested: bool,
-    run_result: Mapping[str, object] | None,
-    platform_error_message: str | None,
-) -> TerminalVerdict:
+def arbitrate_terminal_state(*, exit_code: int | None, timed_out: bool, cancel_requested: bool,
+    run_result: Mapping[str, object] | None, platform_error_message: str | None) -> TerminalVerdict:
     """按仲裁次序算终态与文案.
 
     次序即优先级, 与 `job-workspace.md` §4 的表逐行对应:
@@ -240,16 +234,10 @@ class UnrunnableJob(Exception):
 class JobRunner:
     """执行单个作业, 并在结束时把终态写回运行行."""
 
-    def __init__(
-        self,
-        settings: PlatformSettings,
-        database: PlatformDatabase,
-        registry: RunningJobRegistry,
-    ) -> None:
+    def __init__(self, settings: PlatformSettings, database: PlatformDatabase, registry: RunningJobRegistry) -> None:
         self._settings = settings
         self._database = database
         self._registry = registry
-
     async def execute(self, handle: JobHandle) -> None:
         """执行一个作业, 无论成败都在返回前写定终态并出表.
 
@@ -261,7 +249,6 @@ class JobRunner:
             await self._execute_job(handle)
         finally:
             await self._registry.retire(handle.run_id)
-
     async def _execute_job(self, handle: JobHandle) -> None:
         """作业的执行与收尾.
 
@@ -285,7 +272,6 @@ class JobRunner:
             await self._abandon(execution)
 
         await self._finalize(handle, execution)
-
     async def _run_job(self, handle: JobHandle, execution: JobExecution) -> None:
         """作业体: 读上下文 → 生种子库 → 建目录 → 备行情 → 起进程 → 等它退出.
 
@@ -360,10 +346,7 @@ class JobRunner:
 
             handle.timed_out = True
             await self._abandon(execution)
-
-    async def _prepare_market_data(
-        self, handle: JobHandle, execution: JobExecution, launch_context: LaunchContext
-    ) -> bool:
+    async def _prepare_market_data(self, handle: JobHandle, execution: JobExecution, launch_context: LaunchContext) -> bool:
         """确保这一轮要用的行情已在本地落地; 回 False 表示这一轮不该起引擎.
 
         失败**不抛异常**: 与 `UnrunnableJob` 走同一条路——记一句能直接进 `ErrorMsg` 的固定中文
@@ -390,14 +373,7 @@ class JobRunner:
             return False
 
         return prepared is MarketDataPrepared.READY
-
-    async def _launch_and_await_exit(
-        self,
-        handle: JobHandle,
-        execution: JobExecution,
-        launch_context: LaunchContext,
-        job_directory: Path,
-    ) -> None:
+    async def _launch_and_await_exit(self, handle: JobHandle, execution: JobExecution, launch_context: LaunchContext, job_directory: Path) -> None:
         """起进程、并发收两条输出流、等退出, 并在取消信号到达时收掉进程.
 
         超时由外层的作业级 `asyncio.timeout` 负责, 这里只管"取消"这一路: 两者最终都走同一个
@@ -417,14 +393,7 @@ class JobRunner:
             execution.output_capture = output_capture
 
             await self._supervise_process(handle, execution, launch_context, job_directory)
-
-    async def _supervise_process(
-        self,
-        handle: JobHandle,
-        execution: JobExecution,
-        launch_context: LaunchContext,
-        job_directory: Path,
-    ) -> None:
+    async def _supervise_process(self, handle: JobHandle, execution: JobExecution, launch_context: LaunchContext, job_directory: Path) -> None:
         """起宿主进程并在其整个生命周期内盯着它."""
 
         output_capture = execution.output_capture
@@ -470,10 +439,7 @@ class JobRunner:
 
         await self._await_process_or_cancel(handle, execution)
         await self._drain_pumps(execution)
-
-    async def _await_process_or_cancel(
-        self, handle: JobHandle, execution: JobExecution
-    ) -> None:
+    async def _await_process_or_cancel(self, handle: JobHandle, execution: JobExecution) -> None:
         """等进程退出, 或等来取消信号后收掉它.
 
         取消[只置标志]是不够的: 进程不会因此退出, `wait()` 也不会因此返回, 作业会一直挂到自然
@@ -502,13 +468,11 @@ class JobRunner:
         await exit_waiter
 
         execution.exit_code = process.returncode
-
     async def _abandon(self, execution: JobExecution) -> None:
         """收掉进程并停止读输出; 可重复调用."""
 
         await self._terminate_process(execution)
         await self._drain_pumps(execution)
-
     async def _terminate_process(self, execution: JobExecution) -> None:
         """超时/取消后的进程回收: terminate → 有界等 → kill → 有界等.
 
@@ -542,7 +506,6 @@ class JobRunner:
         # "进程被平台杀掉了"这件事在行上只体现为状态, 而 `ExitCode` 是 NULL——与取消那一路
         # (同一个 `_abandon`, 却因为等过 `exit_waiter` 而记了码) 差成一个无意的形态差异.
         execution.exit_code = process.returncode
-
     async def _drain_pumps(self, execution: JobExecution) -> None:
         """等两条输出流读到 EOF.
 
@@ -565,7 +528,6 @@ class JobRunner:
 
             for pump_task in execution.pump_tasks:
                 pump_task.cancel()
-
     async def _load_launch_context(self, run_id: str) -> LaunchContext | None:
         """读齐起进程所需的一切; 返回 None 表示这一行已不由本作业负责.
 
@@ -614,7 +576,6 @@ class JobRunner:
                 end_trading_day=decoded_fields.end_trading_day,
                 commission_group_id=decoded_fields.commission_group_id,
             )
-
     def _decode_launch_fields(self, run: RunModel) -> DecodedRunFields:
         """从运行行那两份配置文本里解出起进程前要用的那几个取值.
 
@@ -633,10 +594,7 @@ class JobRunner:
             parse_configuration_object(run.id, run.backtest_config_json) or {},
             parse_configuration_object(run.id, run.params_json) or {},
         )
-
-    def _build_job_file_set(
-        self, launch_context: LaunchContext, seed_database_source_path: Path
-    ) -> JobFileSet:
+    def _build_job_file_set(self, launch_context: LaunchContext, seed_database_source_path: Path) -> JobFileSet:
         """作业目录的输入清单."""
 
         return JobFileSet(
@@ -648,7 +606,6 @@ class JobRunner:
             engine_configuration_text=launch_context.engine_configuration_text,
             seed_database_source_path=seed_database_source_path,
         )
-
     async def _stage_run_seed_database(self, launch_context: LaunchContext) -> Path:
         """给这一轮生成种子库, 返回它的暂存路径 (还没进作业目录).
 
@@ -690,7 +647,6 @@ class JobRunner:
             )
 
         return staging_path
-
     async def _record_runner_pid(self, run_id: str, process_id: int) -> None:
         """把宿主进程号写进运行行.
 
@@ -706,7 +662,6 @@ class JobRunner:
                 .values(runner_pid=process_id)
             )
             await session.commit()
-
     def _build_child_environment(self) -> dict[str, str]:
         """子进程环境: 在既有 `PYTHONPATH` **之前**追加引擎根.
 
@@ -721,7 +676,6 @@ class JobRunner:
         )
 
         return {**os.environ, "PYTHONPATH": search_path}
-
     def _report_missing_binding(self, output_capture: JobOutputCapture) -> None:
         """ABI 不匹配时写一条诊断, **绝不做成硬闸**.
 
@@ -735,7 +689,6 @@ class JobRunner:
 
         logger.warning("引擎根下没有与当前解释器匹配的扩展模块, 引擎类策略将无法加载")
         output_capture.append_stderr(MISSING_BINDING_MESSAGE.encode("utf-8"))
-
     async def _finalize(self, handle: JobHandle, execution: JobExecution) -> None:
         """算定终态并写回运行行.
 
@@ -789,10 +742,7 @@ class JobRunner:
         )
 
         await self._write_terminal_state(handle.run_id, terminal_values)
-
-    async def _write_terminal_state(
-        self, run_id: str, terminal_values: dict[str, object]
-    ) -> None:
+    async def _write_terminal_state(self, run_id: str, terminal_values: dict[str, object]) -> None:
         """条件更新写终态; 抢输了则退化成一次不碰状态的窄更新."""
 
         async with self._database.session_scope() as session:
@@ -821,9 +771,7 @@ class JobRunner:
             await session.commit()
 
 
-async def _pump_output(
-    reader: asyncio.StreamReader, append_chunk: Callable[[bytes], None]
-) -> None:
+async def _pump_output(reader: asyncio.StreamReader, append_chunk: Callable[[bytes], None]) -> None:
     """把一条输出流整条读到 EOF, 逐块交给落盘侧.
 
     落盘写**原始字节**: stdout.txt / stderr.txt 按引擎实际吐出的字节存, 任何编码都能事后重新
@@ -839,9 +787,7 @@ async def _pump_output(
         append_chunk(chunk)
 
 
-async def _wait_for_exit(
-    process: asyncio.subprocess.Process, timeout_seconds: int
-) -> bool:
+async def _wait_for_exit(process: asyncio.subprocess.Process, timeout_seconds: int) -> bool:
     """有界地等进程退出; 等到了返回 True.
 
     每次调用都**重新**取一个 `wait()` 协程. 被取消的协程不能再次 await, 而在 3.14 上
@@ -859,9 +805,7 @@ async def _wait_for_exit(
     return True
 
 
-def _elapsed_milliseconds(
-    started_at: datetime | None, finished_at: datetime
-) -> int | None:
+def _elapsed_milliseconds(started_at: datetime | None, finished_at: datetime) -> int | None:
     """运行耗时.
 
     排队中被取消时 `started_at` 为 NULL, 此时耗时必须是 NULL 而不是 0——0 会被读成"瞬间跑完",

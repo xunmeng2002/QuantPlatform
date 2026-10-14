@@ -51,9 +51,7 @@ class RunBoard:
 
 
 @pytest_asyncio.fixture
-async def run_board(
-    client: AsyncClient, database: PlatformDatabase
-) -> RunBoard:
+async def run_board(client: AsyncClient, database: PlatformDatabase) -> RunBoard:
     member = await create_user_record(database, MEMBER_USERNAME)
     first_strategy = await create_strategy_record(database, member, "runs-grid-first")
     second_strategy = await create_strategy_record(database, member, "runs-grid-second")
@@ -108,15 +106,11 @@ async def run_board(
     )
 
 
-async def _fetch_runs(
-    client: AsyncClient, token: str, **parameters: object
-) -> PageResponse[RunSummaryResponse]:
+async def _fetch_runs(client: AsyncClient, token: str, **parameters: object) -> PageResponse[RunSummaryResponse]:
     return await fetch_page(client, RUNS_PATH, token, RunSummaryResponse, **parameters)
 
 
-async def test_listing_without_parameters_returns_every_run_newest_first(
-    client: AsyncClient, run_board: RunBoard
-) -> None:
+async def test_listing_without_parameters_returns_every_run_newest_first(client: AsyncClient, run_board: RunBoard) -> None:
     page = await _fetch_runs(client, run_board.token)
 
     assert page.total == 3
@@ -127,9 +121,7 @@ async def test_listing_without_parameters_returns_every_run_newest_first(
     ]
 
 
-async def test_status_filter_narrows_to_matching_runs(
-    client: AsyncClient, run_board: RunBoard
-) -> None:
+async def test_status_filter_narrows_to_matching_runs(client: AsyncClient, run_board: RunBoard) -> None:
     page = await _fetch_runs(client, run_board.token, status=RunStatus.SUCCEEDED.value)
 
     assert page.total == 2
@@ -140,9 +132,7 @@ async def test_status_filter_narrows_to_matching_runs(
     assert {record.status for record in page.records} == {RunStatus.SUCCEEDED}
 
 
-async def test_strategy_filter_narrows_to_that_strategy(
-    client: AsyncClient, run_board: RunBoard
-) -> None:
+async def test_strategy_filter_narrows_to_that_strategy(client: AsyncClient, run_board: RunBoard) -> None:
     first_page = await _fetch_runs(
         client, run_board.token, strategy_id=run_board.first_strategy.id
     )
@@ -159,9 +149,7 @@ async def test_strategy_filter_narrows_to_that_strategy(
     assert record_ids(second_page) == [run_board.failed_run.id]
 
 
-async def test_status_and_strategy_filters_combine(
-    client: AsyncClient, run_board: RunBoard
-) -> None:
+async def test_status_and_strategy_filters_combine(client: AsyncClient, run_board: RunBoard) -> None:
     page = await _fetch_runs(
         client,
         run_board.token,
@@ -173,9 +161,7 @@ async def test_status_and_strategy_filters_combine(
     assert page.records == []
 
 
-async def test_sorting_by_balance_descending(
-    client: AsyncClient, run_board: RunBoard
-) -> None:
+async def test_sorting_by_balance_descending(client: AsyncClient, run_board: RunBoard) -> None:
     page = await _fetch_runs(client, run_board.token, sort_by="balance", descending=True)
 
     assert record_ids(page) == [
@@ -185,9 +171,7 @@ async def test_sorting_by_balance_descending(
     ]
 
 
-async def test_sorting_by_trade_count_ascending(
-    client: AsyncClient, run_board: RunBoard
-) -> None:
+async def test_sorting_by_trade_count_ascending(client: AsyncClient, run_board: RunBoard) -> None:
     page = await _fetch_runs(
         client, run_board.token, sort_by="trade_count", descending=False
     )
@@ -199,9 +183,7 @@ async def test_sorting_by_trade_count_ascending(
     ]
 
 
-async def test_sorting_by_submitted_at_ascending_reverses_the_default(
-    client: AsyncClient, run_board: RunBoard
-) -> None:
+async def test_sorting_by_submitted_at_ascending_reverses_the_default(client: AsyncClient, run_board: RunBoard) -> None:
     page = await _fetch_runs(
         client, run_board.token, sort_by="submitted_at", descending=False
     )
@@ -225,9 +207,7 @@ async def test_sorting_by_submitted_at_ascending_reverses_the_default(
         "Balance",
     ],
 )
-async def test_unknown_sort_column_falls_back_to_the_default_order(
-    client: AsyncClient, run_board: RunBoard, unknown_sort_by: str
-) -> None:
+async def test_unknown_sort_column_falls_back_to_the_default_order(client: AsyncClient, run_board: RunBoard, unknown_sort_by: str) -> None:
     page = await _fetch_runs(client, run_board.token, sort_by=unknown_sort_by)
 
     assert record_ids(page) == [
@@ -237,9 +217,7 @@ async def test_unknown_sort_column_falls_back_to_the_default_order(
     ]
 
 
-async def test_sorting_does_not_change_the_reported_total(
-    client: AsyncClient, run_board: RunBoard
-) -> None:
+async def test_sorting_does_not_change_the_reported_total(client: AsyncClient, run_board: RunBoard) -> None:
     page = await _fetch_runs(
         client, run_board.token, sort_by="balance", descending=False, limit=1
     )
@@ -249,9 +227,7 @@ async def test_sorting_does_not_change_the_reported_total(
     assert record_ids(page) == [run_board.early_success_run.id]
 
 
-async def test_offset_advances_without_changing_the_total(
-    client: AsyncClient, run_board: RunBoard
-) -> None:
+async def test_offset_advances_without_changing_the_total(client: AsyncClient, run_board: RunBoard) -> None:
     first_page = await _fetch_runs(client, run_board.token, offset=0, limit=2)
     second_page = await _fetch_runs(client, run_board.token, offset=2, limit=2)
 
@@ -265,9 +241,7 @@ async def test_offset_advances_without_changing_the_total(
     assert record_ids(second_page) == [run_board.early_success_run.id]
 
 
-async def test_offset_past_the_end_yields_an_empty_page(
-    client: AsyncClient, run_board: RunBoard
-) -> None:
+async def test_offset_past_the_end_yields_an_empty_page(client: AsyncClient, run_board: RunBoard) -> None:
     page = await _fetch_runs(client, run_board.token, offset=99, limit=20)
 
     assert page.total == 3
@@ -284,9 +258,7 @@ async def test_offset_past_the_end_yields_an_empty_page(
         {"sort_by": "balance", "descending": "not-a-boolean"},
     ],
 )
-async def test_invalid_query_parameters_are_rejected(
-    client: AsyncClient, run_board: RunBoard, parameters: dict[str, object]
-) -> None:
+async def test_invalid_query_parameters_are_rejected(client: AsyncClient, run_board: RunBoard, parameters: dict[str, object]) -> None:
     response = await client.get(
         RUNS_PATH, params=parameters, headers=bearer_headers(run_board.token)
     )
@@ -294,9 +266,7 @@ async def test_invalid_query_parameters_are_rejected(
     assert response.status_code == 422
 
 
-async def test_run_summary_carries_the_baseline_metrics(
-    client: AsyncClient, run_board: RunBoard
-) -> None:
+async def test_run_summary_carries_the_baseline_metrics(client: AsyncClient, run_board: RunBoard) -> None:
     """金额按 float64 原样往返, 不被定点化截断——与引擎逐位一致是验收判据."""
 
     page = await _fetch_runs(client, run_board.token, sort_by="balance", descending=True)
@@ -305,9 +275,7 @@ async def test_run_summary_carries_the_baseline_metrics(
     assert page.records[0].trade_count == 3
 
 
-async def test_reading_a_run_detail_exposes_the_full_mirrored_row(
-    client: AsyncClient, run_board: RunBoard
-) -> None:
+async def test_reading_a_run_detail_exposes_the_full_mirrored_row(client: AsyncClient, run_board: RunBoard) -> None:
     response = await client.get(
         f"{RUNS_PATH}/{run_board.early_success_run.id}",
         headers=bearer_headers(run_board.token),
@@ -326,9 +294,7 @@ async def test_reading_a_run_detail_exposes_the_full_mirrored_row(
     assert "commission_zero_rate_key_count" in payload
 
 
-async def test_a_run_list_row_does_not_carry_the_engine_version(
-    client: AsyncClient, run_board: RunBoard
-) -> None:
+async def test_a_run_list_row_does_not_carry_the_engine_version(client: AsyncClient, run_board: RunBoard) -> None:
     """引擎版本只进详情, 与 `hostname` 同形.
 
     它是"这一轮由哪个构建跑的"的取证依据, 既不是排序维度也不是筛选维度; 列表页多带一个字段,

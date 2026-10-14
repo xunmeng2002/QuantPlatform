@@ -23,9 +23,7 @@ MISSING_INITIAL_PASSWORD_MESSAGE = (
 logger = logging.getLogger(__name__)
 
 
-async def ensure_initial_admin(
-    database: PlatformDatabase, settings: PlatformSettings
-) -> None:
+async def ensure_initial_admin(database: PlatformDatabase, settings: PlatformSettings) -> None:
     """确保库中至少有一个管理员账号; 已存在则原样返回."""
 
     async with database.session_scope() as session:

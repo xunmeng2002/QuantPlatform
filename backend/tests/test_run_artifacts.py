@@ -106,9 +106,7 @@ def write_job_files(settings: PlatformSettings, run_id: str) -> None:
 
 
 @pytest_asyncio.fixture
-async def artifact_board(
-    client: AsyncClient, database: PlatformDatabase, platform_settings: PlatformSettings
-) -> ArtifactBoard:
+async def artifact_board(client: AsyncClient, database: PlatformDatabase, platform_settings: PlatformSettings) -> ArtifactBoard:
     member = await create_user_record(database, RUN_OWNER_USERNAME)
     outsider = await create_user_record(database, OTHER_MEMBER_USERNAME)
     strategy = await create_strategy_record(database, member, STRATEGY_NAME)
@@ -141,11 +139,8 @@ def _artifact_path(run_id: str, relative_path: str) -> str:
     return f"{_artifacts_path(run_id)}/{relative_path}"
 
 
-async def test_the_artifact_list_names_every_file_in_the_job_directory(
-    client: AsyncClient,
-    artifact_board: ArtifactBoard,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_the_artifact_list_names_every_file_in_the_job_directory(client: AsyncClient,
+    artifact_board: ArtifactBoard, platform_settings: PlatformSettings) -> None:
     """清单要能把嵌套的 `Dump/<RunId>/*.csv` 列出来, 且路径是相对作业目录的 POSIX 形式.
 
     相对路径带盘符或反斜杠时, 前端拼出来的下载 URL 会指向别处 (或直接报错), 故这里对形式
@@ -180,9 +175,7 @@ async def test_the_artifact_list_names_every_file_in_the_job_directory(
         assert (disk_directory / relative_path).exists()
 
 
-async def test_an_artifact_downloads_byte_for_byte(
-    client: AsyncClient, artifact_board: ArtifactBoard
-) -> None:
+async def test_an_artifact_downloads_byte_for_byte(client: AsyncClient, artifact_board: ArtifactBoard) -> None:
     """下载到的字节必须与盘上逐字节相同——这是"下载"这条验收的判据."""
 
     nested_path = f"{DUMP_DIRECTORY_NAME}/{artifact_board.member_run.id}/{TRADE_FILENAME}"
@@ -197,9 +190,7 @@ async def test_an_artifact_downloads_byte_for_byte(
     assert response.headers["content-type"] == ARTIFACT_MEDIA_TYPE
 
 
-async def test_an_artifact_is_always_served_as_an_attachment(
-    client: AsyncClient, artifact_board: ArtifactBoard
-) -> None:
+async def test_an_artifact_is_always_served_as_an_attachment(client: AsyncClient, artifact_board: ArtifactBoard) -> None:
     """一律按附件下发.
 
     策略是用户上传的任意 Python, 它可以往自己的作业目录里写一个 `.html`; 同源内联渲染等于
@@ -215,9 +206,8 @@ async def test_an_artifact_is_always_served_as_an_attachment(
     assert response.headers["content-disposition"].startswith("attachment")
 
 
-async def test_a_html_artifact_is_not_rendered_inline(
-    client: AsyncClient, artifact_board: ArtifactBoard, platform_settings: PlatformSettings
-) -> None:
+async def test_a_html_artifact_is_not_rendered_inline(client: AsyncClient, artifact_board: ArtifactBoard,
+    platform_settings: PlatformSettings) -> None:
     """同上, 但拿一个真的 `.html` 去试: 类型必须仍是通用二进制, 不能是 `text/html`."""
 
     html_name = "report.html"
@@ -235,12 +225,8 @@ async def test_a_html_artifact_is_not_rendered_inline(
     assert "text/html" not in response.headers["content-type"]
 
 
-async def test_an_unfinished_run_still_lists_its_artifacts(
-    client: AsyncClient,
-    artifact_board: ArtifactBoard,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_an_unfinished_run_still_lists_its_artifacts(client: AsyncClient, artifact_board: ArtifactBoard,
+    database: PlatformDatabase, platform_settings: PlatformSettings) -> None:
     """运行中的轮也能列: 这里读的是文件系统, 不碰库里的状态, 不存在"还没收尾"的限制."""
 
     await update_record_by_id(
@@ -259,9 +245,7 @@ async def test_an_unfinished_run_still_lists_its_artifacts(
     assert response.json()["artifacts"]
 
 
-async def test_a_run_without_a_job_directory_is_not_found(
-    client: AsyncClient, artifact_board: ArtifactBoard, database: PlatformDatabase
-) -> None:
+async def test_a_run_without_a_job_directory_is_not_found(client: AsyncClient, artifact_board: ArtifactBoard, database: PlatformDatabase) -> None:
     """目录可能在构造前那一轮就失败了 (行已落库而目录从未建起), 那种轮不该 500."""
 
     await update_record_by_id(
@@ -280,9 +264,8 @@ async def test_a_run_without_a_job_directory_is_not_found(
     assert response.json()["detail"] == JOB_DIRECTORY_MISSING_MESSAGE
 
 
-async def test_an_empty_workspace_path_never_exposes_the_runs_root(
-    client: AsyncClient, artifact_board: ArtifactBoard, database: PlatformDatabase
-) -> None:
+async def test_an_empty_workspace_path_never_exposes_the_runs_root(client: AsyncClient, artifact_board: ArtifactBoard,
+    database: PlatformDatabase) -> None:
     """空的工作目录名拼出来就是**运行根本身**.
 
     `WorkspacePath` 的列缺省是空串, 于是这个字符串一旦直拼, "在运行根之内"的判断会一路通过,
@@ -314,9 +297,7 @@ async def test_an_empty_workspace_path_never_exposes_the_runs_root(
     assert escaped.status_code == 404
 
 
-async def test_a_directory_is_not_downloadable(
-    client: AsyncClient, artifact_board: ArtifactBoard
-) -> None:
+async def test_a_directory_is_not_downloadable(client: AsyncClient, artifact_board: ArtifactBoard) -> None:
     """`Dump` 是目录不是文件: 放过去会变成一个读不完的响应."""
 
     response = await client.get(
@@ -328,9 +309,7 @@ async def test_a_directory_is_not_downloadable(
     assert response.json()["detail"] == ARTIFACT_NOT_FOUND_MESSAGE
 
 
-async def test_another_users_artifacts_are_out_of_reach(
-    client: AsyncClient, artifact_board: ArtifactBoard
-) -> None:
+async def test_another_users_artifacts_are_out_of_reach(client: AsyncClient, artifact_board: ArtifactBoard) -> None:
     """越权与不存在必须给出同一种结果: 两者分开判, 差别本身就是泄漏.
 
     两条端点各测一次, 且**两条都在同一份真实存在的目录上**测: 拿一个不存在的目录去测越权,
@@ -351,9 +330,7 @@ async def test_another_users_artifacts_are_out_of_reach(
     assert listing.json()["detail"] == download.json()["detail"]
 
 
-async def test_artifacts_reject_an_anonymous_caller(
-    client: AsyncClient, artifact_board: ArtifactBoard
-) -> None:
+async def test_artifacts_reject_an_anonymous_caller(client: AsyncClient, artifact_board: ArtifactBoard) -> None:
     listing = await client.get(_artifacts_path(artifact_board.member_run.id))
     download = await client.get(
         _artifact_path(artifact_board.member_run.id, RESULT_FILENAME)
@@ -379,9 +356,8 @@ def traversal_targets(artifact_board: ArtifactBoard) -> list[str]:
     ]
 
 
-async def test_a_traversal_attempt_is_indistinguishable_from_a_missing_artifact(
-    client: AsyncClient, artifact_board: ArtifactBoard, traversal_targets: list[str]
-) -> None:
+async def test_a_traversal_attempt_is_indistinguishable_from_a_missing_artifact(client: AsyncClient,
+    artifact_board: ArtifactBoard, traversal_targets: list[str]) -> None:
     """越界一律当"产物不存在", 不回"路径非法": 后者等于确认那个路径存在."""
 
     for target in traversal_targets:

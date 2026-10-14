@@ -88,9 +88,7 @@ def bearer_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def assert_rejected(
-    response: Response, expected_message: str, *rejected_values: str
-) -> None:
+def assert_rejected(response: Response, expected_message: str, *rejected_values: str) -> None:
     """一次被拒的写操作: 400、文案相符, 且不原样回显调用方给出的取值.
 
     不回显是硬要求 (D.03): 文案进响应体, 带上调用方的输入就等于平台把一次错误请求放大成一次
@@ -105,13 +103,8 @@ def assert_rejected(
         assert rejected_value not in response.text
 
 
-async def fetch_page[RecordType: BaseModel](
-    client: AsyncClient,
-    path: str,
-    token: str,
-    response_model: type[RecordType],
-    **parameters: object,
-) -> PageResponse[RecordType]:
+async def fetch_page[RecordType: BaseModel](client: AsyncClient, path: str, token: str,
+    response_model: type[RecordType], **parameters: object) -> PageResponse[RecordType]:
     """请求一个列表端点并解出分页信封."""
 
     response = await client.get(path, params=parameters, headers=bearer_headers(token))
@@ -127,9 +120,7 @@ def record_ids[RecordType](page: PageResponse[RecordType]) -> list[str]:
     return [record.id for record in page.records]
 
 
-def read_seed_database_rows(
-    database_path: Path, table_name: str
-) -> list[tuple[object, ...]]:
+def read_seed_database_rows(database_path: Path, table_name: str) -> list[tuple[object, ...]]:
     """把引擎种子库里的某张表整表读出来.
 
     用 `SELECT *` 而**不列列名**: 列序本身就是种子库用例要验的东西之一, 列出来就把它的来源从被
@@ -148,9 +139,7 @@ async def list_visible_strategy_ids(client: AsyncClient, token: str) -> list[str
     return record_ids(await fetch_page(client, STRATEGIES_PATH, token, StrategyResponse))
 
 
-async def get_strategy_response(
-    client: AsyncClient, token: str, strategy_id: str
-) -> Response:
+async def get_strategy_response(client: AsyncClient, token: str, strategy_id: str) -> Response:
     """请求策略详情, 原样返回响应.
 
     详情请求散在多个测试模块里, 有的要状态码、有的要响应体、有的要在整段响应文本上找
@@ -162,9 +151,7 @@ async def get_strategy_response(
     )
 
 
-async def read_strategy_detail(
-    client: AsyncClient, token: str, strategy_id: str
-) -> StrategyDetailResponse:
+async def read_strategy_detail(client: AsyncClient, token: str, strategy_id: str) -> StrategyDetailResponse:
     """读策略详情, 断言取得到再解出响应体."""
 
     response = await get_strategy_response(client, token, strategy_id)
@@ -174,9 +161,7 @@ async def read_strategy_detail(
     return StrategyDetailResponse.model_validate(response.json())
 
 
-async def read_strategy_status_code(
-    client: AsyncClient, token: str, strategy_id: str
-) -> int:
+async def read_strategy_status_code(client: AsyncClient, token: str, strategy_id: str) -> int:
     """读策略详情, 只要状态码.
 
     越权用例要的就是这个: 把响应体也解出来反而会写死在"取不到"上, 而取不到与不存在本就
@@ -186,9 +171,7 @@ async def read_strategy_status_code(
     return (await get_strategy_response(client, token, strategy_id)).status_code
 
 
-async def persist_record[ModelType: DeclarativeBase](
-    database: PlatformDatabase, record: ModelType
-) -> ModelType:
+async def persist_record[ModelType: DeclarativeBase](database: PlatformDatabase, record: ModelType) -> ModelType:
     """直接落库一条新记录."""
 
     async with database.session_scope() as session:
@@ -198,12 +181,8 @@ async def persist_record[ModelType: DeclarativeBase](
     return record
 
 
-async def update_record_by_id[ModelType: DeclarativeBase](
-    database: PlatformDatabase,
-    model_type: type[ModelType],
-    record_id: str,
-    apply_change: Callable[[ModelType], None],
-) -> None:
+async def update_record_by_id[ModelType: DeclarativeBase](database: PlatformDatabase, model_type: type[ModelType],
+    record_id: str, apply_change: Callable[[ModelType], None]) -> None:
     """按主键取一条记录, 施加改动后落库.
 
     取不到时直接报错: 夹具对象缺失会让后续断言以"属性为 None"这类面目出现, 追因很费时.
@@ -220,13 +199,8 @@ async def update_record_by_id[ModelType: DeclarativeBase](
         await session.commit()
 
 
-async def create_user_record(
-    database: PlatformDatabase,
-    username: str,
-    password: str = DEFAULT_MEMBER_PASSWORD,
-    user_type: UserType = UserType.USER,
-    status: UserStatus = UserStatus.ACTIVE,
-) -> UserModel:
+async def create_user_record(database: PlatformDatabase, username: str, password: str = DEFAULT_MEMBER_PASSWORD,
+    user_type: UserType = UserType.USER, status: UserStatus = UserStatus.ACTIVE) -> UserModel:
     """直接落库建一个账号."""
 
     return await persist_record(
@@ -242,9 +216,7 @@ async def create_user_record(
     )
 
 
-async def bulk_create_user_records(
-    database: PlatformDatabase, user_count: int, username_prefix: str
-) -> list[str]:
+async def bulk_create_user_records(database: PlatformDatabase, user_count: int, username_prefix: str) -> list[str]:
     """批量落库建号, 只回主键, 建出来的账号不用于登录.
 
     口令散列一律用同一个按格式就通不过的占位串: 这些账号只为"在册"而存在, 而
@@ -269,9 +241,7 @@ async def bulk_create_user_records(
     return user_ids
 
 
-async def create_signed_in_account(
-    database: PlatformDatabase, client: AsyncClient, username: str
-) -> SignedInAccount:
+async def create_signed_in_account(database: PlatformDatabase, client: AsyncClient, username: str) -> SignedInAccount:
     """造一个账号并经登录接口取到令牌.
 
     令牌一律走登录接口取, 不直接签发: 造出来的令牌若与线上签发路径不是同一条, 鉴权用例
@@ -286,9 +256,7 @@ async def create_signed_in_account(
     )
 
 
-async def update_user_status_record(
-    database: PlatformDatabase, user_id: str, status: UserStatus
-) -> None:
+async def update_user_status_record(database: PlatformDatabase, user_id: str, status: UserStatus) -> None:
     """直接落库改账号状态."""
 
     await update_record_by_id(
@@ -296,12 +264,8 @@ async def update_user_status_record(
     )
 
 
-async def create_strategy_record(
-    database: PlatformDatabase,
-    owner: UserModel,
-    name: str,
-    visibility_type: StrategyVisibility = StrategyVisibility.PRIVATE,
-) -> StrategyModel:
+async def create_strategy_record(database: PlatformDatabase, owner: UserModel, name: str,
+    visibility_type: StrategyVisibility = StrategyVisibility.PRIVATE) -> StrategyModel:
     """直接落库建一个策略."""
 
     return await persist_record(
@@ -327,13 +291,8 @@ async def soft_delete_strategy_record(database: PlatformDatabase, strategy_id: s
     )
 
 
-async def create_strategy_grant_record(
-    database: PlatformDatabase,
-    strategy: StrategyModel,
-    grantee: UserModel,
-    granted_by: UserModel,
-    permission_type: GrantPermission = GrantPermission.READ,
-) -> None:
+async def create_strategy_grant_record(database: PlatformDatabase, strategy: StrategyModel, grantee: UserModel,
+    granted_by: UserModel, permission_type: GrantPermission = GrantPermission.READ) -> None:
     """直接落库建一条授权."""
 
     await persist_record(
@@ -347,13 +306,8 @@ async def create_strategy_grant_record(
     )
 
 
-async def create_strategy_version_record(
-    database: PlatformDatabase,
-    strategy: StrategyModel,
-    uploaded_by: UserModel,
-    entry_filename: str = "entry.py",
-    configuration_json: str | None = "{}",
-) -> StrategyVersionModel:
+async def create_strategy_version_record(database: PlatformDatabase, strategy: StrategyModel, uploaded_by: UserModel,
+    entry_filename: str = "entry.py", configuration_json: str | None = "{}") -> StrategyVersionModel:
     """直接落库建一个策略版本.
 
     `configuration_json` 默认是空对象 (即"这个策略一个参数都没有"), 需要按模板做判据的用例自己
@@ -377,21 +331,11 @@ async def create_strategy_version_record(
     )
 
 
-async def create_run_record(
-    database: PlatformDatabase,
-    user: UserModel,
-    strategy: StrategyModel,
-    version: StrategyVersionModel,
-    status: RunStatus = RunStatus.SUCCEEDED,
-    trade_count: int = BASELINE_TRADE_COUNT,
-    order_count: int = BASELINE_ORDER_COUNT,
-    balance: float = BASELINE_BALANCE,
-    submitted_at: datetime | None = None,
-    params_json: str = "{}",
-    backtest_config_json: str = "{}",
-    engine_version: str = "",
-    run_id: str | None = None,
-) -> RunModel:
+async def create_run_record(database: PlatformDatabase, user: UserModel, strategy: StrategyModel,
+    version: StrategyVersionModel, status: RunStatus = RunStatus.SUCCEEDED, trade_count: int = BASELINE_TRADE_COUNT,
+    order_count: int = BASELINE_ORDER_COUNT, balance: float = BASELINE_BALANCE, submitted_at: datetime | None = None,
+    params_json: str = "{}", backtest_config_json: str = "{}", engine_version: str = "",
+    run_id: str | None = None) -> RunModel:
     """直接落库建一个运行.
 
     指标列可取非基线值: 排序与筛选的断言要靠互不相同的取值才区分得开.

@@ -40,9 +40,7 @@ async def _sign_in_admin(client: AsyncClient) -> str:
     return await login(client, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD)
 
 
-async def test_startup_seeds_exactly_one_admin_account(
-    client: AsyncClient, database: PlatformDatabase
-) -> None:
+async def test_startup_seeds_exactly_one_admin_account(client: AsyncClient, database: PlatformDatabase) -> None:
     async with database.session_scope() as session:
         total = await session.scalar(select(func.count()).select_from(UserModel))
         seeded = await session.scalar(select(UserModel))
@@ -75,9 +73,7 @@ async def test_login_rejects_wrong_password(client: AsyncClient) -> None:
     assert response.json()["detail"] == INVALID_CREDENTIALS_DETAIL
 
 
-async def test_login_rejects_unknown_username_with_same_message(
-    client: AsyncClient,
-) -> None:
+async def test_login_rejects_unknown_username_with_same_message(client: AsyncClient) -> None:
     unknown_response = await client.post(
         LOGIN_PATH,
         json={"username": "never-created-account", "password": DEFAULT_MEMBER_PASSWORD},
@@ -91,9 +87,7 @@ async def test_login_rejects_unknown_username_with_same_message(
     assert unknown_response.json() == wrong_password_response.json()
 
 
-async def test_login_rejects_disabled_account(
-    client: AsyncClient, database: PlatformDatabase
-) -> None:
+async def test_login_rejects_disabled_account(client: AsyncClient, database: PlatformDatabase) -> None:
     await create_user_record(database, MEMBER_USERNAME, status=UserStatus.DISABLED)
 
     response = await client.post(
@@ -105,9 +99,7 @@ async def test_login_rejects_disabled_account(
     assert response.json()["detail"] == DISABLED_ACCOUNT_DETAIL
 
 
-async def test_disabled_account_with_wrong_password_reports_credentials_not_status(
-    client: AsyncClient, database: PlatformDatabase
-) -> None:
+async def test_disabled_account_with_wrong_password_reports_credentials_not_status(client: AsyncClient, database: PlatformDatabase) -> None:
     await create_user_record(database, MEMBER_USERNAME, status=UserStatus.DISABLED)
 
     response = await client.post(
@@ -148,9 +140,7 @@ async def test_read_current_user_without_token_is_unauthorized(client: AsyncClie
     assert response.headers["www-authenticate"] == "Bearer"
 
 
-async def test_read_current_user_with_malformed_token_is_unauthorized(
-    client: AsyncClient,
-) -> None:
+async def test_read_current_user_with_malformed_token_is_unauthorized(client: AsyncClient) -> None:
     response = await client.get(CURRENT_USER_PATH, headers=bearer_headers(GARBAGE_TOKEN))
 
     assert response.status_code == 401
@@ -158,9 +148,7 @@ async def test_read_current_user_with_malformed_token_is_unauthorized(
     assert response.headers["www-authenticate"] == "Bearer"
 
 
-async def test_read_current_user_with_non_bearer_scheme_is_unauthorized(
-    client: AsyncClient,
-) -> None:
+async def test_read_current_user_with_non_bearer_scheme_is_unauthorized(client: AsyncClient) -> None:
     token = await _sign_in_admin(client)
 
     response = await client.get(
@@ -171,9 +159,7 @@ async def test_read_current_user_with_non_bearer_scheme_is_unauthorized(
     assert response.json()["detail"] == MISSING_TOKEN_DETAIL
 
 
-async def test_token_issued_before_disable_stops_working(
-    client: AsyncClient, database: PlatformDatabase
-) -> None:
+async def test_token_issued_before_disable_stops_working(client: AsyncClient, database: PlatformDatabase) -> None:
     member = await create_user_record(database, MEMBER_USERNAME)
     token = await login(client, MEMBER_USERNAME, DEFAULT_MEMBER_PASSWORD)
 
@@ -185,9 +171,7 @@ async def test_token_issued_before_disable_stops_working(
     assert response.json()["detail"] == DISABLED_ACCOUNT_DETAIL
 
 
-async def test_admin_and_member_are_distinguishable_by_user_type(
-    client: AsyncClient, database: PlatformDatabase
-) -> None:
+async def test_admin_and_member_are_distinguishable_by_user_type(client: AsyncClient, database: PlatformDatabase) -> None:
     await create_user_record(database, MEMBER_USERNAME)
 
     member_response = await client.get(
@@ -212,9 +196,7 @@ async def test_admin_and_member_are_distinguishable_by_user_type(
         {"username": TEST_ADMIN_USERNAME, "password": ""},
     ],
 )
-async def test_login_rejects_incomplete_request_body(
-    client: AsyncClient, request_body: dict[str, str]
-) -> None:
+async def test_login_rejects_incomplete_request_body(client: AsyncClient, request_body: dict[str, str]) -> None:
     response = await client.post(LOGIN_PATH, json=request_body)
 
     assert response.status_code == 422

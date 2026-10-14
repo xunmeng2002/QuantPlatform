@@ -66,9 +66,7 @@ def add_missing_columns(connection: Connection, metadata: MetaData) -> list[str]
     return added_columns
 
 
-def _build_add_column_statement(
-    connection: Connection, table_name: str, column: Column[object]
-) -> str | None:
+def _build_add_column_statement(connection: Connection, table_name: str, column: Column[object]) -> str | None:
     """渲染一条 `ALTER TABLE ... ADD COLUMN`; 该列补不上时回 None."""
 
     rendered_column = str(CreateColumn(column).compile(dialect=connection.dialect))

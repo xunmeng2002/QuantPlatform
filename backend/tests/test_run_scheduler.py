@@ -153,16 +153,10 @@ QUOTE_HUB_CLI_FILENAME = quote_hub.QUOTE_HUB_CLI_FILENAME
 QUOTE_HUB_DATABASE_FILENAME = quote_hub.QUOTE_HUB_DATABASE_FILENAME
 
 
-async def _submit_and_wait(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    token: str,
-    strategy_id: str,
-    params: dict[str, object] | None = None,
-    bar_period: str = DEFAULT_BAR_PERIOD,
+async def _submit_and_wait(client: AsyncClient, database: PlatformDatabase, token: str, strategy_id: str,
+    params: dict[str, object] | None = None, bar_period: str = DEFAULT_BAR_PERIOD,
     commission_group_id: int = DEFAULT_COMMISSION_GROUP_ID,
-    timeout_seconds: float = CONCURRENT_ELAPSED_LIMIT_SECONDS,
-) -> RunModel:
+    timeout_seconds: float = CONCURRENT_ELAPSED_LIMIT_SECONDS) -> RunModel:
     """提交一轮并等它落终态."""
 
     submitted = await submit_run(
@@ -181,14 +175,9 @@ async def _submit_and_wait(
     ("exit_delay_seconds", "sleep_seconds"),
     [(0, 0), (0, CONCURRENT_SLEEP_SECONDS)],
 )
-async def test_a_successful_run_is_recorded_end_to_end(
-    exit_delay_seconds: float,
-    sleep_seconds: float,
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_successful_run_is_recorded_end_to_end(exit_delay_seconds: float, sleep_seconds: float,
+    client: AsyncClient, database: PlatformDatabase, platform_settings: PlatformSettings,
+    run_owner: SignedInAccount) -> None:
     """一轮跑通的作业要走完: 落 `queued` → 起进程 → 写结果 → 镜像入库 → 落 `succeeded`.
 
     两个参数化取值覆盖两条真实路径: 立即退出, 以及"先睡一会儿再退出"(并发用例靠的正是后者).
@@ -221,12 +210,8 @@ async def test_a_successful_run_is_recorded_end_to_end(
     assert run.runner_pid is not None
 
 
-async def test_the_job_directory_holds_a_seed_database_for_this_contract_only(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_the_job_directory_holds_a_seed_database_for_this_contract_only(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """作业目录里那份种子库只有这一轮的合约的费率行.
 
     它是**按轮生成**的派生物: 库里存的是三级规则 (交易所级那一行合约格是空的), 引擎读到的必须是
@@ -288,12 +273,8 @@ async def test_the_job_directory_holds_a_seed_database_for_this_contract_only(
     assert staging_seed_database_names(platform_settings) == set()
 
 
-async def test_the_job_directory_seed_database_follows_the_run_commission_group(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_the_job_directory_seed_database_follows_the_run_commission_group(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """用 2 号组跑一轮 → 作业目录里那份种子库的费率行属于 2 号组, 不属于 1 号组.
 
     两个组**同时**在库里 (1 号组由 `create_runnable_strategy` 铺好, 2 号组另行备上), 于是这条断言
@@ -336,12 +317,8 @@ async def test_the_job_directory_seed_database_follows_the_run_commission_group(
     ]
 
 
-async def test_the_job_directory_matches_the_launch_contract(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_the_job_directory_matches_the_launch_contract(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """作业目录逐项对照启动契约.
 
     两条断言是**启动期致命**的, 单看"跑成功了"看不出来: 入口文件名必须是裸文件名 (引擎日志器
@@ -410,12 +387,8 @@ async def test_the_job_directory_matches_the_launch_contract(
     ], "作业目录构造留下了临时目录"
 
 
-async def test_the_strategy_configuration_carries_exactly_the_template_keys_plus_three(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_the_strategy_configuration_carries_exactly_the_template_keys_plus_three(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """策略配置的键集合**恰好**是 {模板的键} ∪ {平台那三个}——不多, 也不少.
 
     不多: 平台不提任何自己的键进去, 策略读到的每一个键都能在那份上传的 JSON 里找到出处.
@@ -490,9 +463,7 @@ async def test_the_strategy_configuration_carries_exactly_the_template_keys_plus
     assert engine_configuration["BarPreces"] == MARKET_DATA_PRECISION
 
 
-async def test_concurrency_never_exceeds_the_configured_limit(
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_concurrency_never_exceeds_the_configured_limit(platform_settings: PlatformSettings) -> None:
     """并发上限靠最大重叠数判定, 不靠采样.
 
     三个 `sleep(2)` 的作业并发提交, 上限为 2. 判据是三份 `span.txt` 里 `[start, end]` 区间的
@@ -539,9 +510,7 @@ async def test_concurrency_never_exceeds_the_configured_limit(
     assert maximum_overlap(intervals) == 2
 
 
-async def test_a_queued_job_is_not_started_before_its_turn(
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_queued_job_is_not_started_before_its_turn(platform_settings: PlatformSettings) -> None:
     """排队中的作业: 行是 `queued`, 三个"已经开始"的痕迹一个都还没有.
 
     作业目录也**不存在**——它由作业任务构造, 而不是提交端点反过来的话用户提交完立刻就能在一个
@@ -595,9 +564,7 @@ async def test_a_queued_job_is_not_started_before_its_turn(
     assert maximum_overlap(intervals) == 1
 
 
-async def test_two_concurrent_jobs_do_not_share_a_database_file(
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_two_concurrent_jobs_do_not_share_a_database_file(platform_settings: PlatformSettings) -> None:
     """相对写路径的隔离: 两个作业各写各的库, 而两份配置里的取值**逐字相同**.
 
     这条只能靠并发用例验: 单作业时绝对写路径也"跑得通", 只有两个作业同时跑才会共写同一个库
@@ -653,12 +620,8 @@ async def test_two_concurrent_jobs_do_not_share_a_database_file(
     ], "运行根下出现了文件, 说明有作业把写路径解析到了作业目录之外"
 
 
-async def test_the_full_output_is_kept_on_disk_and_only_the_tail_is_reported(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_the_full_output_is_kept_on_disk_and_only_the_tail_is_reported(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """全量输出落盘, 内存里只留尾部, 且尾部是文件内容的**真后缀**.
 
     尾部按字节截, 故起点可能落在多字节字符的续字节上——那会凭空多出一个 U+FFFD, 看着像"引擎
@@ -690,12 +653,8 @@ async def test_the_full_output_is_kept_on_disk_and_only_the_tail_is_reported(
     assert written_stdout.endswith(run.stdout_tail.encode("utf-8"))
 
 
-async def test_a_job_that_floods_the_other_stream_does_not_deadlock(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_job_that_floods_the_other_stream_does_not_deadlock(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """只往 stderr 灌 1 MB 而 stdout 一个字不写, 作业照样跑完.
 
     串行读两条流的实现会挂在这里: Windows 管道缓冲约 64 KB, 桩阻塞在写系统调用上, `wait()` 永不
@@ -726,12 +685,8 @@ async def test_a_job_that_floods_the_other_stream_does_not_deadlock(
     assert (job_directory(platform_settings, run.id) / "stdout.txt").read_bytes() == b""
 
 
-async def test_an_entry_filename_with_a_space_survives_launch(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_an_entry_filename_with_a_space_survives_launch(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """入口文件名含空格也要跑得通.
 
     这一条依赖 `create_subprocess_exec` 的参数列表语义: 改成手工拼一行命令行, 空格处会被拆成两个
@@ -754,12 +709,8 @@ async def test_an_entry_filename_with_a_space_survives_launch(
     assert (job_directory(platform_settings, run.id) / STUB_SPACE_ENTRY_FILENAME).is_file()
 
 
-async def test_a_failed_job_construction_does_not_starve_the_queue(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_failed_job_construction_does_not_starve_the_queue(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """作业目录构造失败落 `failed`, 且**随后的作业照样跑完**.
 
     后半句才是重点: 构造失败的那一轮若把信号量漏还, 在上限为 1 的部署下表现为"从此再也不跑了"
@@ -801,12 +752,8 @@ async def test_a_failed_job_construction_does_not_starve_the_queue(
     assert job_directory(platform_settings, following_run.id).is_dir()
 
 
-async def test_soft_deleting_the_strategy_does_not_stop_a_submitted_job(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_soft_deleting_the_strategy_does_not_stop_a_submitted_job(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """提交之后软删策略, 已提交的作业仍要跑完.
 
     版本目录是 append-only 的: 软删只改一行, 不碰盘. 若软删顺手删了版本目录, 一轮已经排队的回测
@@ -828,9 +775,7 @@ async def test_soft_deleting_the_strategy_does_not_stop_a_submitted_job(
     assert run.status == RunStatus.SUCCEEDED.value
 
 
-async def test_a_job_over_the_time_limit_is_killed(
-    platform_settings: PlatformSettings,
-) -> None:
+async def test_a_job_over_the_time_limit_is_killed(platform_settings: PlatformSettings) -> None:
     """超时后进程必须真的死掉, 而不只是库里写了一句 `timeout`.
 
     判据是 `span.txt` 里**没有 end 行**: 桩要睡满 30 秒才写它, 而时限是 1 秒. 若进程没被收掉,
@@ -869,12 +814,8 @@ async def test_a_job_over_the_time_limit_is_killed(
         assert count_span_end_lines(limited_settings, run.id) == 0
 
 
-async def test_the_host_startup_failure_exit_code_is_put_on_the_row(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_the_host_startup_failure_exit_code_is_put_on_the_row(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """退出码 1 = 宿主启动失败: 结果文件不存在, 四个镜像列一个都不许落.
 
     判据是 `db_path == ""`: 空串是列默认值, 而"引擎真跑过"一定会把它写成 `./BackTest_<id>.db`.
@@ -901,12 +842,8 @@ async def test_the_host_startup_failure_exit_code_is_put_on_the_row(
     assert run.trade_count is None
 
 
-async def test_the_unreadable_result_exit_code_is_put_on_the_row(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_the_unreadable_result_exit_code_is_put_on_the_row(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """退出码 2 = 结果文件缺失或不可解析。
 
     "不可解析"与"缺失"同码, 因为对平台来说后续动作一样: 拿不到结果就是拿不到.
@@ -930,12 +867,8 @@ async def test_the_unreadable_result_exit_code_is_put_on_the_row(
     assert (job_directory(platform_settings, run.id) / RESULT_FILENAME).is_file()
 
 
-async def test_a_reported_engine_failure_is_mirrored(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_reported_engine_failure_is_mirrored(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """退出码 3 **且结果文件可解析** = 引擎报告失败: 镜像要落库.
 
     与下一条用例成对: 两条的退出码相同, 只有文件在不在之分. 这就是"消歧靠文件不靠码"。
@@ -961,12 +894,8 @@ async def test_a_reported_engine_failure_is_mirrored(
     assert run.error_msg == "桩: 引擎报告本轮回测失败"
 
 
-async def test_a_reported_engine_failure_without_a_result_file_is_not_mirrored(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_reported_engine_failure_without_a_result_file_is_not_mirrored(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """退出码 3 但**没有**结果文件 = 宿主崩溃: 一个镜像列都不许落.
 
     文案也一并钉住: 没有结果文件时平台看不见任何原因, 只能如实说"异常退出 (退出码 3)". 写成
@@ -996,12 +925,8 @@ async def test_a_reported_engine_failure_without_a_result_file_is_not_mirrored(
     assert run.error_msg == build_unexpected_exit_message(run.exit_code)
 
 
-async def test_a_zero_exit_code_without_a_result_file_is_not_success(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_zero_exit_code_without_a_result_file_is_not_success(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """退出码 0 **不足以**判成功: 结果文件必须存在、可解析、且 `Success` 为真.
 
     少了这一条, 一个把结果文件写坏的策略会被当成跑成功了——而"跑成功了"是用户唯一不会复查的
@@ -1025,12 +950,8 @@ async def test_a_zero_exit_code_without_a_result_file_is_not_success(
     assert run.error_msg == SUCCESS_WITHOUT_RESULT_MESSAGE
 
 
-async def test_the_result_file_is_mirrored_column_by_column(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_the_result_file_is_mirrored_column_by_column(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """结果镜像落库: 桩写的每一列都要逐项出现在行上.
 
     `Balance` 取 `998951.4506464996` 逐位相等, 钉住的是金额列用 `Float` 而非 `Numeric`: 定点数
@@ -1059,12 +980,8 @@ async def test_the_result_file_is_mirrored_column_by_column(
     assert run.balance == 998951.4506464996
 
 
-async def test_a_result_file_written_in_gbk_is_still_a_report(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_result_file_written_in_gbk_is_still_a_report(client: AsyncClient, database: PlatformDatabase,
+    platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """结果文件是 GBK 编码时, 结论仍是"引擎报告失败", 不是"结果文件不可解析".
 
     中文 Windows 上引擎有 GBK 变体, 而那种字节序列不是合法 UTF-8. 读文件若不宽容解码, 一个
@@ -1091,12 +1008,8 @@ async def test_a_result_file_written_in_gbk_is_still_a_report(
     assert run.error_id == REPORTED_FAILURE_ERROR_ID
 
 
-async def test_a_result_reporting_a_foreign_run_id_still_lands_on_this_row(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_result_reporting_a_foreign_run_id_still_lands_on_this_row(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, run_owner: SignedInAccount) -> None:
     """结果文件里的 `RunId` 与本行不符时**以行主键为准**, 且不新建行.
 
     引擎可能报回上一轮的 id. 拿结果文件的 id 去定位行, 轻则镜像写进别人的行, 重则凭空多出一行
@@ -1124,13 +1037,9 @@ async def test_a_result_reporting_a_foreign_run_id_still_lands_on_this_row(
     )
 
 
-async def test_a_failed_market_data_preparation_fails_the_run_without_starting_the_engine(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    quote_hub_root: Path,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_failed_market_data_preparation_fails_the_run_without_starting_the_engine(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, quote_hub_root: Path,
+    run_owner: SignedInAccount) -> None:
     """行情备不齐时**根本不起引擎**: 干跑一轮只会花掉时间并留下一份看不出来由的空结果.
 
     退出码保持 NULL 与"引擎真的没起"是同一件事: 起了进程就一定有退出码或超时.
@@ -1153,13 +1062,9 @@ async def test_a_failed_market_data_preparation_fails_the_run_without_starting_t
     assert not (job_directory(platform_settings, run.id) / ARGV0_FILENAME).exists()
 
 
-async def test_a_missing_market_data_component_fails_only_the_runs_that_name_a_contract(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    quote_hub_root: Path,
-    run_owner: SignedInAccount,
-) -> None:
+async def test_a_missing_market_data_component_fails_only_the_runs_that_name_a_contract(client: AsyncClient,
+    database: PlatformDatabase, platform_settings: PlatformSettings, quote_hub_root: Path,
+    run_owner: SignedInAccount) -> None:
     """组件不在位时文案要指向"组件不在位", 而不是让它后来以某句引擎侧的话收场."""
 
     (quote_hub_root / QUOTE_HUB_CLI_FILENAME).unlink()

@@ -123,9 +123,7 @@ def prefill_path(strategy_id: str) -> str:
     return PREFILL_PATH_TEMPLATE.format(strategy_id=strategy_id)
 
 
-async def read_prefill(
-    client: AsyncClient, token: str | None, strategy_id: str
-) -> LastSubmittedParametersResponse:
+async def read_prefill(client: AsyncClient, token: str | None, strategy_id: str) -> LastSubmittedParametersResponse:
     """请求预填端点并解出响应体; 非 200 直接失败."""
 
     headers = bearer_headers(token) if token is not None else {}
@@ -136,12 +134,7 @@ async def read_prefill(
     return LastSubmittedParametersResponse.model_validate(response.json())
 
 
-async def submit_recording_run(
-    database: PlatformDatabase,
-    board: RecordBoard,
-    owner: UserModel | None = None,
-    **overrides: Any,
-) -> RunModel:
+async def submit_recording_run(database: PlatformDatabase, board: RecordBoard, owner: UserModel | None = None, **overrides: Any) -> RunModel:
     """记录级落一轮"跑过"的运行: 两份配置文本与状态都由调用方给."""
 
     arguments: dict[str, Any] = {
@@ -178,9 +171,7 @@ async def publish_strategy(database: PlatformDatabase, board: RecordBoard) -> No
 
 
 @pytest_asyncio.fixture
-async def record_board(
-    client: AsyncClient, database: PlatformDatabase
-) -> RecordBoard:
+async def record_board(client: AsyncClient, database: PlatformDatabase) -> RecordBoard:
     """记录级的一个账号、一个私有策略与它的一份版本.
 
     版本本身不参与预填 (取数只读那一轮的两份配置文本), 故用 `create_strategy_version_record` 的
@@ -200,12 +191,8 @@ async def record_board(
 
 
 @pytest_asyncio.fixture
-async def submitted_board(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    platform_settings: PlatformSettings,
-    run_owner: SignedInAccount,
-) -> SubmittedBoard:
+async def submitted_board(client: AsyncClient, database: PlatformDatabase, platform_settings: PlatformSettings,
+    run_owner: SignedInAccount) -> SubmittedBoard:
     """一个可提交的策略, 外加经接口真提交的一轮."""
 
     runnable = await create_runnable_strategy(
@@ -233,9 +220,7 @@ async def submitted_board(
     )
 
 
-async def test_a_submitted_run_is_read_back_as_its_own_parameters(
-    client: AsyncClient, submitted_board: SubmittedBoard
-) -> None:
+async def test_a_submitted_run_is_read_back_as_its_own_parameters(client: AsyncClient, submitted_board: SubmittedBoard) -> None:
     """刚提交的那一轮就是"上一次": 运行级字段逐项相等, 参数按原类型带回来.
 
     这里读的是**提交自己写下的**两份文本, 故它同时是"写进去的与读出来的逐字一致"的证明. 那一轮
@@ -258,9 +243,7 @@ async def test_a_submitted_run_is_read_back_as_its_own_parameters(
     assert prefill.params[FLOOD_BYTES_PARAMETER_KEY] == RECORDED_FLOOD_BYTES
 
 
-async def test_run_level_key_names_are_not_reported_as_parameters(
-    client: AsyncClient, submitted_board: SubmittedBoard
-) -> None:
+async def test_run_level_key_names_are_not_reported_as_parameters(client: AsyncClient, submitted_board: SubmittedBoard) -> None:
     """三个运行级键名不出现在 `params` 里, 参数**恰好**是模板里的那几个.
 
     它们已经在具名字段上; 再作为参数带回去, 前端就会给一个引擎键名 (`BarPreces` 这种) 渲染出一个
@@ -288,9 +271,7 @@ async def test_run_level_key_names_are_not_reported_as_parameters(
         assert run_field_key_name not in prefill.params
 
 
-async def test_a_strategy_without_history_reads_back_as_no_memory(
-    client: AsyncClient, record_board: RecordBoard
-) -> None:
+async def test_a_strategy_without_history_reads_back_as_no_memory(client: AsyncClient, record_board: RecordBoard) -> None:
     """没跑过 → 200 且字段全空, 不是 404.
 
     首次使用某个策略走的就是这条路, 而 404 已经表示"策略不存在或不可见": 两种含义挤在一个状态码
@@ -311,9 +292,7 @@ async def test_a_strategy_without_history_reads_back_as_no_memory(
     assert prefill.params == {}
 
 
-async def test_a_failed_run_is_read_back_like_any_other(
-    client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard
-) -> None:
+async def test_a_failed_run_is_read_back_like_any_other(client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard) -> None:
     """"最近一次"不看成败: 失败那一轮照样是预填来源 (用户拍板).
 
     夹具造的就是一轮 `failed`——它单独成立, 才说明实现里没有一条 `Status == succeeded` 的过滤.
@@ -329,9 +308,8 @@ async def test_a_failed_run_is_read_back_like_any_other(
     assert prefill.params[RECORDED_PARAMETER_KEY] == RECORDED_PARAMETER_VALUE
 
 
-async def test_the_run_level_values_are_read_from_the_strategy_configuration(
-    client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard
-) -> None:
+async def test_the_run_level_values_are_read_from_the_strategy_configuration(client: AsyncClient,
+    database: PlatformDatabase, record_board: RecordBoard) -> None:
     """三项运行级取值都取自**策略配置**里的固定键名, 且那三个键不进参数.
 
     交换/标的两项只存在于策略配置里 (引擎不认识它们), 故这两项成立就说明读的确实是那一份.
@@ -351,9 +329,7 @@ async def test_the_run_level_values_are_read_from_the_strategy_configuration(
     assert prefill.params == {RECORDED_PARAMETER_KEY: RECORDED_PARAMETER_VALUE}
 
 
-async def test_the_newest_submission_wins_over_an_earlier_one(
-    client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard
-) -> None:
+async def test_the_newest_submission_wins_over_an_earlier_one(client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard) -> None:
     """多轮取最新, 与成败无关."""
 
     submitted_base = utc_now()
@@ -373,9 +349,7 @@ async def test_the_newest_submission_wins_over_an_earlier_one(
     assert prefill.run_id == newest_run.id
 
 
-async def test_a_submitted_at_tie_is_broken_by_the_run_id(
-    client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard
-) -> None:
+async def test_a_submitted_at_tie_is_broken_by_the_run_id(client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard) -> None:
     """同一 `SubmittedAt` 时按主键兜平局: 两条都排在最前, 没有兜法就无"最新"可言.
 
     Windows 上 `SubmittedAt` 只有毫秒精度, 同毫秒提交的两轮可以完全同值 (调度侧认领队列用了同一个
@@ -398,9 +372,7 @@ async def test_a_submitted_at_tie_is_broken_by_the_run_id(
     assert prefill.run_id == larger_id_run.id
 
 
-async def test_another_users_newer_run_is_not_adopted(
-    client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard
-) -> None:
+async def test_another_users_newer_run_is_not_adopted(client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard) -> None:
     """归属人的轮次再新也不算你的: 粒度是 (用户, 策略), 不是策略.
 
     策略取 `public` 是为了让"可见"与"有记忆"分开——只要可见性对了就照归属人的参数填表, 是这条
@@ -418,9 +390,7 @@ async def test_another_users_newer_run_is_not_adopted(
     assert prefill.params == {}
 
 
-async def test_each_user_reads_back_their_own_latest_submission(
-    client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard
-) -> None:
+async def test_each_user_reads_back_their_own_latest_submission(client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard) -> None:
     """同一策略下, 各自拿各自的那一份——两个方向都断言.
 
     只断言"别人的不算数"的话, 一个把归属过滤写成 `user_id != 当前用户` 的实现照样通过.
@@ -455,13 +425,8 @@ async def test_each_user_reads_back_their_own_latest_submission(
 
 @pytest.mark.parametrize("broken_column", ["params_json", "backtest_config_json"])
 @pytest.mark.parametrize("broken_text", ["{", "[]"])
-async def test_an_unreadable_configuration_reads_back_as_no_memory(
-    broken_column: str,
-    broken_text: str,
-    client: AsyncClient,
-    database: PlatformDatabase,
-    record_board: RecordBoard,
-) -> None:
+async def test_an_unreadable_configuration_reads_back_as_no_memory(broken_column: str, broken_text: str,
+    client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard) -> None:
     """两份配置文本读不动 (坏 JSON 或不是对象) → 当作没有记忆, 不是 500.
 
     提交页是入口: 那里因为一条历史数据而报错, 用户既看不懂也无从修复. 两种坏法都试: 解析失败与
@@ -478,9 +443,7 @@ async def test_an_unreadable_configuration_reads_back_as_no_memory(
     assert prefill.params == {}
 
 
-async def test_a_single_bad_value_only_costs_its_own_field(
-    client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard
-) -> None:
+async def test_a_single_bad_value_only_costs_its_own_field(client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard) -> None:
     """单项读不动时逐项回默认, 不把整轮预填作废.
 
     一个字段是坏数据, 没有理由让其余十来个字段的预填一起失效. `true` 冒充 `1` 这一档是显式的:
@@ -514,9 +477,7 @@ async def test_a_single_bad_value_only_costs_its_own_field(
     assert prefill.end_trading_day == RECORDED_END_TRADING_DAY
 
 
-async def test_an_invisible_strategy_yields_404(
-    client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard
-) -> None:
+async def test_an_invisible_strategy_yields_404(client: AsyncClient, database: PlatformDatabase, record_board: RecordBoard) -> None:
     """看不到的策略 → 404, 与详情接口同一条可见性收口.
 
     `private` 且未授权: 跨租户一律"不存在", 403 会说漏"这个 id 是真的".
@@ -532,9 +493,7 @@ async def test_an_invisible_strategy_yields_404(
     assert response.status_code == 404
 
 
-async def test_an_anonymous_request_yields_401(
-    client: AsyncClient, record_board: RecordBoard
-) -> None:
+async def test_an_anonymous_request_yields_401(client: AsyncClient, record_board: RecordBoard) -> None:
     """无令牌 → 401."""
 
     response = await client.get(prefill_path(record_board.strategy.id))

@@ -72,9 +72,7 @@ def grants_path(strategy_id: str) -> str:
     return f"{STRATEGIES_PATH}/{strategy_id}/grants"
 
 
-def grant_entry(
-    grantee_user_id: str, permission_type: GrantPermission = GrantPermission.READ
-) -> dict[str, str]:
+def grant_entry(grantee_user_id: str, permission_type: GrantPermission = GrantPermission.READ) -> dict[str, str]:
     """一条授权项的请求体形态."""
 
     return {
@@ -93,12 +91,7 @@ def granted_user_ids(detail: StrategyDetailResponse) -> list[str]:
     return sorted(grant.grantee_user_id for grant in detail.grants)
 
 
-async def put_grants(
-    client: AsyncClient,
-    account: SignedInAccount,
-    strategy_id: str,
-    grants: list[dict[str, str]],
-) -> Response:
+async def put_grants(client: AsyncClient, account: SignedInAccount, strategy_id: str, grants: list[dict[str, str]]) -> Response:
     """整体替换授权集合."""
 
     return await client.put(
@@ -108,9 +101,7 @@ async def put_grants(
     )
 
 
-async def read_owner_view(
-    client: AsyncClient, grant_cast: GrantCast, strategy: StrategyModel
-) -> StrategyDetailResponse:
+async def read_owner_view(client: AsyncClient, grant_cast: GrantCast, strategy: StrategyModel) -> StrategyDetailResponse:
     """归属人眼中这条策略的状态: 可见性与完整授权列表."""
 
     return await read_strategy_detail(client, grant_cast.owner.token, strategy.id)
@@ -125,9 +116,7 @@ async def grant_cast(client: AsyncClient, database: PlatformDatabase) -> GrantCa
     )
 
 
-async def test_granting_makes_a_private_strategy_shared(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_granting_makes_a_private_strategy_shared(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     assert strategy.visibility_type == StrategyVisibility.PRIVATE.value
@@ -146,9 +135,7 @@ async def test_granting_makes_a_private_strategy_shared(
     assert owner_view.grants[0].granted_by_user_id == grant_cast.owner.user_id
 
 
-async def test_the_grantee_gains_visibility_and_sees_no_grant_list(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_the_grantee_gains_visibility_and_sees_no_grant_list(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     await put_grants(client, grant_cast.owner, strategy.id, [grant_entry(grant_cast.grantee.user_id)])
@@ -160,9 +147,8 @@ async def test_the_grantee_gains_visibility_and_sees_no_grant_list(
     assert grantee_view.grants == []
 
 
-async def test_an_ungranted_account_sees_neither_the_strategy_nor_a_hint(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_an_ungranted_account_sees_neither_the_strategy_nor_a_hint(client: AsyncClient,
+    database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     granted = await put_grants(
@@ -175,9 +161,7 @@ async def test_an_ungranted_account_sees_neither_the_strategy_nor_a_hint(
     assert await read_strategy_status_code(client, grant_cast.other.token, strategy.id) == 404
 
 
-async def test_replacing_the_grant_list_revokes_the_previous_grantee(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_replacing_the_grant_list_revokes_the_previous_grantee(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     await put_grants(client, grant_cast.owner, strategy.id, [grant_entry(grant_cast.grantee.user_id)])
@@ -195,9 +179,8 @@ async def test_replacing_the_grant_list_revokes_the_previous_grantee(
     assert await read_strategy_status_code(client, grant_cast.other.token, strategy.id) == 200
 
 
-async def test_an_empty_grant_list_revokes_everything_and_returns_to_private(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_an_empty_grant_list_revokes_everything_and_returns_to_private(client: AsyncClient,
+    database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     await put_grants(
@@ -218,9 +201,7 @@ async def test_an_empty_grant_list_revokes_everything_and_returns_to_private(
     assert await read_strategy_status_code(client, grant_cast.grantee.token, strategy.id) == 404
 
 
-async def test_a_public_strategy_stays_public_and_keeps_the_grants(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_a_public_strategy_stays_public_and_keeps_the_grants(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(
         database,
         grant_cast.owner.user,
@@ -241,9 +222,7 @@ async def test_a_public_strategy_stays_public_and_keeps_the_grants(
     assert await read_strategy_status_code(client, grant_cast.other.token, strategy.id) == 200
 
 
-async def test_empty_grants_on_a_public_strategy_leave_it_public(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_empty_grants_on_a_public_strategy_leave_it_public(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(
         database,
         grant_cast.owner.user,
@@ -261,9 +240,8 @@ async def test_empty_grants_on_a_public_strategy_leave_it_public(
     assert await read_strategy_status_code(client, grant_cast.other.token, strategy.id) == 200
 
 
-async def test_a_shared_strategy_without_grants_returns_to_private_on_an_empty_list(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_a_shared_strategy_without_grants_returns_to_private_on_an_empty_list(client: AsyncClient,
+    database: PlatformDatabase, grant_cast: GrantCast) -> None:
     """空名单配 `shared` 也要落到 `private`.
 
     这一格只有本用例覆盖: 上传时可指定 `shared` 而不带任何授权, 此后"没有名单"与
@@ -287,9 +265,7 @@ async def test_a_shared_strategy_without_grants_returns_to_private_on_an_empty_l
     assert owner_view.strategy.visibility_type is StrategyVisibility.PRIVATE
 
 
-async def test_only_the_owner_may_replace_the_grant_list(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_only_the_owner_may_replace_the_grant_list(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     response = await put_grants(
@@ -305,9 +281,7 @@ async def test_only_the_owner_may_replace_the_grant_list(
     assert owner_view.strategy.visibility_type is StrategyVisibility.PRIVATE
 
 
-async def test_a_grantee_may_not_widen_its_own_access(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_a_grantee_may_not_widen_its_own_access(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     granted = await put_grants(
@@ -327,9 +301,8 @@ async def test_a_grantee_may_not_widen_its_own_access(
     assert await read_strategy_status_code(client, grant_cast.other.token, strategy.id) == 404
 
 
-async def test_a_non_owner_may_not_replace_grants_even_on_a_public_strategy(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_a_non_owner_may_not_replace_grants_even_on_a_public_strategy(client: AsyncClient,
+    database: PlatformDatabase, grant_cast: GrantCast) -> None:
     """非归属人对一条**它看得见**的策略改授权, 仍是 404.
 
     上面那条"非归属人"用的是 private 策略, 于是 404 也可能只是没通过可见性这一关; 换成
@@ -358,9 +331,7 @@ async def test_a_non_owner_may_not_replace_grants_even_on_a_public_strategy(
     assert owner_view.strategy.visibility_type is StrategyVisibility.PUBLIC
 
 
-async def test_replacing_grants_on_an_absent_strategy_is_not_found(
-    client: AsyncClient, grant_cast: GrantCast
-) -> None:
+async def test_replacing_grants_on_an_absent_strategy_is_not_found(client: AsyncClient, grant_cast: GrantCast) -> None:
     response = await put_grants(
         client,
         grant_cast.owner,
@@ -372,9 +343,8 @@ async def test_replacing_grants_on_an_absent_strategy_is_not_found(
     assert response.json()["detail"] == STRATEGY_NOT_FOUND_MESSAGE
 
 
-async def test_replacing_grants_on_a_soft_deleted_strategy_is_not_found(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_replacing_grants_on_a_soft_deleted_strategy_is_not_found(client: AsyncClient, database: PlatformDatabase,
+    grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     await soft_delete_strategy_record(database, strategy.id)
@@ -387,9 +357,7 @@ async def test_replacing_grants_on_a_soft_deleted_strategy_is_not_found(
     assert response.json()["detail"] == STRATEGY_NOT_FOUND_MESSAGE
 
 
-async def test_granting_to_the_owner_is_rejected(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_granting_to_the_owner_is_rejected(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     response = await put_grants(
@@ -405,9 +373,8 @@ async def test_granting_to_the_owner_is_rejected(
     assert owner_view.strategy.visibility_type is StrategyVisibility.PRIVATE
 
 
-async def test_an_unknown_grantee_is_rejected_without_writing_anything(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_an_unknown_grantee_is_rejected_without_writing_anything(client: AsyncClient, database: PlatformDatabase,
+    grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     response = await put_grants(
@@ -426,9 +393,7 @@ async def test_an_unknown_grantee_is_rejected_without_writing_anything(
     assert owner_view.strategy.visibility_type is StrategyVisibility.PRIVATE
 
 
-async def test_a_failed_replacement_leaves_the_previous_grants_intact(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_a_failed_replacement_leaves_the_previous_grants_intact(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     await put_grants(client, grant_cast.owner, strategy.id, [grant_entry(grant_cast.grantee.user_id)])
@@ -446,9 +411,7 @@ async def test_a_failed_replacement_leaves_the_previous_grants_intact(
     assert await read_strategy_status_code(client, grant_cast.grantee.token, strategy.id) == 200
 
 
-async def test_a_repeated_grantee_is_rejected(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_a_repeated_grantee_is_rejected(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     """重复名单被拒时, 盘上那份旧名单要原样留着.
 
     先写入一份合法名单再发非法请求: 从空名单起步的话, "旧名单没被改动"与"压根没写过"是
@@ -475,9 +438,7 @@ async def test_a_repeated_grantee_is_rejected(
     assert await read_strategy_status_code(client, grant_cast.other.token, strategy.id) == 404
 
 
-async def test_a_grant_list_beyond_the_cap_is_rejected(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_a_grant_list_beyond_the_cap_is_rejected(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     """同上: 超限被拒之后, 旧名单与旧可见性都该原样不动."""
 
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
@@ -514,9 +475,7 @@ def test_the_grant_cap_keeps_its_agreed_value() -> None:
     assert "1000" in TOO_MANY_GRANTS_MESSAGE
 
 
-async def test_a_grant_list_exactly_at_the_cap_is_accepted(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_a_grant_list_exactly_at_the_cap_is_accepted(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     """恰好等于上限的一份名单要被收下.
 
     上限用例只测"超了被拒"的话, 把判据写成 `>=` 也照样绿——那会让上限比声明的少一个,
@@ -545,12 +504,8 @@ async def test_a_grant_list_exactly_at_the_cap_is_accepted(
 
 
 @pytest.mark.parametrize("permission_type", [GrantPermission.READ, GrantPermission.RUN])
-async def test_the_permission_type_round_trips(
-    client: AsyncClient,
-    database: PlatformDatabase,
-    grant_cast: GrantCast,
-    permission_type: GrantPermission,
-) -> None:
+async def test_the_permission_type_round_trips(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast,
+    permission_type: GrantPermission) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     await put_grants(
@@ -565,9 +520,7 @@ async def test_the_permission_type_round_trips(
     assert owner_view.grants[0].permission_type is permission_type
 
 
-async def test_repeating_the_same_list_changes_nothing(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_repeating_the_same_list_changes_nothing(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
     grants = [grant_entry(grant_cast.grantee.user_id, GrantPermission.RUN)]
 
@@ -583,9 +536,7 @@ async def test_repeating_the_same_list_changes_nothing(
     assert owner_view.grants[0].permission_type is GrantPermission.RUN
 
 
-async def test_an_unknown_permission_type_is_rejected(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_an_unknown_permission_type_is_rejected(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     response = await client.put(
@@ -604,9 +555,7 @@ async def test_an_unknown_permission_type_is_rejected(
     assert response.status_code == 422
 
 
-async def test_rejections_never_echo_the_submitted_grantee_id(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_rejections_never_echo_the_submitted_grantee_id(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     unknown_response = await put_grants(
@@ -625,9 +574,7 @@ async def test_rejections_never_echo_the_submitted_grantee_id(
     assert VALUE_MARKER not in repeated_response.text
 
 
-async def test_replacing_grants_requires_a_token(
-    client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast
-) -> None:
+async def test_replacing_grants_requires_a_token(client: AsyncClient, database: PlatformDatabase, grant_cast: GrantCast) -> None:
     strategy = await create_strategy_record(database, grant_cast.owner.user, GRANT_STRATEGY_NAME)
 
     response = await client.put(

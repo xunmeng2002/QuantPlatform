@@ -60,18 +60,14 @@ def _build_settings(**overrides: object) -> PlatformSettings:
     return PlatformSettings(**{**VALID_SETTINGS_ARGUMENTS, **overrides})
 
 
-def test_read_integer_environment_returns_fallback_when_unset(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_read_integer_environment_returns_fallback_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ENVIRONMENT_NAME, raising=False)
 
     assert read_integer_environment(ENVIRONMENT_NAME, 7) == 7
 
 
 @pytest.mark.parametrize("blank_value", ["", "   "])
-def test_read_integer_environment_returns_fallback_when_blank(
-    monkeypatch: pytest.MonkeyPatch, blank_value: str
-) -> None:
+def test_read_integer_environment_returns_fallback_when_blank(monkeypatch: pytest.MonkeyPatch, blank_value: str) -> None:
     monkeypatch.setenv(ENVIRONMENT_NAME, blank_value)
 
     assert read_integer_environment(ENVIRONMENT_NAME, 7) == 7
@@ -81,18 +77,14 @@ def test_read_integer_environment_returns_fallback_when_blank(
     ("raw_value", "expected_value"),
     [("0", 0), ("12", 12), (" 12 ", 12), ("+12", 12), ("-3", -3)],
 )
-def test_read_integer_environment_parses_integers(
-    monkeypatch: pytest.MonkeyPatch, raw_value: str, expected_value: int
-) -> None:
+def test_read_integer_environment_parses_integers(monkeypatch: pytest.MonkeyPatch, raw_value: str, expected_value: int) -> None:
     monkeypatch.setenv(ENVIRONMENT_NAME, raw_value)
 
     assert read_integer_environment(ENVIRONMENT_NAME, 7) == expected_value
 
 
 @pytest.mark.parametrize("raw_value", ["abc", "1.5", "12abc", "0x10", "--3"])
-def test_read_integer_environment_rejects_non_integers(
-    monkeypatch: pytest.MonkeyPatch, raw_value: str
-) -> None:
+def test_read_integer_environment_rejects_non_integers(monkeypatch: pytest.MonkeyPatch, raw_value: str) -> None:
     monkeypatch.setenv(ENVIRONMENT_NAME, raw_value)
 
     with pytest.raises(ValueError):
@@ -100,9 +92,7 @@ def test_read_integer_environment_rejects_non_integers(
 
 
 @pytest.mark.parametrize("blank_value", ["", "   "])
-def test_read_boolean_environment_returns_fallback_when_blank(
-    monkeypatch: pytest.MonkeyPatch, blank_value: str
-) -> None:
+def test_read_boolean_environment_returns_fallback_when_blank(monkeypatch: pytest.MonkeyPatch, blank_value: str) -> None:
     monkeypatch.setenv(BOOLEAN_ENVIRONMENT_NAME, blank_value)
 
     assert read_boolean_environment(BOOLEAN_ENVIRONMENT_NAME, True) is True
@@ -124,9 +114,7 @@ def test_read_boolean_environment_returns_fallback_when_blank(
         ("off", False),
     ],
 )
-def test_read_boolean_environment_parses_booleans(
-    monkeypatch: pytest.MonkeyPatch, raw_value: str, expected_value: bool
-) -> None:
+def test_read_boolean_environment_parses_booleans(monkeypatch: pytest.MonkeyPatch, raw_value: str, expected_value: bool) -> None:
     monkeypatch.setenv(BOOLEAN_ENVIRONMENT_NAME, raw_value)
 
     parsed_value = read_boolean_environment(BOOLEAN_ENVIRONMENT_NAME, not expected_value)
@@ -135,9 +123,7 @@ def test_read_boolean_environment_parses_booleans(
 
 
 @pytest.mark.parametrize("raw_value", ["enable", "enabled", "2", "t", "是", "n/a"])
-def test_read_boolean_environment_rejects_anything_else(
-    monkeypatch: pytest.MonkeyPatch, raw_value: str
-) -> None:
+def test_read_boolean_environment_rejects_anything_else(monkeypatch: pytest.MonkeyPatch, raw_value: str) -> None:
     """非法布尔取值必须当场报错, 不能静默当成 false.
 
     保留策略那一项静默翻转的后果是**不可逆**的: 写 `=enable` 的人以为开着, 后端安静地什么都不
@@ -150,9 +136,7 @@ def test_read_boolean_environment_rejects_anything_else(
         read_boolean_environment(BOOLEAN_ENVIRONMENT_NAME, False)
 
 
-def test_unset_boolean_environment_returns_its_own_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_unset_boolean_environment_returns_its_own_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     """回退值原样返回, 不做 True/False 归一: 回退值是调用方给的默认策略."""
 
     monkeypatch.delenv(BOOLEAN_ENVIRONMENT_NAME, raising=False)
@@ -161,9 +145,7 @@ def test_unset_boolean_environment_returns_its_own_fallback(
     assert read_boolean_environment(BOOLEAN_ENVIRONMENT_NAME, False) is False
 
 
-def test_environment_key_takes_precedence_over_the_secret_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_environment_key_takes_precedence_over_the_secret_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     secret_file = tmp_path / "jwt_secret.key"
     secret_file.write_text("persisted-key", encoding="utf-8")
     monkeypatch.setenv(JWT_SECRET_ENVIRONMENT_NAME, "environment-key")
@@ -172,9 +154,7 @@ def test_environment_key_takes_precedence_over_the_secret_file(
     assert secret_file.read_text(encoding="utf-8") == "persisted-key"
 
 
-def test_persisted_secret_file_is_reused_across_calls(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_persisted_secret_file_is_reused_across_calls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """密钥落盘的意义就在于重启后不变, 否则已签发的令牌会集体失效."""
 
     monkeypatch.delenv(JWT_SECRET_ENVIRONMENT_NAME, raising=False)
@@ -188,9 +168,7 @@ def test_persisted_secret_file_is_reused_across_calls(
     assert secret_file.is_file()
 
 
-def test_generated_secret_is_written_to_the_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_generated_secret_is_written_to_the_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv(JWT_SECRET_ENVIRONMENT_NAME, raising=False)
     secret_file = tmp_path / "jwt_secret.key"
 
@@ -199,9 +177,7 @@ def test_generated_secret_is_written_to_the_file(
     assert secret_file.read_text(encoding="utf-8").strip() == generated_key
 
 
-def test_blank_persisted_secret_file_is_regenerated(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_blank_persisted_secret_file_is_regenerated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv(JWT_SECRET_ENVIRONMENT_NAME, raising=False)
     secret_file = tmp_path / "jwt_secret.key"
     secret_file.write_text("   ", encoding="utf-8")
@@ -275,9 +251,7 @@ def test_relative_engine_input_paths_are_rejected(relative_field_name: str) -> N
         _build_settings(**{relative_field_name: Path("relative-input")})
 
 
-def test_from_environment_reads_the_engine_input_paths(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_from_environment_reads_the_engine_input_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """两个环境变量必须真的被读进去, 且默认值本就绝对.
 
     默认引擎根来自 `QUANT_ENGINE_ROOT`, 而 `session_file_path` 由它拼接派生——若哪天把默认值
@@ -307,9 +281,7 @@ def test_from_environment_reads_the_engine_input_paths(
     assert overridden_settings.session_file_path == override_root / "Sessions.json"
 
 
-def test_from_environment_applies_documented_defaults(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_from_environment_applies_documented_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     """未设任何环境变量时也应能构造出配置, 且默认端口与令牌有效期与文档一致."""
 
     for name in (
@@ -351,9 +323,7 @@ def test_from_environment_applies_documented_defaults(
     assert settings.trusted_proxy_addresses == ()
 
 
-def test_from_environment_reads_the_login_throttle_settings(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_from_environment_reads_the_login_throttle_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """三个节流项都要真的从环境里读出来.
 
     白名单那一项是逗号分隔的地址表, 空串与只有空白/逗号的取值都要收成空表——把空串切成
@@ -378,9 +348,7 @@ def test_from_environment_reads_the_login_throttle_settings(
     assert PlatformSettings.from_environment().trusted_proxy_addresses == ()
 
 
-def test_from_environment_reads_integer_overrides(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_from_environment_reads_integer_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(JWT_SECRET_ENVIRONMENT_NAME, "from-environment-key")
     monkeypatch.setenv("QUANT_MAX_CONCURRENT_RUNS", "4")
     monkeypatch.setenv("QUANT_HTTP_PORT", "9100")
@@ -391,9 +359,7 @@ def test_from_environment_reads_integer_overrides(
     assert settings.http_port == 9100
 
 
-def test_from_environment_reads_the_retention_switches(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_from_environment_reads_the_retention_switches(monkeypatch: pytest.MonkeyPatch) -> None:
     """两个保留项要真的从环境里读出来: 默认关的那一项, 只能靠环境变量打开."""
 
     monkeypatch.setenv(JWT_SECRET_ENVIRONMENT_NAME, "from-environment-key")
@@ -406,9 +372,7 @@ def test_from_environment_reads_the_retention_switches(
     assert settings.retained_runs_per_user == 5
 
 
-def test_from_environment_rejects_a_non_integer_port(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_from_environment_rejects_a_non_integer_port(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(JWT_SECRET_ENVIRONMENT_NAME, "from-environment-key")
     monkeypatch.setenv("QUANT_HTTP_PORT", "八零零零")
 
@@ -416,9 +380,7 @@ def test_from_environment_rejects_a_non_integer_port(
         PlatformSettings.from_environment()
 
 
-def test_blank_initial_admin_password_becomes_unset(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_blank_initial_admin_password_becomes_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     """空串口令须等同于未设置, 否则播种会建出一个口令为空的账号."""
 
     monkeypatch.setenv(JWT_SECRET_ENVIRONMENT_NAME, "from-environment-key")
@@ -449,9 +411,7 @@ def _clear_environment_file_keys(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
-def test_environment_file_parses_assignments_and_skips_comments_and_blanks(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_environment_file_parses_assignments_and_skips_comments_and_blanks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """注释与空行要跳过, 取值两侧空白与成对引号要剥掉."""
 
     _clear_environment_file_keys(monkeypatch)
@@ -476,9 +436,7 @@ def test_environment_file_parses_assignments_and_skips_comments_and_blanks(
     assert os.environ[NON_PREFIXED_KEY] == "1"
 
 
-def test_environment_file_keeps_a_hash_inside_the_value(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_environment_file_keeps_a_hash_inside_the_value(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """取值里的 `#` 不是注释起点: 把它当注释会静默截断口令."""
 
     _clear_environment_file_keys(monkeypatch)
@@ -497,9 +455,7 @@ def test_environment_file_keeps_a_hash_inside_the_value(
     }
 
 
-def test_environment_file_does_not_override_real_environment_variables(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_environment_file_does_not_override_real_environment_variables(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """命令行上临时给的那一个必须赢过文件里写的那个."""
 
     _clear_environment_file_keys(monkeypatch)
@@ -523,9 +479,7 @@ def test_missing_environment_file_is_a_no_op(tmp_path: Path) -> None:
     "malformed_line",
     ["QUANT_TEST_BARE_KEY", "export QUANT_TEST_EXPORTED=1", "=无键名"],
 )
-def test_malformed_environment_file_lines_are_rejected(
-    tmp_path: Path, malformed_line: str
-) -> None:
+def test_malformed_environment_file_lines_are_rejected(tmp_path: Path, malformed_line: str) -> None:
     """非法行当场抛错而不是跳过: 静默降级会让人以为配置已经生效.
 
     `export KEY=VALUE` 那条是有意拒绝的——它看着像 shell, 而键名会变成 `export KEY`,
@@ -540,9 +494,8 @@ def test_malformed_environment_file_lines_are_rejected(
         parse_environment_file(environment_file.read_text(encoding="utf-8"))
 
 
-def test_non_prefixed_environment_file_keys_are_warned_about(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_non_prefixed_environment_file_keys_are_warned_about(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture) -> None:
     """没有 `QUANT_` 前缀的键会被记一条 warning——多半是名字打错了."""
 
     _clear_environment_file_keys(monkeypatch)

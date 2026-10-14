@@ -86,12 +86,7 @@ GRANT_TO_OWNER_MESSAGE = "不能授权给策略归属人"
 GRANTS_CONFLICTED_MESSAGE = "授权正被其他请求修改, 请重试"
 
 
-async def _read_uploaded_file(
-    upload: UploadFile,
-    maximum_bytes: int,
-    empty_message: str,
-    too_large_message: str,
-) -> bytes:
+async def _read_uploaded_file(upload: UploadFile, maximum_bytes: int, empty_message: str, too_large_message: str) -> bytes:
     """按上限分块读一个上传部件, 超限即拒.
 
     分块而非一次读完: 一次读完等于把"客户端说多大就占多少内存"交给调用方.
@@ -117,9 +112,7 @@ async def _read_uploaded_file(
     return b"".join(chunks)
 
 
-def _validate_uploaded_filename(
-    upload: UploadFile, required_suffix: str, field_label: str
-) -> str:
+def _validate_uploaded_filename(upload: UploadFile, required_suffix: str, field_label: str) -> str:
     """取上传部件自带的文件名并校验它是个能当裸文件名的取值; 不合法即译成 400.
 
     缺失不是罕见情形: 客户端拿字符串当文件传时 `filename` 就是 `None`, 而名字是**载荷**的一部分
@@ -170,9 +163,7 @@ def _decode_configuration(configuration_bytes: bytes) -> str:
         raise InvalidRequestError(CONFIGURATION_NOT_UTF8_MESSAGE) from error
 
 
-async def _read_validated_version_upload(
-    source_file: UploadFile, configuration_file: UploadFile
-) -> UploadedStrategyVersion:
+async def _read_validated_version_upload(source_file: UploadFile, configuration_file: UploadFile) -> UploadedStrategyVersion:
     """把两个上传部件读完并验完; 任一项不合法即整批拒.
 
     建策略与传新版本共用这一条路径: 两处各抄一遍, 迟早有一处漏掉其中一步——漏掉源码可解析性
@@ -219,9 +210,7 @@ async def _read_validated_version_upload(
     )
 
 
-async def _build_strategy_detail(
-    session: AsyncSession, strategy: StrategyModel, current_user: UserModel
-) -> StrategyDetailResponse:
+async def _build_strategy_detail(session: AsyncSession, strategy: StrategyModel, current_user: UserModel) -> StrategyDetailResponse:
     """策略详情: 本体 + 版本列表 + 授权列表.
 
     授权列表只对归属人返回: 被授权人若能看到完整授权表, 就知道还有谁也被授权了.
@@ -266,9 +255,7 @@ async def _build_strategy_detail(
     )
 
 
-async def _ensure_each_grantee_exists(
-    session: AsyncSession, grantee_user_ids: set[str]
-) -> None:
+async def _ensure_each_grantee_exists(session: AsyncSession, grantee_user_ids: set[str]) -> None:
     """确认这些被授权人都在册, 缺一个即整批拒.
 
     一条 `IN` 查完, 不逐个查: 逐个查的话往返次数由请求体里的列表长度决定, 等于把"发多少个
@@ -332,12 +319,9 @@ def _apply_visibility_for_grants(strategy: StrategyModel, has_grants: bool) -> N
 
 
 @router.get("", response_model=PageResponse[StrategyResponse])
-async def list_strategies_handler(
-    session: SessionDependency,
-    current_user: CurrentUserDependency,
+async def list_strategies_handler(session: SessionDependency, current_user: CurrentUserDependency,
     offset: int = Query(0, ge=0),
-    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE),
-) -> PageResponse[StrategyResponse]:
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE)) -> PageResponse[StrategyResponse]:
     """可见策略列表: 本人所有 + 被授权共享 + 公开."""
 
     return await fetch_page(
@@ -353,20 +337,12 @@ async def list_strategies_handler(
 @router.post(
     "", response_model=StrategyDetailResponse, status_code=status.HTTP_201_CREATED
 )
-async def create_strategy_handler(
-    session: SessionDependency,
-    settings: SettingsDependency,
-    current_user: CurrentUserDependency,
-    source_file: Annotated[UploadFile, File(alias="source")],
+async def create_strategy_handler(session: SessionDependency, settings: SettingsDependency,
+    current_user: CurrentUserDependency, source_file: Annotated[UploadFile, File(alias="source")],
     configuration_file: Annotated[UploadFile, File(alias="configuration")],
-    name: Annotated[
-        str, Form(min_length=1, max_length=MAXIMUM_STRATEGY_NAME_LENGTH)
-    ],
-    description: Annotated[
-        str, Form(max_length=MAXIMUM_STRATEGY_DESCRIPTION_LENGTH)
-    ] = "",
-    visibility_type: Annotated[StrategyVisibility, Form()] = StrategyVisibility.PRIVATE,
-) -> StrategyDetailResponse:
+    name: Annotated[str, Form(min_length=1, max_length=MAXIMUM_STRATEGY_NAME_LENGTH)],
+    description: Annotated[str, Form(max_length=MAXIMUM_STRATEGY_DESCRIPTION_LENGTH)] = "",
+    visibility_type: Annotated[StrategyVisibility, Form()] = StrategyVisibility.PRIVATE) -> StrategyDetailResponse:
     """上传一个新策略: 建策略本体并落成首个版本.
 
     名字先 `strip` 再存: 不去空白的话, "网格" 与 "网格 " 会各占一个策略, 而界面上看是同一个.
@@ -407,14 +383,9 @@ async def create_strategy_handler(
     response_model=StrategyVersionResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def upload_strategy_version_handler(
-    strategy_id: str,
-    session: SessionDependency,
-    settings: SettingsDependency,
-    current_user: CurrentUserDependency,
-    source_file: Annotated[UploadFile, File(alias="source")],
-    configuration_file: Annotated[UploadFile, File(alias="configuration")],
-) -> StrategyVersionModel:
+async def upload_strategy_version_handler(strategy_id: str, session: SessionDependency, settings: SettingsDependency,
+    current_user: CurrentUserDependency, source_file: Annotated[UploadFile, File(alias="source")],
+    configuration_file: Annotated[UploadFile, File(alias="configuration")]) -> StrategyVersionModel:
     """给既有策略上传一个新版本.
 
     判重是"与**既有任一**版本同内容"而非"与最新版本同内容": 改了参数又改回去, 就该命中那个
@@ -433,12 +404,8 @@ async def upload_strategy_version_handler(
 
 
 @router.put("/{strategy_id}/grants", response_model=StrategyDetailResponse)
-async def replace_strategy_grants_handler(
-    strategy_id: str,
-    request_body: StrategyGrantReplaceRequest,
-    session: SessionDependency,
-    current_user: CurrentUserDependency,
-) -> StrategyDetailResponse:
+async def replace_strategy_grants_handler(strategy_id: str, request_body: StrategyGrantReplaceRequest,
+    session: SessionDependency, current_user: CurrentUserDependency) -> StrategyDetailResponse:
     """整体替换策略的授权集合, 只对归属人开放.
 
     `PUT` 是整体替换: 请求体就是替换后的全集, 空列表即撤销全部授权.
@@ -492,11 +459,7 @@ async def replace_strategy_grants_handler(
 
 
 @router.get("/{strategy_id}", response_model=StrategyDetailResponse)
-async def read_strategy_handler(
-    strategy_id: str,
-    session: SessionDependency,
-    current_user: CurrentUserDependency,
-) -> StrategyDetailResponse:
+async def read_strategy_handler(strategy_id: str, session: SessionDependency, current_user: CurrentUserDependency) -> StrategyDetailResponse:
     """策略详情、版本列表与授权列表."""
 
     strategy = await load_visible_strategy(session, current_user, strategy_id)
@@ -508,11 +471,8 @@ async def read_strategy_handler(
     "/{strategy_id}/last-submitted-parameters",
     response_model=LastSubmittedParametersResponse,
 )
-async def read_last_submitted_parameters_handler(
-    strategy_id: str,
-    session: SessionDependency,
-    current_user: CurrentUserDependency,
-) -> LastSubmittedParametersResponse:
+async def read_last_submitted_parameters_handler(strategy_id: str, session: SessionDependency,
+    current_user: CurrentUserDependency) -> LastSubmittedParametersResponse:
     """该用户在该策略下最近一次提交的参数, 供提交页预填.
 
     可见性闸与详情同款 (`load_visible_strategy`): 别人共享给你的策略也要能用这个功能. 但
@@ -550,11 +510,7 @@ async def read_last_submitted_parameters_handler(
 
 
 @router.delete("/{strategy_id}", response_model=MessageResponse)
-async def delete_strategy_handler(
-    strategy_id: str,
-    session: SessionDependency,
-    current_user: CurrentUserDependency,
-) -> MessageResponse:
+async def delete_strategy_handler(strategy_id: str, session: SessionDependency, current_user: CurrentUserDependency) -> MessageResponse:
     """软删除策略.
 
     只落 `DeletedAt`, 不动盘上的版本目录: 历史运行要复现就得靠那份原文, 清掉目录会让旧结果

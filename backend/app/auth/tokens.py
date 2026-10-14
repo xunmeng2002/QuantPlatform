@@ -65,13 +65,7 @@ def _encode_segment(segment: dict[str, object]) -> str:
     return _base64url_encode(serialized.encode("utf-8"))
 
 
-def create_access_token(
-    user_id: str,
-    username: str,
-    user_type: str,
-    secret_key: str,
-    expires_in_minutes: int,
-) -> str:
+def create_access_token(user_id: str, username: str, user_type: str, secret_key: str, expires_in_minutes: int) -> str:
     """签发访问令牌."""
 
     issued_at = int(time.time())

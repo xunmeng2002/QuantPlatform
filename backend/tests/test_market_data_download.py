@@ -81,9 +81,7 @@ SCHEMA_NOT_INITIALIZED_STDERR = "数据库未初始化，请先执行 python ini
 QUOTE_HUB_CLI_FILENAME = quote_hub.QUOTE_HUB_CLI_FILENAME
 
 
-def _build_settings(
-    tmp_path: Path, quote_hub_root: Path, **overrides: object
-) -> PlatformSettings:
+def _build_settings(tmp_path: Path, quote_hub_root: Path, **overrides: object) -> PlatformSettings:
     overrides.setdefault(
         "market_data_prepare_timeout_seconds", TEST_PREPARE_TIMEOUT_SECONDS
     )
@@ -108,12 +106,8 @@ def _build_settings(
     )
 
 
-def _build_request(
-    exchange_id: str = REQUESTED_EXCHANGE_ID,
-    instrument_id: str = REQUESTED_INSTRUMENT_ID,
-    start_trading_day: str = WINDOW_START_DAY,
-    end_trading_day: str = WINDOW_END_DAY,
-) -> MarketDataRequest:
+def _build_request(exchange_id: str = REQUESTED_EXCHANGE_ID, instrument_id: str = REQUESTED_INSTRUMENT_ID,
+    start_trading_day: str = WINDOW_START_DAY, end_trading_day: str = WINDOW_END_DAY) -> MarketDataRequest:
     return MarketDataRequest(
         exchange_id=exchange_id,
         instrument_id=instrument_id,
@@ -157,9 +151,7 @@ def download_component(tmp_path: Path) -> Path:
     return component_root
 
 
-async def test_a_covered_request_starts_no_subprocess(
-    tmp_path: Path, covered_component: Path
-) -> None:
+async def test_a_covered_request_starts_no_subprocess(tmp_path: Path, covered_component: Path) -> None:
     """本地已落地就**一个子进程都不起** —— 这是整件事的成本闸."""
 
     settings = _build_settings(tmp_path, covered_component)
@@ -175,9 +167,7 @@ async def test_a_covered_request_starts_no_subprocess(
     assert count_starts(covered_component) == 0
 
 
-async def test_a_contractless_request_skips_preparation(
-    tmp_path: Path, covered_component: Path
-) -> None:
+async def test_a_contractless_request_skips_preparation(tmp_path: Path, covered_component: Path) -> None:
     """没指名合约的策略照旧能跑: 没有合约就没什么可准备的, 不该拦."""
 
     settings = _build_settings(tmp_path, covered_component)
@@ -191,9 +181,7 @@ async def test_a_contractless_request_skips_preparation(
     assert count_starts(covered_component) == 0
 
 
-async def test_missing_coverage_downloads_the_whole_universe(
-    tmp_path: Path, download_component: Path
-) -> None:
+async def test_missing_coverage_downloads_the_whole_universe(tmp_path: Path, download_component: Path) -> None:
     """不够时起一次组件, 且 `--codes` 必须是**全集** —— 少传一个就把那个合约从年度文件里挤掉."""
 
     enable_bar_ingestion(download_component)
@@ -223,9 +211,7 @@ async def test_missing_coverage_downloads_the_whole_universe(
     )
 
 
-async def test_a_contract_never_downloaded_before_joins_the_universe(
-    tmp_path: Path, download_component: Path
-) -> None:
+async def test_a_contract_never_downloaded_before_joins_the_universe(tmp_path: Path, download_component: Path) -> None:
     """库里没下过的合约也要进 `--codes`, 否则下完它自己不在文件里."""
 
     enable_bar_ingestion(download_component)
@@ -249,9 +235,7 @@ async def test_a_contract_never_downloaded_before_joins_the_universe(
     )
 
 
-async def test_the_download_window_is_aligned_to_the_years_it_touches(
-    tmp_path: Path, download_component: Path
-) -> None:
+async def test_the_download_window_is_aligned_to_the_years_it_touches(tmp_path: Path, download_component: Path) -> None:
     """两端向外对齐到年份边界 —— 组件的年度文件按年整份导出, 取半份就留一个补不上的空洞.
 
     缺失段只落在 2024 年内, 故起点回到该年 1 月 1 日; 末端对齐出的 12-31 被组件日历末日
@@ -304,11 +288,8 @@ def _window_verdict(missing_days: tuple[str, ...]) -> CoverageVerdict:
         (("2024-06-15",), None, ("2024-01-01", "2024-12-31")),
     ],
 )
-def test_the_download_window_covers_whole_years(
-    missing_days: tuple[str, ...],
-    calendar_last_day: str | None,
-    expected_window: tuple[str, str],
-) -> None:
+def test_the_download_window_covers_whole_years(missing_days: tuple[str, ...], calendar_last_day: str | None,
+    expected_window: tuple[str, str]) -> None:
     """窗口规则本身 —— 穷举的代价只有几十毫秒, 而起错一次就是同一批数据反复重下."""
 
     window = _resolve_download_window(
@@ -375,9 +356,7 @@ def test_a_range_straddling_the_calendar_end_is_clamped_rather_than_dropped() ->
     assert window == ("2026-08-01", "2026-09-09")
 
 
-async def test_a_range_beyond_the_calendar_still_reports_no_market_data(
-    tmp_path: Path, download_component: Path
-) -> None:
+async def test_a_range_beyond_the_calendar_still_reports_no_market_data(tmp_path: Path, download_component: Path) -> None:
     """无处可问时**一个子进程都不起**, 直接给"区间内没有行情" —— 与空跑一轮的收场同一句话."""
 
     enable_bar_ingestion(download_component)
@@ -396,9 +375,7 @@ async def test_a_range_beyond_the_calendar_still_reports_no_market_data(
     assert count_starts(download_component) == 0
 
 
-async def test_a_login_failure_points_at_credentials(
-    tmp_path: Path, download_component: Path
-) -> None:
+async def test_a_login_failure_points_at_credentials(tmp_path: Path, download_component: Path) -> None:
     """登录失败与其它非零退出**必须分开**: 一个指向凭据与网络, 一个不指向."""
 
     set_exit_code(download_component, 1, LOGIN_FAILURE_STDERR)
@@ -410,9 +387,7 @@ async def test_a_login_failure_points_at_credentials(
     assert failure.value.message == MARKET_DATA_LOGIN_FAILED_MESSAGE
 
 
-async def test_an_uninitialized_component_database_points_at_building_it(
-    tmp_path: Path, download_component: Path
-) -> None:
+async def test_an_uninitialized_component_database_points_at_building_it(tmp_path: Path, download_component: Path) -> None:
     """库未建好与登录失败**必须分开**: 一个要做的是跑组件的建库脚本, 一个才去查凭据与网络."""
 
     set_exit_code(download_component, 1, SCHEMA_NOT_INITIALIZED_STDERR)
@@ -424,9 +399,7 @@ async def test_an_uninitialized_component_database_points_at_building_it(
     assert failure.value.message == MARKET_DATA_SCHEMA_NOT_INITIALIZED_MESSAGE
 
 
-async def test_any_other_nonzero_exit_is_a_plain_download_failure(
-    tmp_path: Path, download_component: Path
-) -> None:
+async def test_any_other_nonzero_exit_is_a_plain_download_failure(tmp_path: Path, download_component: Path) -> None:
     set_exit_code(download_component, 1, "traceback: something else")
     settings = _build_settings(tmp_path, download_component)
 
@@ -436,9 +409,7 @@ async def test_any_other_nonzero_exit_is_a_plain_download_failure(
     assert failure.value.message == MARKET_DATA_DOWNLOAD_FAILED_MESSAGE
 
 
-async def test_exit_code_zero_without_bars_is_still_insufficient(
-    tmp_path: Path, download_component: Path
-) -> None:
+async def test_exit_code_zero_without_bars_is_still_insufficient(tmp_path: Path, download_component: Path) -> None:
     """退出码 0 **不等于**有数据: 真组件在库中无数据时只记一条 warning 仍以 0 退出.
 
     故放行与否只能由复判说了算 —— 只看退出码就会把一个必然空跑的区间放过去.
@@ -452,9 +423,7 @@ async def test_exit_code_zero_without_bars_is_still_insufficient(
     assert failure.value.message == MARKET_DATA_STILL_INSUFFICIENT_MESSAGE
 
 
-async def test_a_download_that_outruns_its_deadline_is_reported_as_such(
-    tmp_path: Path, download_component: Path
-) -> None:
+async def test_a_download_that_outruns_its_deadline_is_reported_as_such(tmp_path: Path, download_component: Path) -> None:
     set_delay_seconds(download_component, STUB_DELAY_SECONDS)
     settings = _build_settings(
         tmp_path,
@@ -468,9 +437,7 @@ async def test_a_download_that_outruns_its_deadline_is_reported_as_such(
     assert failure.value.message == MARKET_DATA_PREPARE_TIMEOUT_MESSAGE
 
 
-async def test_a_cancelled_preparation_is_not_reported_as_a_failure(
-    tmp_path: Path, download_component: Path
-) -> None:
+async def test_a_cancelled_preparation_is_not_reported_as_a_failure(tmp_path: Path, download_component: Path) -> None:
     """取消**不设错误文案**: 终态由调度器的仲裁表按取消算成 `interrupted`, 复用现成路径."""
 
     set_delay_seconds(download_component, STUB_DELAY_SECONDS)
@@ -494,9 +461,7 @@ async def test_a_cancelled_preparation_is_not_reported_as_a_failure(
     assert prepared is MarketDataPrepared.CANCELLED
 
 
-async def test_concurrent_preparations_start_the_component_only_once(
-    tmp_path: Path, download_component: Path
-) -> None:
+async def test_concurrent_preparations_start_the_component_only_once(tmp_path: Path, download_component: Path) -> None:
     """单飞: 两个作业同时缺数据, 不能各起一个组件进程去写同一批落地文件.
 
     第一个进锁的负责下载; 第二个在锁上等到它出来, 复判已是"够了", 于是 **不再起进程**.
@@ -516,9 +481,7 @@ async def test_concurrent_preparations_start_the_component_only_once(
     assert count_starts(download_component) == 1
 
 
-async def test_the_component_is_asked_for_the_dataset_precision_frequency(
-    tmp_path: Path, download_component: Path
-) -> None:
+async def test_the_component_is_asked_for_the_dataset_precision_frequency(tmp_path: Path, download_component: Path) -> None:
     """组件被问的频率来自**平台常量**, 且请求里根本没有周期这个字段.
 
     周期解绑之后, 覆盖判据只关心"落盘数据在不在"——落盘精度恒为 5m, 用户在提交页选什么不改变
@@ -563,9 +526,7 @@ async def test_incomplete_trading_days_are_rejected(tmp_path: Path, download_com
     assert failure.value.message == MARKET_DATA_REQUEST_INCOMPLETE_MESSAGE
 
 
-async def test_a_missing_component_is_reported_without_starting_anything(
-    tmp_path: Path,
-) -> None:
+async def test_a_missing_component_is_reported_without_starting_anything(tmp_path: Path) -> None:
     component_root = tmp_path / "quote-hub"
     write_stub_component(component_root)
     settings = _build_settings(tmp_path, component_root)
@@ -596,9 +557,7 @@ async def test_a_missing_entry_script_is_reported_the_same_way(tmp_path: Path) -
     assert failure.value.message == MARKET_DATA_COMPONENT_MISSING_MESSAGE
 
 
-async def test_an_unlaunchable_component_is_reported_as_a_start_failure(
-    tmp_path: Path,
-) -> None:
+async def test_an_unlaunchable_component_is_reported_as_a_start_failure(tmp_path: Path) -> None:
     """进程都没起来与"起来了但退出码非零"要分开.
 
     这一格走的是 `OSError` 那条路 (解释器本身起不来), 从外部很难造: 入口脚本存在性那道检查已

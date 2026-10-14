@@ -92,12 +92,7 @@ COMMISSION_GROUP_TEMPLATE_REFERENCED_MESSAGE_TEMPLATE = (
 COMMISSION_GROUP_REFERENCED_MESSAGE = "该手续费组仍被费率明细引用, 先删掉那些明细"
 
 
-async def _load_record[RecordType](
-    session: AsyncSession,
-    model: type[RecordType],
-    record_id: str,
-    not_found_message: str,
-) -> RecordType:
+async def _load_record[RecordType](session: AsyncSession, model: type[RecordType], record_id: str, not_found_message: str) -> RecordType:
     """按主键取一行, 取不到即视为不存在.
 
     这三张表没有归属过滤, 故比 `catalog.visibility` 里那几个取件函数简单一层 —— 但仍走同一个
@@ -112,9 +107,7 @@ async def _load_record[RecordType](
     return record
 
 
-def _apply_product_write(
-    product: ProductModel, request_body: ProductWriteRequest
-) -> None:
+def _apply_product_write(product: ProductModel, request_body: ProductWriteRequest) -> None:
     """把一次写入的取值整体盖到品种行上.
 
     建单与改单共用它: 两条路径各写一遍的话, 日后加一列时只会改到其中一处, 而那一处自己是绿的,
@@ -134,20 +127,14 @@ def _apply_product_write(
     product.session_name = request_body.session_name
 
 
-def _apply_commission_group_write(
-    commission_group: CommissionGroupModel,
-    request_body: CommissionGroupWriteRequest,
-) -> None:
+def _apply_commission_group_write(commission_group: CommissionGroupModel, request_body: CommissionGroupWriteRequest) -> None:
     """把一次写入的取值整体盖到手续费组行上."""
 
     commission_group.commission_group_id = request_body.commission_group_id
     commission_group.commission_group_name = request_body.commission_group_name
 
 
-def _apply_base_commission_write(
-    base_commission: BaseCommissionModel,
-    request_body: BaseCommissionWriteRequest,
-) -> None:
+def _apply_base_commission_write(base_commission: BaseCommissionModel, request_body: BaseCommissionWriteRequest) -> None:
     """把一次写入的取值整体盖到费率行上."""
 
     base_commission.commission_group_id = request_body.commission_group_id
@@ -170,9 +157,7 @@ def _apply_base_commission_write(
     base_commission.max_commission = request_body.max_commission
 
 
-async def _count_referencing_rate_rows(
-    session: AsyncSession, commission_group_id: int
-) -> int:
+async def _count_referencing_rate_rows(session: AsyncSession, commission_group_id: int) -> int:
     """某个组号下挂着几条费率明细. 删组与改组号两处都要先数一遍, 故抽出来共用."""
 
     return (
@@ -184,9 +169,7 @@ async def _count_referencing_rate_rows(
     ) or 0
 
 
-async def _count_referencing_templates(
-    session: AsyncSession, commission_group_id: int
-) -> int:
+async def _count_referencing_templates(session: AsyncSession, commission_group_id: int) -> int:
     """有多少个配置模板指着这个组号.
 
     模板**没有**外键指向组表 (组号在模板上只是一个整数列, 与 `Runs.BacktestConfigJson` 里的那个
@@ -204,9 +187,7 @@ async def _count_referencing_templates(
     ) or 0
 
 
-async def _ensure_commission_group_exists(
-    session: AsyncSession, commission_group_id: int
-) -> None:
+async def _ensure_commission_group_exists(session: AsyncSession, commission_group_id: int) -> None:
     """费率行引用的那个组得先在.
 
     真正的保证是外键 (并发下先查这一次可能落空, 漏到提交那一步由 `IntegrityError` 兜底),
@@ -221,9 +202,7 @@ async def _ensure_commission_group_exists(
         raise ConflictError(COMMISSION_GROUP_ABSENT_MESSAGE)
 
 
-async def _ensure_instrument_scope_is_known(
-    session: AsyncSession, request_body: BaseCommissionWriteRequest
-) -> None:
+async def _ensure_instrument_scope_is_known(session: AsyncSession, request_body: BaseCommissionWriteRequest) -> None:
     """费率行的作用域代码得说得通.
 
     合约格非空且**不长于** `MAXIMUM_PRODUCT_CODE_LENGTH` 时, 它只可能是两种意图: 一个已登记的
@@ -258,12 +237,9 @@ async def _ensure_instrument_scope_is_known(
 
 
 @router.get("/products", response_model=PageResponse[ProductResponse])
-async def list_products_handler(
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
+async def list_products_handler(session: SessionDependency, admin_user: AdminUserDependency,
     offset: int = Query(0, ge=0),
-    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE),
-) -> PageResponse[ProductResponse]:
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE)) -> PageResponse[ProductResponse]:
     """品种列表, 按 (交易所, 品种代码) 排序."""
 
     return await fetch_page(
@@ -280,11 +256,7 @@ async def list_products_handler(
 @router.post(
     "/products", response_model=ProductResponse, status_code=status.HTTP_201_CREATED
 )
-async def create_product_handler(
-    request_body: ProductWriteRequest,
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
-) -> ProductModel:
+async def create_product_handler(request_body: ProductWriteRequest, session: SessionDependency, admin_user: AdminUserDependency) -> ProductModel:
     """新建一个品种."""
 
     product = ProductModel(id=generate_identifier())
@@ -302,12 +274,8 @@ async def create_product_handler(
 
 
 @router.patch("/products/{record_id}", response_model=ProductResponse)
-async def update_product_handler(
-    record_id: str,
-    request_body: ProductWriteRequest,
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
-) -> ProductModel:
+async def update_product_handler(record_id: str, request_body: ProductWriteRequest, session: SessionDependency,
+    admin_user: AdminUserDependency) -> ProductModel:
     """改一个品种. 字段是整行替换语义: 请求里没给的列会回到 schema 的默认值."""
 
     product = await _load_record(
@@ -325,11 +293,7 @@ async def update_product_handler(
 
 
 @router.delete("/products/{record_id}", response_model=MessageResponse)
-async def delete_product_handler(
-    record_id: str,
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
-) -> MessageResponse:
+async def delete_product_handler(record_id: str, session: SessionDependency, admin_user: AdminUserDependency) -> MessageResponse:
     """删一个品种. 删掉它不会影响既有费率行 (两者在引擎侧没有关联)."""
 
     product = await _load_record(
@@ -346,12 +310,9 @@ async def delete_product_handler(
 @router.get(
     "/commission-group-options", response_model=PageResponse[CommissionGroupOptionResponse]
 )
-async def list_commission_group_options_handler(
-    session: SessionDependency,
-    current_user: CurrentUserDependency,
+async def list_commission_group_options_handler(session: SessionDependency, current_user: CurrentUserDependency,
     offset: int = Query(0, ge=0),
-    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE),
-) -> PageResponse[CommissionGroupOptionResponse]:
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE)) -> PageResponse[CommissionGroupOptionResponse]:
     """提交页选组用的选项: 组号 + 组名, **只要求登录**.
 
     这是本模块唯一的非管理端点 (理由见模块 docstring): 普通用户要提交回测就得能选组, 而"有哪几个
@@ -373,12 +334,9 @@ async def list_commission_group_options_handler(
 
 
 @router.get("/commission-groups", response_model=PageResponse[CommissionGroupResponse])
-async def list_commission_groups_handler(
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
+async def list_commission_groups_handler(session: SessionDependency, admin_user: AdminUserDependency,
     offset: int = Query(0, ge=0),
-    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE),
-) -> PageResponse[CommissionGroupResponse]:
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE)) -> PageResponse[CommissionGroupResponse]:
     """手续费组列表, 按组号排序."""
 
     return await fetch_page(
@@ -397,11 +355,8 @@ async def list_commission_groups_handler(
     response_model=CommissionGroupResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_commission_group_handler(
-    request_body: CommissionGroupWriteRequest,
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
-) -> CommissionGroupModel:
+async def create_commission_group_handler(request_body: CommissionGroupWriteRequest, session: SessionDependency,
+    admin_user: AdminUserDependency) -> CommissionGroupModel:
     """新建一个手续费组."""
 
     commission_group = CommissionGroupModel(id=generate_identifier())
@@ -421,12 +376,8 @@ async def create_commission_group_handler(
 @router.patch(
     "/commission-groups/{record_id}", response_model=CommissionGroupResponse
 )
-async def update_commission_group_handler(
-    record_id: str,
-    request_body: CommissionGroupWriteRequest,
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
-) -> CommissionGroupModel:
+async def update_commission_group_handler(record_id: str, request_body: CommissionGroupWriteRequest,
+    session: SessionDependency, admin_user: AdminUserDependency) -> CommissionGroupModel:
     """改一个手续费组.
 
     费率行存的是**组号**而不是组的主键, 而外键是 `BaseCommissions.CommissionGroupId →
@@ -462,11 +413,7 @@ async def update_commission_group_handler(
 
 
 @router.delete("/commission-groups/{record_id}", response_model=MessageResponse)
-async def delete_commission_group_handler(
-    record_id: str,
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
-) -> MessageResponse:
+async def delete_commission_group_handler(record_id: str, session: SessionDependency, admin_user: AdminUserDependency) -> MessageResponse:
     """删一个手续费组. 仍被引用时拒绝, **不级联删任何东西**.
 
     两道闸, 按"引用得有多硬"排序:
@@ -518,12 +465,9 @@ async def delete_commission_group_handler(
 
 
 @router.get("/base-commissions", response_model=PageResponse[BaseCommissionResponse])
-async def list_base_commissions_handler(
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
+async def list_base_commissions_handler(session: SessionDependency, admin_user: AdminUserDependency,
     offset: int = Query(0, ge=0),
-    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE),
-) -> PageResponse[BaseCommissionResponse]:
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAXIMUM_PAGE_SIZE)) -> PageResponse[BaseCommissionResponse]:
     """费率明细列表, 按 (组号, 交易所, 合约, 方向) 排序.
 
     键序与引擎那四列一致, 只是这一页收的**还含通配的规则** (空 / 品种码的合约格, `-1` 的双向),
@@ -549,11 +493,8 @@ async def list_base_commissions_handler(
     response_model=BaseCommissionResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_base_commission_handler(
-    request_body: BaseCommissionWriteRequest,
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
-) -> BaseCommissionModel:
+async def create_base_commission_handler(request_body: BaseCommissionWriteRequest, session: SessionDependency,
+    admin_user: AdminUserDependency) -> BaseCommissionModel:
     """新建一条费率明细.
 
     组号指向一个不存在的组时回 409 而不是 400: 请求本身是合法的, 冲突在于它引用的东西不在
@@ -585,12 +526,8 @@ async def create_base_commission_handler(
 @router.patch(
     "/base-commissions/{record_id}", response_model=BaseCommissionResponse
 )
-async def update_base_commission_handler(
-    record_id: str,
-    request_body: BaseCommissionWriteRequest,
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
-) -> BaseCommissionModel:
+async def update_base_commission_handler(record_id: str, request_body: BaseCommissionWriteRequest,
+    session: SessionDependency, admin_user: AdminUserDependency) -> BaseCommissionModel:
     """改一条费率明细. 整行替换语义, 故改单同样要验一次它将要指向的那个组与作用域代码."""
 
     await _ensure_instrument_scope_is_known(session, request_body)
@@ -612,11 +549,7 @@ async def update_base_commission_handler(
 
 
 @router.delete("/base-commissions/{record_id}", response_model=MessageResponse)
-async def delete_base_commission_handler(
-    record_id: str,
-    session: SessionDependency,
-    admin_user: AdminUserDependency,
-) -> MessageResponse:
+async def delete_base_commission_handler(record_id: str, session: SessionDependency, admin_user: AdminUserDependency) -> MessageResponse:
     """删一条费率明细."""
 
     base_commission = await _load_record(

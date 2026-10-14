@@ -32,11 +32,7 @@ from .run_storage import ROW_DELETABLE_OUTCOMES, remove_run_directory
 logger = logging.getLogger(__name__)
 
 
-async def prune_superseded_runs(
-    database: PlatformDatabase,
-    settings: PlatformSettings,
-    protected_run_ids: Iterable[str] = (),
-) -> int:
+async def prune_superseded_runs(database: PlatformDatabase, settings: PlatformSettings, protected_run_ids: Iterable[str] = ()) -> int:
     """按保留轮数清理各用户的旧运行, 返回真正删掉的行数.
 
     关着时返回 0 且**不写任何日志**: 它每次作业收尾都会被调一次, 一条"保留策略已关闭"的日志会
@@ -81,11 +77,7 @@ async def prune_superseded_runs(
     return len(removable_run_ids)
 
 
-async def _select_superseded_runs(
-    database: PlatformDatabase,
-    settings: PlatformSettings,
-    protected_run_ids: frozenset[str],
-) -> list[RunModel]:
+async def _select_superseded_runs(database: PlatformDatabase, settings: PlatformSettings, protected_run_ids: frozenset[str]) -> list[RunModel]:
     """取每个用户"第 N+1 新及之后"的终态运行.
 
     **非终态永不入选**——这是"清理与在飞的运行是什么关系"的结构性答案, 而不是"刚好没选中": 排队
@@ -128,9 +120,7 @@ async def _select_superseded_runs(
     return superseded_runs
 
 
-async def _delete_run_rows(
-    database: PlatformDatabase, run_ids: Sequence[str]
-) -> None:
+async def _delete_run_rows(database: PlatformDatabase, run_ids: Sequence[str]) -> None:
     """按主键批量删行.
 
     用 `delete()` 语句而不是把 ORM 对象逐个 `session.delete()`: 清扫手上的是上一个会话留下的游

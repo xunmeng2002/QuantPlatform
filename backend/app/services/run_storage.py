@@ -58,9 +58,7 @@ class RunDirectoryResolution:
     absence: RunDirectoryRemoval | None
 
 
-def resolve_run_directory(
-    settings: PlatformSettings, run: RunModel
-) -> RunDirectoryResolution:
+def resolve_run_directory(settings: PlatformSettings, run: RunModel) -> RunDirectoryResolution:
     """由运行行还原它的作业目录, 并确认它确实落在运行根之内.
 
     目录名就是 `RunId` (`scheduler/workspace.py` 的 `runs_root / job_files.run_id`), 而
@@ -98,9 +96,7 @@ def resolve_run_directory(
     return RunDirectoryResolution(job_directory, None)
 
 
-def remove_run_directory(
-    settings: PlatformSettings, run: RunModel
-) -> RunDirectoryRemoval:
+def remove_run_directory(settings: PlatformSettings, run: RunModel) -> RunDirectoryRemoval:
     """整目录移除该轮的作业目录; 只有 `ROW_DELETABLE_OUTCOMES` 里的结局才允许接着删行.
 
     阻塞调用, 调用方负责 `asyncio.to_thread`. **不做 `exists()` 预检**: 先问后删在两次系统调用

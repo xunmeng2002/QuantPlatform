@@ -44,7 +44,6 @@ class PlatformDatabase:
         )
 
         self._configure_sqlite_connections()
-
     def _configure_sqlite_connections(self) -> None:
         """逐连接打开外键校验并设置忙等超时.
 
@@ -55,9 +54,7 @@ class PlatformDatabase:
         if self._engine.dialect.name != SQLITE_DIALECT:
             return
 
-        def _apply_pragmas(
-            dbapi_connection: Any, connection_record: Any
-        ) -> None:
+        def _apply_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
             cursor = dbapi_connection.cursor()
 
             try:
@@ -67,7 +64,6 @@ class PlatformDatabase:
                 cursor.close()
 
         event.listen(self._engine.sync_engine, "connect", _apply_pragmas)
-
     def _create_database_directory(self) -> None:
         """SQLite 不会自建目录, 库文件所在目录缺失会在首次连接时报错."""
 
@@ -77,7 +73,6 @@ class PlatformDatabase:
             return
 
         Path(database_file).parent.mkdir(parents=True, exist_ok=True)
-
     async def initialize(self) -> None:
         """建表, 并给已存在的表补上模型新增的列.
 
@@ -100,12 +95,10 @@ class PlatformDatabase:
                 len(added_columns),
                 ", ".join(added_columns),
             )
-
     async def close(self) -> None:
         """释放连接池."""
 
         await self._engine.dispose()
-
     @asynccontextmanager
     async def session_scope(self) -> AsyncIterator[AsyncSession]:
         """会话作用域: 只管会话存活与异常回滚, 不代为提交.

@@ -104,9 +104,7 @@ def _redact_validation_error(validation_error: dict[str, Any]) -> dict[str, Any]
 logger = logging.getLogger(__name__)
 
 
-async def _prune_retained_runs(
-    database: PlatformDatabase, settings: PlatformSettings
-) -> None:
+async def _prune_retained_runs(database: PlatformDatabase, settings: PlatformSettings) -> None:
     """启动时按保留策略清一次盘.
 
     位置在两处之间: `recover_interrupted_runs` **之后**——恢复把上一轮留下的 `queued`/`running`
@@ -127,9 +125,7 @@ async def _prune_retained_runs(
         logger.info("启动清理移除了 %d 轮历史运行", removed_count)
 
 
-async def _run_startup_step(
-    step_description: str, step: Callable[[], Awaitable[None]]
-) -> None:
+async def _run_startup_step(step_description: str, step: Callable[[], Awaitable[None]]) -> None:
     """跑一个启动期的维护步骤, **失败只记日志、不阻断启动**.
 
     与 `_prune_retained_runs` 是同一条取舍: 这些步骤都是维护性的, 让一次磁盘或数据问题把整个
@@ -146,9 +142,7 @@ async def _run_startup_step(
         logger.error("%s失败, 后端照常启动: %s", step_description, error)
 
 
-def _build_retention_sweep(
-    database: PlatformDatabase, settings: PlatformSettings
-) -> Callable[[str], Awaitable[None]]:
+def _build_retention_sweep(database: PlatformDatabase, settings: PlatformSettings) -> Callable[[str], Awaitable[None]]:
     """把保留清理绑成一个"某一轮落终态之后"的回调.
 
     刚结束的那一轮经 `protected_run_ids` 排除: 清扫正由它的收尾触发, 而用户此刻看的多半就是它.
@@ -202,15 +196,11 @@ def _register_exception_handlers(application: FastAPI) -> None:
     """
 
     @application.exception_handler(ResourceNotFoundError)
-    async def _handle_resource_not_found(
-        request: Request, error: ResourceNotFoundError
-    ) -> JSONResponse:
+    async def _handle_resource_not_found(request: Request, error: ResourceNotFoundError) -> JSONResponse:
         return JSONResponse(status_code=404, content={"detail": str(error)})
 
     @application.exception_handler(PermissionDeniedError)
-    async def _handle_permission_denied(
-        request: Request, error: PermissionDeniedError
-    ) -> JSONResponse:
+    async def _handle_permission_denied(request: Request, error: PermissionDeniedError) -> JSONResponse:
         return JSONResponse(status_code=403, content={"detail": str(error)})
 
     @application.exception_handler(ConflictError)
@@ -218,15 +208,11 @@ def _register_exception_handlers(application: FastAPI) -> None:
         return JSONResponse(status_code=409, content={"detail": str(error)})
 
     @application.exception_handler(InvalidRequestError)
-    async def _handle_invalid_request(
-        request: Request, error: InvalidRequestError
-    ) -> JSONResponse:
+    async def _handle_invalid_request(request: Request, error: InvalidRequestError) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(error)})
 
     @application.exception_handler(RequestValidationError)
-    async def _handle_validation_error(
-        request: Request, error: RequestValidationError
-    ) -> JSONResponse:
+    async def _handle_validation_error(request: Request, error: RequestValidationError) -> JSONResponse:
         """把校验失败回执里的敏感字段值抹掉后再回.
 
         收尾那道 `jsonable_encoder` 不能省: 错误的 `ctx` 里可能躺着**异常对象本身**
@@ -276,9 +262,7 @@ def _register_request_size_guard(application: FastAPI) -> None:
     """
 
     @application.middleware("http")
-    async def _reject_oversized_request(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
+    async def _reject_oversized_request(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         declared_length = request.headers.get("content-length")
 
         if declared_length is not None:
