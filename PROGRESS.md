@@ -39,7 +39,39 @@ Python 策略**。
 
 ## ✅ 已完成
 
-### D.40 · 2026-10-14 （第四十批） 编码规范基线自查：Python 3.14 收口 + 前端 kebab-case 与版本钉死
+### D.41 · 2026-10-14 （第四十一批） 前端按 web-style.md 重构：`@/` 别名 + 目录分层 + 事件处理器改名 + 行尾归一
+
+> 用户点名「前端的代码，按着规则去重构」，把 D.40 记下「查了但有意没动」的前端几处逐条落地。
+> **全批无功能改动**（只有名字与位置变），验收口径不变：`npm run type-check` 通过 + `npm test` 238/30。
+
+- **`@/` 路径别名**（`f694ac3`，66 文件 +529/−514）：`vite.config.ts` 配 `resolve.alias` 一处，
+  单测与构建共用（`test` 键就在这份配置里，不必再配一遍）；`tsconfig.app.json` 补 `paths` 跟上。
+  **284 处**跨目录引用改走 `@/`，同目录仍写 `./x`（100 处）。顺带修掉 4 处漏网的跨目录 `./`
+  （`App.vue` / `App.spec.ts` / `main.ts` 两处）与 8 处 `vi.mock('../…')` 调用点。
+- **目录分层**（`fd9795b`，51 文件）：24 个组件按「**是否认识业务域**」（有没有 import `@/api` /
+  `@/domain` / `@/stores`）拆进 `components/common/`（10 个）与 `components/business/`（13 个），
+  页面骨架 `AppLayout.vue` 上移 `layouts/`，`style.css` → `styles/global.css`（它本就是 Tailwind 的
+  `@theme` 令牌与全局焦点/动效，属 §0 的全局样式一层）。93 处说明符按新位置重取向；6 处注释/文档里的
+  旧路径引用与 `platform-plan.md` 的目录树一并更新。**`dir=` 分类的边界**：`StatusBadge` 虽
+  `import type { StatusTone }`，但它自己的 docstring 写明「不认识任何枚举」，归 `common/`。
+- **模板事件处理器改名**（`9833800`，18 文件 +102/−102）：**27 个名字 / 93 处**改 `handle` + 动宾短语（§1）。
+  判据是「**纯事件入口**」——模板 `@` 绑定之外再无别的调用点。故 `runSearch`（`onMounted` 里也调）、
+  `loadComparison`（`watch` + `onMounted`）、`refreshCoverageNotice`（被两个兄弟函数调）**保持原名**：
+  它们同时是**操作**，冠 `handle` 会把「谁在调它」这层信息改错。`useReferenceTable` 的三个返回成员
+  （`handleGoToOffset` / `handleSubmitForm` / `handleRemoveRecord`）随改——它们唯一的调用点就是模板；
+  `refresh` / `cancelEditing` / `beginEditing` 保留（前两个组合式函数内部也在调，第三个在三个面板里
+  已被别名成 `markRowAsEditing`，名字到不了模板）。两个易踩处已加保护：`@submit.prevent` 与
+  `native-type="submit"` 里的 `submit` 是**属性名/取值不是引用**；`RouterLink` 的
+  `v-slot="{ navigate }"` 是外部 API 的具名插槽，本仓无此函数。
+- **行尾归一**（`d56af47`）：4 个 CRLF 文件（`.gitignore` 与三份台账）归 LF，全仓 229 个跟踪文件
+  至此**清一色 LF**；`RunSubmitView.spec.ts` 早在别名那一笔里随说明符重写落回 LF。备注里那条
+  「三份台账是 CRLF、写回要照原样」的提醒随之作废。
+- **有意保留**：`main.ts` 两处 `console.error` —— §5 禁的是 `console.log` / `debugger`，这两处正是
+  §9 要求的全局兜底（`app.config.errorHandler` 与 401 跳转失败），本仓无日志上报通道，加一层
+  「logger」只会多造一个概念（Harness §6）。
+- **已提交、未推送**：本批四笔都在 `master` 上，推送按既定分工由用户做。
+
+
 
 > **本批无功能改动**：用户更新了全局 `~/.claude/rules/` 下的三份规范，要求本仓按新规范自查。
 > 下面只记「按规范动了什么」与「查了但**有意没动**」两类，后者按 Harness §1「禁止擅自重构」待用户点名
@@ -575,10 +607,11 @@ Python 策略**。
 
 ## 备注
 
-- **环境锁定**：Windows + 后端与引擎同机；前端 **Node 24.16.0 + npm 11.13.0**（原记 24.15，
-  归档 D.07 实测订正）。**2026-10-14 补记**：本机实测 Node `24.15.0` + npm `12.2.0`，与上行
-  **不一致**（两台机？还是 npm 记错？**未核实，故上行的数一字未改**）；钉版本的文件取本机实测值，
-  即 `frontend/package.json` 的 `engines.node = ">=24.15.0"` 与 `frontend/.nvmrc` 的 `24.15.0`。
+- **环境锁定**：Windows + 后端与引擎同机；前端是**两台电脑**（2026-10-14 用户确认），两台的 Node/npm 各记各的：
+  **A 台 Node 24.16.0 + npm 11.13.0**、**B 台 Node 24.15.0 + npm 12.2.0**（后者本机实测，`D:\Program Files\node-v24.15.0-win-x64`）。
+  先前的「记乱了」实为两台各测各的，两个数**都对，不再订正谁**。钉版本的文件取**两台中的下限**，
+  即 `frontend/package.json` 的 `engines.node = ">=24.15.0"` 与 `frontend/.nvmrc` 的 `24.15.0` ——
+  两台的版本都满足。
   **"上云"等于一台 Windows 云主机，横向扩展无余地。**
   **Python 版本（2026-10-14 收口）**：本机 `python --version` = **3.14.7**
   （`sys.implementation.cache_tag` = `cpython-314`），引擎 `CMakePresets.json` 的 windows-base
@@ -612,9 +645,10 @@ Python 策略**。
   用户选择**保留现状** —— 既有的函数体内说明性注释与那批「为什么」型 docstring 一概不动，后续照旧写。
   **不要再拿 §10 来删它们**，也不必重新议这一条。
 
-- **`PROGRESS*.md` 三份台账是 CRLF 行尾**（2026-10-14 记）：全仓 229 个跟踪文件里只有 5 个不是 LF
-  （这三份 + `.gitignore` + `views/RunSubmitView.spec.ts`），而 `.editorconfig` 写的是 `end_of_line = lf`。
-  改这三份时若不按原样写回 CRLF，diff 会从几十行涨到四千行。**要么照原样保留，要么单独开一笔统一归 LF。**
+- **行尾一律 LF**（2026-10-14 收口，`d56af47`）：全仓 229 个跟踪文件里曾有 5 个不是 LF，现已全部归 LF，
+  复查「仍含 CR 的跟踪文件：无」。此前那条「三份台账是 CRLF、写回时要照原样」的提醒**已作废** ——
+  照 `.editorconfig` 的 `end_of_line = lf` 直接写即可，不必再惦记按原样写回。仓内**没有** `.gitattributes`，
+  `core.autocrlf` 为 `false`。
 - **本地开发要两个终端**（P4 起，见 `platform-plan.md` §8.1）：一个跑
   `cd backend && python -m app.main`，一个跑 `cd frontend && npm run dev`。
   前端**没有 CORS 中间件**，靠 Vite 的 `/api` 代理（**不重写路径**）打到
