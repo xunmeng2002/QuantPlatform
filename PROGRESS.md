@@ -317,10 +317,11 @@ Vite 代理缺口销账）。**本条的未决项**：前端仍无 e2e（P4 起�
 > `PYTHONPATH`，那条路径一旦存在就会**静默盖掉平台指定的引擎根**。后端 740 全过 + 真引擎 5 全过。
 > **已提交**（`4ed9dec`）。
 
-**仍未决（本条的未决部分，原文在归档 D.35 末）**：真引擎验收留下的
-`backend/_acc_tmp_relative_dbinit/`（未跟踪，且不在 `.gitignore` 覆盖的 `_acc_tmp/` 之内）**未删**
-—— Harness §1 禁止 AI 递归删除仓外 / 未跟踪对象，待用户处置（删掉，或把 `.gitignore` 的
-`backend/_acc_tmp/` 放宽成 `backend/_acc_tmp*/`）。
+**该条的未决部分已销账（2026-10-14 核对）**：真引擎验收留下的 `backend/_acc_tmp_relative_dbinit/`
+当时未跟踪、也不在 `.gitignore` 的 `backend/_acc_tmp/` 之内，故按 Harness §1 不删、留待用户处置。
+现由 `.gitignore:166` 的 `/backend/_acc_tmp_relative_dbinit` 一条显式覆盖（`git check-ignore -v`
+复核命中），两个后路里选了「放宽忽略规则」那条。**目录本身仍在盘上** —— §1 的禁令并没有撤，它只是
+不再进 `git status`。原文见归档 D.35 末。
 
 ### D.34 · 2026-10-07 （第三十四批） 手续费组随轮冻结：提交页选组 + 删组两道闸
 
