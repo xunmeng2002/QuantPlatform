@@ -1,6 +1,6 @@
 """引擎侧硬条件的探测.
 
-扩展模块的 ABI 标签、运行时 DLL、以及调度侧要读入的三个文件, 都属于"不满足时提交回测只会
+扩展模块的 ABI 标签、运行时库、以及调度侧要读入的三个文件, 都属于"不满足时提交回测只会
 得到一个难以归因的启动失败"那一类. health 端点据此在设置页提前暴露, 调度器用同一组判据做
 **非阻断**诊断.
 
@@ -23,7 +23,15 @@ PYTHON_BINDING_FILENAME_PREFIX = "QuantTrading."
 # (目录里同时躺着通用的与带 ABI 标签的两份时, 选带标签的).
 PYTHON_BINDING_FILENAME_SUFFIXES: tuple[str, ...] = tuple(EXTENSION_SUFFIXES)
 
-ENGINE_RUNTIME_FILENAMES = ("BackTest.dll", "Core.dll", "Network.dll")
+# 运行时库的**文件名两平台不同**: Windows 是 `BackTest.dll`, Linux 是 `libBackTest.so`
+# (前缀 `lib` + 后缀 `.so`). 先前这张表写死成三个 `.dll` 名, 于是 Linux 上
+# `missing_runtime_filenames` 恒返回这三项 —— `/api/health` 的 `ready` 因此恒为 false,
+# 而发布包本身完全正常, 白查一场.
+ENGINE_RUNTIME_LIBRARY_NAMES = ("BackTest", "Core", "Network")
+
+ENGINE_RUNTIME_FILENAMES: tuple[str, ...] = tuple(
+    f"{name}.dll" if sys.platform == "win32" else f"lib{name}.so" for name in ENGINE_RUNTIME_LIBRARY_NAMES
+)
 
 # 平台侧为引擎包约定的版本文件, 不是引擎自己认的文件名 (与 `Sessions.json` 那类不同):
 # 它由 QuantTrading 的发布流程产出, 一行文本即版本号. 缺失时退回内容摘要, 见下.
@@ -71,7 +79,7 @@ def find_python_binding(engine_root: Path) -> Path | None:
 
 
 def missing_runtime_filenames(engine_root: Path) -> list[str]:
-    """引擎运行时缺哪些 DLL, 名字原样列出."""
+    """引擎运行时缺哪些库, 名字原样列出."""
 
     return [
         filename
@@ -97,7 +105,7 @@ def read_engine_version(engine_root: Path) -> str:
 
     1. `<engine_root>/engine-version.txt` 的内容 —— 人可读, 精确, 但要 QuantTrading 的发布
        流程产出它. 引擎的依赖闭包只有它自己知道, 故完整口径只能由它给出.
-    2. 扩展模块 + 三个运行时 DLL 的**内容摘要** —— 不依赖任何人配合, 对"这四个文件变了"敏感.
+    2. 扩展模块 + 三个运行时库的**内容摘要** —— 不依赖任何人配合, 对"这四个文件变了"敏感.
        它盖不住引擎包里别的文件, 这只是兜底而不是等价替代.
     3. 两者都取不到时回空串: "不知道"是一个诚实的取值, 与 `Hostname` / `DbPath` 的空串同形.
        此时引擎类策略本来也起不来 (退出码 1), 不必另造一个哨兵值.
@@ -161,7 +169,7 @@ def _hash_engine_binaries(engine_root: Path) -> str:
 
 
 def _engine_binary_paths(engine_root: Path) -> list[Path]:
-    """参与摘要的文件, 次序固定: 扩展模块在前, 运行时 DLL 按 `ENGINE_RUNTIME_FILENAMES` 的次序.
+    """参与摘要的文件, 次序固定: 扩展模块在前, 运行时库按 `ENGINE_RUNTIME_FILENAMES` 的次序.
 
     次序必须固定: 摘要对输入次序敏感, 次序一变同一份引擎会算出两个值.
     """

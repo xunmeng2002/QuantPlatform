@@ -70,8 +70,8 @@ EXPECTED_SCHEMA_COLUMNS: dict[str, frozenset[str]] = {
     ),
 }
 
-# 可以不在, 但**在就必须列齐**的表. `QueriedBarSpans` 是组件 v2.3.0 才有的账: 组件还没升过级
-# 时它不存在, 那时账为空、判据退化成"一段都没问过, 于是每次都取"——这是**有意**的降级方向,
+# 可以不在, 但**在就必须列齐**的表. `QueriedBarSpans` 是较晚才进 schema 的账表: 更早的库上
+# 它不存在, 那时账为空、判据退化成"一段都没问过, 于是每次都取"——这是**有意**的降级方向,
 # 多取只是慢, 少取才是错. 但表在而列漂了是另一回事, 那种 schema 漂移必须显式报错, 不能当成
 # "账是空的"。
 OPTIONAL_SCHEMA_COLUMNS: dict[str, frozenset[str]] = {

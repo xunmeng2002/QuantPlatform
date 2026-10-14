@@ -5,6 +5,7 @@
 `find_python_binding` 另占一节: 它认不出扩展模块时, 现象与"引擎包整个坏了"长得一样.
 """
 
+import sys
 from importlib.machinery import EXTENSION_SUFFIXES
 from pathlib import Path
 
@@ -12,6 +13,7 @@ import pytest
 
 from app.services.engine_probe import (
     ENGINE_RUNTIME_FILENAMES,
+    ENGINE_RUNTIME_LIBRARY_NAMES,
     ENGINE_VERSION_FILENAME,
     MAXIMUM_ENGINE_VERSION_LENGTH,
     PYTHON_BINDING_FILENAME_PREFIX,
@@ -232,3 +234,21 @@ def test_the_most_specific_suffix_wins_over_the_generic_one(tmp_path: Path) -> N
     _write_binding(engine_root)
 
     assert find_python_binding(engine_root) == engine_root / BINDING_FILENAME
+
+
+def test_the_runtime_library_filenames_follow_this_platforms_naming() -> None:
+    """运行时库的名字跟着平台走: Windows 是 `BackTest.dll`, Linux 是 `libBackTest.so`.
+
+    这条在 Windows 上跑近乎复述实现, 判别力在 Linux 上 —— 先前那张表写死了三个 `.dll` 名, 于是
+    Linux 上 `missing_runtime_filenames` 恒返回三项, `/api/health` 的 `ready` 恒为 false, 而
+    发布包本身完全正常. 次序也在这里钉住: 内容摘要对输入次序敏感, 换序会让同一份引擎算出两个值.
+    """
+
+    assert ENGINE_RUNTIME_LIBRARY_NAMES == ("BackTest", "Core", "Network")
+
+    for name, filename in zip(
+        ENGINE_RUNTIME_LIBRARY_NAMES, ENGINE_RUNTIME_FILENAMES, strict=True
+    ):
+        expected_filename = f"{name}.dll" if sys.platform == "win32" else f"lib{name}.so"
+
+        assert filename == expected_filename

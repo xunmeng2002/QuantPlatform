@@ -1,11 +1,11 @@
 """引擎自检.
 
 后端的可用性取决于引擎侧一组硬条件: 与当前解释器匹配的扩展模块存在 (名字里的 cpXXX 即 ABI
-标签, Python 小版本不匹配即不可用)、引擎运行时 DLL 齐备、运行根可写, 以及调度侧要读入的两个
+标签, Python 小版本不匹配即不可用)、引擎运行时库齐备、运行根可写, 以及调度侧要读入的两个
 文件分别在位. 这些条件不满足时提交回测只会得到一个难以归因的启动失败, 故在设置页提前暴露.
 
 本端点要求管理员 (计划原文把它列为免认证, P1 实施时先收为需认证, 现再收为仅管理员): 响应要
-报出引擎根与运行根的绝对路径、缺失的 DLL 名与解释器版本, 即本机内部布局的清单. 单机部署没有
+报出引擎根与运行根的绝对路径、缺失的库名与解释器版本, 即本机内部布局的清单. 单机部署没有
 负载均衡这类匿名消费者, 而普通用户拿到这份清单只有泄漏面——他能做的动作里没有一项需要它.
 
 两个引擎侧输入的缺失**不并入 `ready`**: 两者缺失都会让每个作业构造不出工作目录 (行情根还决定
@@ -79,7 +79,7 @@ def _probe_directory_writable(directory: Path) -> bool:
 
 @router.get("", response_model=EngineHealthResponse)
 async def read_health_handler(settings: SettingsDependency, admin_user: AdminUserDependency) -> EngineHealthResponse:
-    """引擎自检: 扩展模块、运行时 DLL、运行根可写性与两个引擎侧输入."""
+    """引擎自检: 扩展模块、运行时库、运行根可写性与两个引擎侧输入."""
 
     python_binding = find_python_binding(settings.engine_root)
 

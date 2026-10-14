@@ -299,10 +299,12 @@ PY
 
 ```shell
 cd D:/Gitee/QuoteHub && python - <<'PY'
+import json
 import sqlite3
-from BaoStock import DB_PATH
+from pathlib import Path
 
-connection = sqlite3.connect(DB_PATH)
+database_path = json.loads(Path("config.json").read_text(encoding="utf-8"))["database_path"]
+connection = sqlite3.connect(database_path)
 tables = {row[0] for row in connection.execute(
     "SELECT name FROM sqlite_master WHERE type = 'table'")}
 print("账表在:", "QueriedBarSpans" in tables)
@@ -315,7 +317,7 @@ if "QueriedBarSpans" in tables:
 PY
 ```
 
-> **注意**：账表是 v2.3.0 才有的。**跑过新组件之前它要么不存在、要么是空的**，于是所有合约都判
+> **注意**：账表是较晚才进 schema 的。**在还没人写过账的库上它是空的**，于是所有合约都判
 > "没问过"—— 包括那 4 只明明已有 bar 的。这是有意的降级方向（多取只是慢，少取才是错），代价是
 > **每只合约各重取一次**；写过账之后就不再重复。走查时别把第一轮的"全部重取"当成 bug。
 
