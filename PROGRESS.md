@@ -516,10 +516,10 @@ Python 策略**。
     `.dll`（Linux 上是 `.so`，须按平台分档）；② `strategy_store.py:97` 的版本占用依赖 Windows
     `rename` 语义——POSIX `rename(2)` 会**静默覆盖空目录**，须改成显式占位（既有 docstring
     已预警）。
-  - **Python 3.14 统一**：用户 2026-10-09 表示要把两台机统一升到 3.14。**现状归属**：本机
-    3.14/`cp314`，另一台 3.11/`cp311`（详见备注「环境锁定」）。引擎 `CMakePresets.json` 的
-    `linux-base` 仍写 `QUANTTRADING_PYTHON_VERSION: "3.12"`，须一并对齐；**云主机那台的
-    Python 要与包内扩展模块的 ABI 对上**（同下面「clean 的引擎发布包」那条的第 ③ 点）。
+  - **Python 3.14 统一**：**已了结（2026-10-14 实测）**——两台机与引擎两侧现均 3.14（本机
+    `python --version` = 3.14.7；引擎 `CMakePresets.json` 的 windows-base 与 linux-base
+    两档 preset 皆 `QUANTTRADING_PYTHON_VERSION: "3.14"`）。云主机那台的 Python 要与包内
+    扩展模块 ABI 对上这一点仍随下面「clean 的引擎发布包」那条第 ③ 点未决，不在本条。
 - **Tick 模式的三档撮合语义未定**（2026-09-25，D.06 引入，半关闭；
   **表单侧已定部分见归档 `Q.06`**）：引擎侧 tick 撮合有 `OrderBook:0` /
   `LastPrice:1` / `OppositePrice:2` 三档，`SimExchange.cpp` 按"是不是 Bar"
@@ -546,8 +546,8 @@ Python 策略**。
   **给出时须一并落实三件**：① 包内带 `engine-version.txt`（D.19 的标识优先取它；
   没有则退化为 `.pyd` + 三个 DLL 的内容摘要，两者**不可比**）；② 换版按版本留目录
   而非原地覆盖（`platform-plan.md` §5.1 的约定）；③ **云主机那台的 Python 版本要与包内 `.pyd`
-  的 ABI 对上**（2026-10-08 补，成因见备注「环境锁定」：本机是 3.14/`cp314`，另一台是 3.11/
-  `cp311`，`.pyd` 与解释器绑死，装错了是启动期就装不起来）。**上云前定**。
+  的 ABI 对上**（2026-10-08 补，成因见备注「环境锁定」；**2026-10-14 更新：两台现均 3.14 /
+  `cp314`**，`.pyd` 与解释器绑死，装错了是启动期就装不起来）。**上云前定**。
 - **引擎发布包要含哪些数据库适配器**（2026-09-27，D.20 引出）：MySQL / MariaDB 两系现在
   **可以不随包发运**，但"要发运时装到哪"尚未定。装载器按两步找：先"调用方模块所在目录 + 文件名"
   （Windows），再裸文件名（Windows 走标准搜索序，Linux 走**调用方 `RUNPATH`**，与链结期 `DT_NEEDED` 规则逐字相同）。
@@ -564,27 +564,17 @@ Python 策略**。
 
 - **环境锁定**：Windows + 后端与引擎同机；前端 **Node 24.16.0 + npm 11.13.0**（原记 24.15，
   归档 D.07 实测订正）。**"上云"等于一台 Windows 云主机，横向扩展无余地。**
-  **⚠️ Python 版本以本机实测为准（2026-10-01）**：原记 **3.14.5 / `cp314`**（且"Linux 无解"），
-  本机实测却是 **3.11.1**（`py -0p` 只有这一个）＋ `QuantTrading.cp311-win_amd64.pyd`，
-  两者**自洽**（`runner.py:344` 用 `sys.executable` 拉起策略进程），不影响运行。决定性证据：
-  `test_engine_probe.py` 把 `.pyd` 名硬编码成 `cp314` 时 4 项断言恒失败，而
-  `../QuantTrading/bin/Release` 里**只有 `cp311` 那个文件**；改成从探针自己的常量推导后 12 项
-  全绿。故 **3.14.5 / `cp314` 不描述这台机器**（"在另一台机器上记的"仍未排除），别当本机事实。
-  **⚠️ 2026-10-08 复测并问明成因：上面那段与下面这段不是"谁错"，是两台机器 —— 以本段为准。**
-  用户 2026-10-08 说明：**上面那段量的是另一台电脑**（那台的 Windows 上是 Python **3.11**，
-  它 WSL 里是 **3.12**），并**已定：两台都不升级**。本机（当前开发机）是 **3.14.5 + `cp314`**，
-  三条独立证据：① `py -0p` 在本机只有一个解释器 **3.14.5**（PATH 上那个 `python` 就是它，
-  本会话跑 pytest 的也是它）；② 引擎侧由**平台自己的探针**量出 ——
-  `PlatformSettings.from_environment().engine_root` 是 `D:\Gitee\QuantTrading\bin\Release`，
-  在那里 `find_python_binding()` 找到 `QuantTrading.cp314-win_amd64.pyd` 且
-  `is_python_binding_available()` 为 **True**；③ `sys.implementation.cache_tag` 是 `cpython-314`，
-  `backend/**/__pycache__` 里的 pyc 也全是 `cpython-314`。
-  **两台各自自洽**（3.11 ↔ `cp311` / 3.14 ↔ `cp314`），探针那条"按当前解释器求 ABI 标签"的写法
-  （`engine_probe.py:39`）本来就同时描述得了两者，**代码不必改**。上面那句"3.14.5 / `cp314`
-  不描述这台机器"里的"这台"指的是**另一台** —— 主语没写明才读成了矛盾。同样地，
-  `strategy_store.py:171` 的注释写"Python 3.14（`.pyd` 是 `cp314-win_amd64`）"说的是**本机**，
-  并不冲突。**对上云的含义**：`.pyd` 与解释器绑死，云主机那台的 Python 版本必须与随包发运的
-  `.pyd` 的 ABI 对上（已补进下方 ❓ 的"引擎发布包"那条）。
+  **Python 版本（2026-10-14 收口）**：本机 `python --version` = **3.14.7**
+  （`sys.implementation.cache_tag` = `cpython-314`），引擎 `CMakePresets.json` 的 windows-base
+  与 linux-base 两档 preset 皆 `QUANTTRADING_PYTHON_VERSION: "3.14"`（引擎侧 `09bf7f6` 把
+  Linux 由 3.12 改钉 3.14、`3b2144c` 同步文档）。此前两段"本机 3.11 / 另一台 3.11+3.12"的
+  记载已被此收口取代（两台现同为 3.14），原文留在 git 历史，不复述。
+  **唯一一条口径**：`.pyd` 与解释器 ABI 绑死，装错了是**启动期就装不起来** ——
+  故云主机那台的 Python 须与随包发运的 `.pyd` 对齐（见下方 ❓「引擎发布包」第 ③ 点）。
+  **探针写法不必改**：`engine_probe.py:39` 按**当前解释器**求 ABI 标签
+  （`find_python_binding()` / `is_python_binding_available()`），换解释器版本时它自动跟着走；
+  **不要退回硬编码 `.pyd` 名** —— 2026-10-01 那次把名字写死成 `cp314` 时 4 项断言恒失败，
+  改成从探针常量推导后全绿。这条教训与具体版本无关，仍有效。
 - **`market-data/` 是可丢的运行数据, 丢了只在提交时报一句 400（2026-10-07 实测重建）**：仓根
   `market-data/` 被 `.gitignore` 的 `/market-data/` 锚定,**不进版本库、`git status` 里也不显示**。
   它一旦不在盘上（本机 2026-10-07 就是这样, 同批不见的还有 `backend/_acc_tmp_old/`）, 提交回测
