@@ -5,7 +5,7 @@
  * 只能把约定镜像过来; 镜像因此集中在这一个模块里 —— 散到各处的结果是改组件时只改得动一半.
  */
 
-import type { MarketDataContract } from '../api/types';
+import type { MarketDataContract } from '@/api/types';
 
 /**
  * 用户可选的**策略订阅周期**, 与 `backend/app/config.SUBSCRIPTION_BAR_PERIODS` 逐字对应.

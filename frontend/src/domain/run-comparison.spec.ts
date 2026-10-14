@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { RunComparisonEntry, RunSummary } from '../api/types';
+import type { RunComparisonEntry, RunSummary } from '@/api/types';
 import { ABSENT_PLACEHOLDER } from './format';
 import { PARAMETER_ROW_GROUP_TITLE, buildRunComparisonTableModel } from './run-comparison';
 

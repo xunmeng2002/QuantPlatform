@@ -11,7 +11,7 @@
  */
 
 import ParameterField from './ParameterField.vue';
-import type { ParameterDescriptor, ParameterInput } from '../domain/strategy-configuration';
+import type { ParameterDescriptor, ParameterInput } from '@/domain/strategy-configuration';
 
 const props = defineProps<{
   descriptors: ParameterDescriptor[];

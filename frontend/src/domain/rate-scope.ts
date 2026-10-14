@@ -21,8 +21,8 @@
  * 引擎仍然一致, 只是两者的叫法都不是用户本意.
  */
 
-import { MAXIMUM_PRODUCT_CODE_LENGTH } from '../api/types';
-import type { RateScope } from '../api/types';
+import { MAXIMUM_PRODUCT_CODE_LENGTH } from '@/api/types';
+import type { RateScope } from '@/api/types';
 import type { StatusPresentation } from './run-status';
 
 /**

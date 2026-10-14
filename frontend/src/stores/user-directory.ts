@@ -12,9 +12,9 @@
 import { ref } from 'vue';
 import { defineStore } from 'pinia';
 
-import { fetchUserDirectory } from '../api/users';
-import { MAXIMUM_PAGE_SIZE } from '../api/types';
-import type { UserDirectoryEntry } from '../api/types';
+import { fetchUserDirectory } from '@/api/users';
+import { MAXIMUM_PAGE_SIZE } from '@/api/types';
+import type { UserDirectoryEntry } from '@/api/types';
 
 export const useUserDirectoryStore = defineStore('user-directory', () => {
   const entriesById = ref(new Map<string, string>());

@@ -8,9 +8,9 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 
-import { collectAllPages } from '../api/pagination';
-import { fetchStrategies } from '../api/strategies';
-import type { Strategy } from '../api/types';
+import { collectAllPages } from '@/api/pagination';
+import { fetchStrategies } from '@/api/strategies';
+import type { Strategy } from '@/api/types';
 
 export const useStrategyCatalogStore = defineStore('strategy-catalog', () => {
   const strategies = ref<Strategy[]>([]);

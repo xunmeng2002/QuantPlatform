@@ -23,8 +23,8 @@
 import { computed, ref } from 'vue';
 import type { ComputedRef, Ref } from 'vue';
 
-import type { MessageResponse, PageResponse } from '../api/types';
-import { DEFAULT_PAGE_SIZE } from '../api/types';
+import type { MessageResponse, PageResponse } from '@/api/types';
+import { DEFAULT_PAGE_SIZE } from '@/api/types';
 import {
   confirmAction,
   describeApiFailure,

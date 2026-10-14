@@ -16,7 +16,7 @@
 import { computed } from 'vue';
 import { ElTag } from 'element-plus';
 
-import type { StatusTone } from '../domain/run-status';
+import type { StatusTone } from '@/domain/run-status';
 
 const props = defineProps<{
   label: string;

@@ -17,8 +17,8 @@
  * 纯函数, 故能直接单测: 视图只负责把结果画出来.
  */
 
-import { PARAMETER_VALUE_TYPES, PLATFORM_CONFIGURATION_KEY_NAMES } from '../api/types';
-import type { StrategyConfigurationTemplate } from '../api/types';
+import { PARAMETER_VALUE_TYPES, PLATFORM_CONFIGURATION_KEY_NAMES } from '@/api/types';
+import type { StrategyConfigurationTemplate } from '@/api/types';
 
 /** 与后端 `routers/strategies` 的解析失败同义; 前端先判一次是为了**选完文件就看见**, 不必等一轮请求. */
 export const CONFIGURATION_NOT_JSON_MESSAGE = '不是合法的 JSON';

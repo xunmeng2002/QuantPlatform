@@ -18,11 +18,11 @@ import type { EChartsOption } from 'echarts';
 import { computed, onMounted, ref } from 'vue';
 import VChart from 'vue-echarts';
 
-import { fetchRunEquity } from '../api/runs';
-import type { EquityPoint } from '../api/types';
-import { describeApiFailure } from '../composables/use-feedback';
-import { buildEquitySeries, summarizeEquity } from '../domain/equity';
-import { ABSENT_PLACEHOLDER, formatAmount, formatPercentRatio, formatTradingDay } from '../domain/format';
+import { fetchRunEquity } from '@/api/runs';
+import type { EquityPoint } from '@/api/types';
+import { describeApiFailure } from '@/composables/use-feedback';
+import { buildEquitySeries, summarizeEquity } from '@/domain/equity';
+import { ABSENT_PLACEHOLDER, formatAmount, formatPercentRatio, formatTradingDay } from '@/domain/format';
 import EmptyNotice from './EmptyNotice.vue';
 import ErrorBanner from './ErrorBanner.vue';
 import LoadingNotice from './LoadingNotice.vue';

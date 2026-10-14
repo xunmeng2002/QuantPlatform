@@ -21,13 +21,13 @@ import { flushPromises, mount } from '@vue/test-utils';
 import type { VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { PageResponse, Product, ProductPayload } from '../api/types';
-import { DEFAULT_PAGE_SIZE } from '../api/types';
-import { confirmAction } from '../composables/use-feedback';
+import type { PageResponse, Product, ProductPayload } from '@/api/types';
+import { DEFAULT_PAGE_SIZE } from '@/api/types';
+import { confirmAction } from '@/composables/use-feedback';
 import ReferenceProductPanel from './ReferenceProductPanel.vue';
 
-vi.mock('../composables/use-feedback', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../composables/use-feedback')>();
+vi.mock('@/composables/use-feedback', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/composables/use-feedback')>();
 
   return { ...actual, confirmAction: vi.fn(async () => true) };
 });

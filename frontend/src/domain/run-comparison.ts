@@ -10,7 +10,7 @@
  *      占位符 —— 这恰恰是"这两轮差在哪"最该看见的一格.
  */
 
-import type { RunComparisonEntry, RunStatus } from '../api/types';
+import type { RunComparisonEntry, RunStatus } from '@/api/types';
 import { ABSENT_PLACEHOLDER, formatFlag } from './format';
 import { buildSummaryMetricSections } from './run-metrics';
 

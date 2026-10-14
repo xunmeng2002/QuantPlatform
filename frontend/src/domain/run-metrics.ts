@@ -12,7 +12,7 @@
  * 纯函数: 不碰 DOM、不发请求, 故能在 vitest 的 node 环境里直接测.
  */
 
-import type { RunDetail, RunSummary } from '../api/types';
+import type { RunDetail, RunSummary } from '@/api/types';
 import {
   ABSENT_PLACEHOLDER,
   formatAmount,

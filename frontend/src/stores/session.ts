@@ -12,9 +12,9 @@
 import { computed, ref, watch } from 'vue';
 import { defineStore } from 'pinia';
 
-import * as authApi from '../api/auth';
-import { setAccessToken } from '../api/client';
-import type { User } from '../api/types';
+import * as authApi from '@/api/auth';
+import { setAccessToken } from '@/api/client';
+import type { User } from '@/api/types';
 
 export const ACCESS_TOKEN_STORAGE_KEY = 'quantplatform.access-token';
 

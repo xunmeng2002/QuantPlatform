@@ -22,34 +22,34 @@ import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent, h } from 'vue';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchMarketDataContracts } from '../api/market-data';
-import { fetchCommissionGroupOptions } from '../api/reference-data';
-import { fetchStrategies } from '../api/strategies';
-import { MAXIMUM_PAGE_SIZE } from '../api/types';
+import { fetchMarketDataContracts } from '@/api/market-data';
+import { fetchCommissionGroupOptions } from '@/api/reference-data';
+import { fetchStrategies } from '@/api/strategies';
+import { MAXIMUM_PAGE_SIZE } from '@/api/types';
 import type {
   CommissionGroupOption,
   MarketDataContract,
   MarketDataContractList,
-} from '../api/types';
+} from '@/api/types';
 import RunSubmitView from './RunSubmitView.vue';
 
 vi.mock('vue-router', () => ({
   RouterLink: defineComponent({ render: () => h('a') }),
   useRouter: () => ({ push: vi.fn() }),
 }));
-vi.mock('../api/market-data', () => ({
+vi.mock('@/api/market-data', () => ({
   fetchMarketDataContracts: vi.fn(),
   fetchMarketDataCoverage: vi.fn(),
 }));
-vi.mock('../api/reference-data', () => ({
+vi.mock('@/api/reference-data', () => ({
   fetchCommissionGroupOptions: vi.fn(),
 }));
-vi.mock('../api/runs', () => ({ submitRun: vi.fn() }));
-vi.mock('../api/run-templates', () => ({
+vi.mock('@/api/runs', () => ({ submitRun: vi.fn() }));
+vi.mock('@/api/run-templates', () => ({
   createRunTemplate: vi.fn(),
   fetchRunTemplates: vi.fn(),
 }));
-vi.mock('../api/strategies', () => ({
+vi.mock('@/api/strategies', () => ({
   fetchStrategies: vi.fn(),
   fetchStrategyDetail: vi.fn(),
   fetchLastSubmittedParameters: vi.fn(),

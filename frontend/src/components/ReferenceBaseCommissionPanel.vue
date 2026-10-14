@@ -35,40 +35,40 @@ import {
   ElTableColumn,
 } from 'element-plus';
 
-import { collectAllPages } from '../api/pagination';
+import { collectAllPages } from '@/api/pagination';
 import {
   createBaseCommission,
   deleteBaseCommission,
   fetchBaseCommissions,
   fetchProducts,
   updateBaseCommission,
-} from '../api/reference-data';
+} from '@/api/reference-data';
 import {
   BOTH_DIRECTIONS,
   EXCHANGE_SUGGESTIONS,
   MAXIMUM_INSTRUMENT_ID_LENGTH,
   RATE_DIRECTIONS,
   RATE_SCOPES,
-} from '../api/types';
+} from '@/api/types';
 import type {
   BaseCommission,
   BaseCommissionPayload,
   Product,
   RateDirection,
   RateScope,
-} from '../api/types';
-import { describeApiFailure } from '../composables/use-feedback';
-import { useReferenceTable } from '../composables/use-reference-table';
-import { ABSENT_PLACEHOLDER, formatDateTime, formatDecimal } from '../domain/format';
+} from '@/api/types';
+import { describeApiFailure } from '@/composables/use-feedback';
+import { useReferenceTable } from '@/composables/use-reference-table';
+import { ABSENT_PLACEHOLDER, formatDateTime, formatDecimal } from '@/domain/format';
 import {
   describeCommissionDirection,
   describeCommissionDirectionPhrase,
-} from '../domain/labels';
+} from '@/domain/labels';
 import {
   describeRateScope,
   describeRateScopeTarget,
   resolveRateScope,
-} from '../domain/rate-scope';
+} from '@/domain/rate-scope';
 import ContentSkeleton from './ContentSkeleton.vue';
 import EmptyNotice from './EmptyNotice.vue';
 import ErrorBanner from './ErrorBanner.vue';

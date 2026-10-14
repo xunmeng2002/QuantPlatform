@@ -35,7 +35,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from './App.vue';
 import { router } from './router';
-import { useSessionStore } from './stores/session';
+import { useSessionStore } from '@/stores/session';
 
 const pinia = createPinia();
 setActivePinia(pinia);

@@ -11,13 +11,13 @@
 
 import { RouterLink } from 'vue-router';
 
-import { ABSENT_PLACEHOLDER } from '../domain/format';
+import { ABSENT_PLACEHOLDER } from '@/domain/format';
 import type {
   RunComparisonColumn,
   RunComparisonRow,
   RunComparisonRowGroup,
-} from '../domain/run-comparison';
-import { describeEngineVerdict, describeRunStatus } from '../domain/run-status';
+} from '@/domain/run-comparison';
+import { describeEngineVerdict, describeRunStatus } from '@/domain/run-status';
 import StatusBadge from './StatusBadge.vue';
 
 defineProps<{

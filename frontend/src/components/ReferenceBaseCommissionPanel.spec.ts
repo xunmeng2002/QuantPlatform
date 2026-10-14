@@ -19,13 +19,13 @@ import { flushPromises, mount } from '@vue/test-utils';
 import type { VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BOTH_DIRECTIONS } from '../api/types';
+import { BOTH_DIRECTIONS } from '@/api/types';
 import type {
   BaseCommission,
   BaseCommissionPayload,
   PageResponse,
   Product,
-} from '../api/types';
+} from '@/api/types';
 import ReferenceBaseCommissionPanel from './ReferenceBaseCommissionPanel.vue';
 import StatusBadge from './StatusBadge.vue';
 

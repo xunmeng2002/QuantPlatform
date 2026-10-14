@@ -12,7 +12,7 @@
 
 import { ElOption, ElSelect } from 'element-plus';
 
-import { PAGE_SIZE_OPTIONS } from '../api/types';
+import { PAGE_SIZE_OPTIONS } from '@/api/types';
 import PaginationBar from './PaginationBar.vue';
 
 const props = defineProps<{

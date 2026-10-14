@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { RunDetail, RunSummary } from '../api/types';
+import type { RunDetail, RunSummary } from '@/api/types';
 import { formatDateTime } from './format';
 import { buildDetailMetricSections, buildSummaryMetricSections } from './run-metrics';
 import type { MetricSection } from './run-metrics';

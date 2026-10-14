@@ -10,12 +10,12 @@ import { computed, ref } from 'vue';
 import { ElButton, ElInput } from 'element-plus';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 
-import { MAXIMUM_USERNAME_LENGTH } from '../api/types';
-import ErrorBanner from '../components/ErrorBanner.vue';
-import PageHeader from '../components/PageHeader.vue';
-import SurfaceCard from '../components/SurfaceCard.vue';
-import { describeApiFailure } from '../composables/use-feedback';
-import { useSessionStore } from '../stores/session';
+import { MAXIMUM_USERNAME_LENGTH } from '@/api/types';
+import ErrorBanner from '@/components/ErrorBanner.vue';
+import PageHeader from '@/components/PageHeader.vue';
+import SurfaceCard from '@/components/SurfaceCard.vue';
+import { describeApiFailure } from '@/composables/use-feedback';
+import { useSessionStore } from '@/stores/session';
 
 const route = useRoute();
 const router = useRouter();

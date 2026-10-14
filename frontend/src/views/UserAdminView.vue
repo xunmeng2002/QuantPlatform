@@ -18,7 +18,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { ElButton, ElInput, ElOption, ElSelect, ElTable, ElTableColumn } from 'element-plus';
 
-import { createUser, fetchUsers, updateUserStatus } from '../api/users';
+import { createUser, fetchUsers, updateUserStatus } from '@/api/users';
 import {
   DEFAULT_PAGE_SIZE,
   MAXIMUM_DISPLAY_NAME_LENGTH,
@@ -27,24 +27,24 @@ import {
   MINIMUM_PASSWORD_LENGTH,
   MINIMUM_USERNAME_LENGTH,
   USER_TYPES,
-} from '../api/types';
-import type { PageResponse, User, UserStatus, UserType } from '../api/types';
-import ContentSkeleton from '../components/ContentSkeleton.vue';
-import EmptyNotice from '../components/EmptyNotice.vue';
-import ErrorBanner from '../components/ErrorBanner.vue';
-import PageHeader from '../components/PageHeader.vue';
-import PaginationToolbar from '../components/PaginationToolbar.vue';
-import StatusBadge from '../components/StatusBadge.vue';
-import SurfaceCard from '../components/SurfaceCard.vue';
+} from '@/api/types';
+import type { PageResponse, User, UserStatus, UserType } from '@/api/types';
+import ContentSkeleton from '@/components/ContentSkeleton.vue';
+import EmptyNotice from '@/components/EmptyNotice.vue';
+import ErrorBanner from '@/components/ErrorBanner.vue';
+import PageHeader from '@/components/PageHeader.vue';
+import PaginationToolbar from '@/components/PaginationToolbar.vue';
+import StatusBadge from '@/components/StatusBadge.vue';
+import SurfaceCard from '@/components/SurfaceCard.vue';
 import {
   confirmAction,
   describeApiFailure,
   showFailureToast,
   showSuccessToast,
-} from '../composables/use-feedback';
-import { formatDateTime } from '../domain/format';
-import { describeUserStatus, describeUserType } from '../domain/labels';
-import { useSessionStore } from '../stores/session';
+} from '@/composables/use-feedback';
+import { formatDateTime } from '@/domain/format';
+import { describeUserStatus, describeUserType } from '@/domain/labels';
+import { useSessionStore } from '@/stores/session';
 
 const session = useSessionStore();
 

@@ -9,7 +9,7 @@
 
 import { createRouter, createWebHistory } from 'vue-router';
 
-import { useSessionStore } from '../stores/session';
+import { useSessionStore } from '@/stores/session';
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -43,29 +43,29 @@ export const router = createRouter({
     {
       path: '/',
       name: 'home',
-      component: () => import('../views/HomeView.vue'),
+      component: () => import('@/views/HomeView.vue'),
       meta: { isPublic: true },
     },
     {
       path: '/login',
       name: 'login',
-      component: () => import('../views/LoginView.vue'),
+      component: () => import('@/views/LoginView.vue'),
       meta: { isPublic: true, hidesHeader: true },
     },
     {
       path: '/runs',
       name: 'runs',
-      component: () => import('../views/RunListView.vue'),
+      component: () => import('@/views/RunListView.vue'),
     },
     {
       path: '/runs/new',
       name: 'run-submit',
-      component: () => import('../views/RunSubmitView.vue'),
+      component: () => import('@/views/RunSubmitView.vue'),
     },
     {
       path: '/runs/:id',
       name: 'run-detail',
-      component: () => import('../views/RunDetailView.vue'),
+      component: () => import('@/views/RunDetailView.vue'),
       props: true,
     },
     {
@@ -73,35 +73,35 @@ export const router = createRouter({
       // 是"看这几次差在哪"), 地址上不必套一层. 也因此与 `/runs/:id` 没有先后之争.
       path: '/compare',
       name: 'compare',
-      component: () => import('../views/RunCompareView.vue'),
+      component: () => import('@/views/RunCompareView.vue'),
     },
     {
       path: '/strategies',
       name: 'strategies',
-      component: () => import('../views/StrategyListView.vue'),
+      component: () => import('@/views/StrategyListView.vue'),
     },
     {
       path: '/strategies/:id',
       name: 'strategy-detail',
-      component: () => import('../views/StrategyDetailView.vue'),
+      component: () => import('@/views/StrategyDetailView.vue'),
       props: true,
     },
     {
       path: '/reference-data',
       name: 'reference-data',
-      component: () => import('../views/ReferenceDataView.vue'),
+      component: () => import('@/views/ReferenceDataView.vue'),
       meta: { requiresAdmin: true },
     },
     {
       path: '/users',
       name: 'users',
-      component: () => import('../views/UserAdminView.vue'),
+      component: () => import('@/views/UserAdminView.vue'),
       meta: { requiresAdmin: true },
     },
     {
       path: '/:pathMatch(.*)*',
       name: 'not-found',
-      component: () => import('../views/NotFoundView.vue'),
+      component: () => import('@/views/NotFoundView.vue'),
       meta: { isPublic: true, hidesHeader: true },
     },
   ],

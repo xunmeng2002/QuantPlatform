@@ -1,16 +1,26 @@
-import tailwindcss from '@tailwindcss/vite'
-import vue from '@vitejs/plugin-vue'
+import { fileURLToPath, URL } from 'node:url';
+
+import tailwindcss from '@tailwindcss/vite';
+import vue from '@vitejs/plugin-vue';
 // defineConfig 取自 vitest/config 而不是 vite: 它带回 `test` 键的类型, 于是构建与单测共用
 // 这一份配置. 另建 vitest.config.ts 也行, 但那样配置就有两份, 改一处漏一处.
-import { defineConfig } from 'vitest/config'
+import { defineConfig } from 'vitest/config';
 
 // 后端地址取自 backend/app/config.py 的 DEFAULT_HTTP_HOST / DEFAULT_HTTP_PORT.
 // 写 127.0.0.1 而不是 localhost: Windows 上 localhost 先解析到 ::1, 而 uvicorn 只监听
 // IPv4 的 127.0.0.1, 结果是代理层拿到 ECONNREFUSED —— 现象是"前端 502, 后端日志什么都没有".
-const BACKEND_ORIGIN = 'http://127.0.0.1:8000'
+const BACKEND_ORIGIN = 'http://127.0.0.1:8000';
 
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
+
+  // 跨目录引用一律走 `@/` (web-style.md §2), 同目录的 `./x` 仍写相对路径. 别名配置在这里**一处**,
+  // 构建与单测共用 —— `test` 键就在这份配置里, 单测不必再配一遍.
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
 
   server: {
     port: 5173,
@@ -37,4 +47,4 @@ export default defineConfig({
     unstubGlobals: true,
     restoreMocks: true,
   },
-})
+});

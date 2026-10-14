@@ -15,8 +15,8 @@ import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 
 import StatusBadge from './StatusBadge.vue';
-import { describeEngineVerdict, describeRunStatus } from '../domain/run-status';
-import type { StatusTone } from '../domain/run-status';
+import { describeEngineVerdict, describeRunStatus } from '@/domain/run-status';
+import type { StatusTone } from '@/domain/run-status';
 
 /** 逐项列出而不是从组件里 import 那张表: 用例要能独立地判定"这个映射对不对". */
 const TONE_TAG_TYPES: ReadonlyArray<[StatusTone, string]> = [

@@ -13,16 +13,16 @@
 import { computed, ref } from 'vue';
 import { ElButton, ElInput, ElOption, ElSelect } from 'element-plus';
 
-import { createStrategy } from '../api/strategies';
+import { createStrategy } from '@/api/strategies';
 import {
   MAXIMUM_STRATEGY_DESCRIPTION_LENGTH,
   MAXIMUM_STRATEGY_NAME_LENGTH,
   STRATEGY_VISIBILITIES,
-} from '../api/types';
-import type { StrategyVisibility } from '../api/types';
-import { useConfigurationFileSource } from '../composables/use-configuration-file-source';
-import { describeApiFailure } from '../composables/use-feedback';
-import { describeStrategyVisibility } from '../domain/labels';
+} from '@/api/types';
+import type { StrategyVisibility } from '@/api/types';
+import { useConfigurationFileSource } from '@/composables/use-configuration-file-source';
+import { describeApiFailure } from '@/composables/use-feedback';
+import { describeStrategyVisibility } from '@/domain/labels';
 import ErrorBanner from './ErrorBanner.vue';
 import FilePicker from './FilePicker.vue';
 

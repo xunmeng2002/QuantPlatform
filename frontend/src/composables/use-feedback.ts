@@ -20,7 +20,7 @@
 
 import { ElMessage, ElMessageBox } from 'element-plus';
 
-import { ApiError } from '../api/client';
+import { ApiError } from '@/api/client';
 
 /**
  * 成功: 两秒自己消失 —— 用户不需要为「成了」做任何事.

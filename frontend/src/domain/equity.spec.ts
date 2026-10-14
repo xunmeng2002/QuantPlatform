@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { EquityPoint } from '../api/types';
+import type { EquityPoint } from '@/api/types';
 import { alignEquitySeries, buildEquitySeries, summarizeEquity } from './equity';
 function equityPoint(tradingDay: string, balance: number): EquityPoint {
   return { trading_day: tradingDay, balance, available: balance };

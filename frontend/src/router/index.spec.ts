@@ -23,8 +23,8 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { User } from '../api/types';
-import { ACCESS_TOKEN_STORAGE_KEY, useSessionStore } from '../stores/session';
+import type { User } from '@/api/types';
+import { ACCESS_TOKEN_STORAGE_KEY, useSessionStore } from '@/stores/session';
 import { router } from './index';
 
 const TEST_TOKEN = 'test-access-token';

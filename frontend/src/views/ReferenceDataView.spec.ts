@@ -15,7 +15,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import type { VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { PageResponse, Product } from '../api/types';
+import type { PageResponse, Product } from '@/api/types';
 import ReferenceDataView from './ReferenceDataView.vue';
 
 const REFERENCE_DATA_PATH = '/api/reference-data';

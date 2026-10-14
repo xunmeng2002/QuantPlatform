@@ -8,8 +8,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { RUN_STATUSES } from '../api/types';
-import type { RunStatus } from '../api/types';
+import { RUN_STATUSES } from '@/api/types';
+import type { RunStatus } from '@/api/types';
 import { describeEngineVerdict, describeRunStatus, isTerminalRunStatus } from './run-status';
 
 const EXPECTED_LABELS: Record<RunStatus, string> = {

@@ -16,9 +16,9 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchCurrentUser, login } from '../api/auth';
-import { setAccessToken } from '../api/client';
-import type { User } from '../api/types';
+import { fetchCurrentUser, login } from '@/api/auth';
+import { setAccessToken } from '@/api/client';
+import type { User } from '@/api/types';
 import { ACCESS_TOKEN_STORAGE_KEY, useSessionStore } from './session';
 
 const TEST_TOKEN = 'test-access-token';

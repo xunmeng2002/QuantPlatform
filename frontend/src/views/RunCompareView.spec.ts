@@ -18,21 +18,21 @@ import type { VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError } from '../api/client';
-import { MAXIMUM_COMPARISON_RUNS, fetchRunComparison, fetchRuns } from '../api/runs';
-import { fetchStrategies } from '../api/strategies';
-import { MAXIMUM_PAGE_SIZE } from '../api/types';
-import type { RunComparison, RunComparisonEntry, RunSummary, User } from '../api/types';
-import { router } from '../router';
-import { useSessionStore } from '../stores/session';
+import { ApiError } from '@/api/client';
+import { MAXIMUM_COMPARISON_RUNS, fetchRunComparison, fetchRuns } from '@/api/runs';
+import { fetchStrategies } from '@/api/strategies';
+import { MAXIMUM_PAGE_SIZE } from '@/api/types';
+import type { RunComparison, RunComparisonEntry, RunSummary, User } from '@/api/types';
+import { router } from '@/router';
+import { useSessionStore } from '@/stores/session';
 import RunCompareView from './RunCompareView.vue';
 
-vi.mock('../api/runs', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../api/runs')>()),
+vi.mock('@/api/runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/runs')>()),
   fetchRunComparison: vi.fn(),
   fetchRuns: vi.fn(),
 }));
-vi.mock('../api/strategies', () => ({ fetchStrategies: vi.fn() }));
+vi.mock('@/api/strategies', () => ({ fetchStrategies: vi.fn() }));
 
 const fetchRunComparisonMock = vi.mocked(fetchRunComparison);
 const fetchRunsMock = vi.mocked(fetchRuns);

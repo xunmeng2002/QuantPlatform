@@ -24,9 +24,9 @@ import type { VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { User } from '../api/types';
-import { router } from '../router';
-import { useSessionStore } from '../stores/session';
+import type { User } from '@/api/types';
+import { router } from '@/router';
+import { useSessionStore } from '@/stores/session';
 import HomeView from './HomeView.vue';
 
 const TEST_TOKEN = 'test-access-token';

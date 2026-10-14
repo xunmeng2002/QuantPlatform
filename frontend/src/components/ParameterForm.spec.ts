@@ -19,7 +19,7 @@ import { defineComponent, h, nextTick, ref } from 'vue';
 import type { Ref } from 'vue';
 
 import ParameterForm from './ParameterForm.vue';
-import type { ParameterDescriptor, ParameterInput } from '../domain/strategy-configuration';
+import type { ParameterDescriptor, ParameterInput } from '@/domain/strategy-configuration';
 
 // el-checkbox 一类组件会在子树上挂东西, 不拆掉就会串场: 后一个用例的选择器会把前一个的节点也算进去.
 enableAutoUnmount(afterEach);

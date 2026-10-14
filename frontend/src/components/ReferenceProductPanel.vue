@@ -27,18 +27,18 @@ import {
   deleteProduct,
   fetchProducts,
   updateProduct,
-} from '../api/reference-data';
+} from '@/api/reference-data';
 import {
   EXCHANGE_SUGGESTIONS,
   MAXIMUM_PRODUCT_ID_LENGTH,
   MAXIMUM_PRODUCT_NAME_LENGTH,
   MAXIMUM_SESSION_NAME_LENGTH,
   PRODUCT_CLASSES,
-} from '../api/types';
-import type { Product, ProductClass, ProductPayload } from '../api/types';
-import { useReferenceTable } from '../composables/use-reference-table';
-import { formatCount, formatDateTime, formatDecimal } from '../domain/format';
-import { describeProductClass } from '../domain/labels';
+} from '@/api/types';
+import type { Product, ProductClass, ProductPayload } from '@/api/types';
+import { useReferenceTable } from '@/composables/use-reference-table';
+import { formatCount, formatDateTime, formatDecimal } from '@/domain/format';
+import { describeProductClass } from '@/domain/labels';
 import ContentSkeleton from './ContentSkeleton.vue';
 import EmptyNotice from './EmptyNotice.vue';
 import ErrorBanner from './ErrorBanner.vue';

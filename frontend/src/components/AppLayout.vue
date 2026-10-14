@@ -19,9 +19,9 @@ import { RouterLink, useRoute, useRouter } from 'vue-router';
 
 import StatusBadge from './StatusBadge.vue';
 
-import { describeUserType } from '../domain/labels';
-import type { StatusPresentation } from '../domain/run-status';
-import { useSessionStore } from '../stores/session';
+import { describeUserType } from '@/domain/labels';
+import type { StatusPresentation } from '@/domain/run-status';
+import { useSessionStore } from '@/stores/session';
 
 const route = useRoute();
 const router = useRouter();

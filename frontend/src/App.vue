@@ -29,7 +29,7 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn';
 
 import { RouterView } from 'vue-router';
 
-import AppLayout from './components/AppLayout.vue';
+import AppLayout from '@/components/AppLayout.vue';
 </script>
 
 <template>

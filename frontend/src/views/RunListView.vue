@@ -10,29 +10,29 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { ElButton, ElCheckbox, ElOption, ElSelect, ElTable, ElTableColumn } from 'element-plus';
 import { RouterLink } from 'vue-router';
 
-import { DEFAULT_RUN_SORT_COLUMN, RUN_SORT_COLUMNS, fetchRuns } from '../api/runs';
-import type { RunSortColumn } from '../api/runs';
-import { DEFAULT_PAGE_SIZE, RUN_STATUSES } from '../api/types';
-import type { PageResponse, RunStatus, RunSummary } from '../api/types';
-import ContentSkeleton from '../components/ContentSkeleton.vue';
-import EmptyNotice from '../components/EmptyNotice.vue';
-import ErrorBanner from '../components/ErrorBanner.vue';
-import PageHeader from '../components/PageHeader.vue';
-import PaginationToolbar from '../components/PaginationToolbar.vue';
-import StatusBadge from '../components/StatusBadge.vue';
-import SurfaceCard from '../components/SurfaceCard.vue';
-import { describeApiFailure } from '../composables/use-feedback';
-import { usePolling } from '../composables/use-polling';
+import { DEFAULT_RUN_SORT_COLUMN, RUN_SORT_COLUMNS, fetchRuns } from '@/api/runs';
+import type { RunSortColumn } from '@/api/runs';
+import { DEFAULT_PAGE_SIZE, RUN_STATUSES } from '@/api/types';
+import type { PageResponse, RunStatus, RunSummary } from '@/api/types';
+import ContentSkeleton from '@/components/ContentSkeleton.vue';
+import EmptyNotice from '@/components/EmptyNotice.vue';
+import ErrorBanner from '@/components/ErrorBanner.vue';
+import PageHeader from '@/components/PageHeader.vue';
+import PaginationToolbar from '@/components/PaginationToolbar.vue';
+import StatusBadge from '@/components/StatusBadge.vue';
+import SurfaceCard from '@/components/SurfaceCard.vue';
+import { describeApiFailure } from '@/composables/use-feedback';
+import { usePolling } from '@/composables/use-polling';
 import {
   formatAmount,
   formatCount,
   formatDateTime,
   formatDuration,
   formatTradingDay,
-} from '../domain/format';
-import { describeRunSortColumn } from '../domain/labels';
-import { describeEngineVerdict, describeRunStatus, isTerminalRunStatus } from '../domain/run-status';
-import { useStrategyCatalogStore } from '../stores/strategy-catalog';
+} from '@/domain/format';
+import { describeRunSortColumn } from '@/domain/labels';
+import { describeEngineVerdict, describeRunStatus, isTerminalRunStatus } from '@/domain/run-status';
+import { useStrategyCatalogStore } from '@/stores/strategy-catalog';
 
 const strategyCatalog = useStrategyCatalogStore();
 

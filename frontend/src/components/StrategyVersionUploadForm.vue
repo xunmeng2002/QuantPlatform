@@ -12,10 +12,10 @@
 import { computed, ref } from 'vue';
 import { ElButton } from 'element-plus';
 
-import { uploadStrategyVersion } from '../api/strategies';
-import type { StrategyVersion } from '../api/types';
-import { useConfigurationFileSource } from '../composables/use-configuration-file-source';
-import { describeApiFailure } from '../composables/use-feedback';
+import { uploadStrategyVersion } from '@/api/strategies';
+import type { StrategyVersion } from '@/api/types';
+import { useConfigurationFileSource } from '@/composables/use-configuration-file-source';
+import { describeApiFailure } from '@/composables/use-feedback';
 import ErrorBanner from './ErrorBanner.vue';
 import FilePicker from './FilePicker.vue';
 

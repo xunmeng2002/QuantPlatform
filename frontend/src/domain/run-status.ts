@@ -6,7 +6,7 @@
  * 引擎完全可以自报失败; 反过来也一样.
  */
 
-import type { RunStatus } from '../api/types';
+import type { RunStatus } from '@/api/types';
 
 /** 色调而不是颜色值: 具体色值只在 `StatusBadge.vue` 里出现一处. */
 export type StatusTone = 'neutral' | 'progress' | 'success' | 'danger' | 'warning';

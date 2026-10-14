@@ -7,8 +7,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { LastSubmittedParameters, RunTemplate } from '../api/types';
-import type { StrategyConfigurationTemplate } from '../api/types';
+import type { LastSubmittedParameters, RunTemplate } from '@/api/types';
+import type { StrategyConfigurationTemplate } from '@/api/types';
 import {
   createInitialParameterInputs,
   deriveParameterDescriptors,

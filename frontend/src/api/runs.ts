@@ -1,6 +1,6 @@
 /** 提交回测、查运行、取消, 以及作业产物的清单与下载. */
 
-import { encodeArtifactPath } from '../domain/download';
+import { encodeArtifactPath } from '@/domain/download';
 import { request, requestBlob } from './client';
 import type {
   JobArtifactList,

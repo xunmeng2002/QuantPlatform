@@ -16,42 +16,42 @@ import { computed, onMounted, ref } from 'vue';
 import { ElButton, ElOption, ElSelect } from 'element-plus';
 import { RouterLink, useRouter } from 'vue-router';
 
-import { deleteStrategy, fetchStrategyDetail, replaceStrategyGrants } from '../api/strategies';
-import { GRANT_PERMISSIONS } from '../api/types';
+import { deleteStrategy, fetchStrategyDetail, replaceStrategyGrants } from '@/api/strategies';
+import { GRANT_PERMISSIONS } from '@/api/types';
 import type {
   GrantPermission,
   StrategyDetail,
   StrategyGrantPayload,
   StrategyVersion,
   UserDirectoryEntry,
-} from '../api/types';
-import ContentSkeleton from '../components/ContentSkeleton.vue';
-import DirectoryPicker from '../components/DirectoryPicker.vue';
-import EmptyNotice from '../components/EmptyNotice.vue';
-import ErrorBanner from '../components/ErrorBanner.vue';
-import PageHeader from '../components/PageHeader.vue';
-import StatusBadge from '../components/StatusBadge.vue';
-import StrategyVersionUploadForm from '../components/StrategyVersionUploadForm.vue';
-import SurfaceCard from '../components/SurfaceCard.vue';
+} from '@/api/types';
+import ContentSkeleton from '@/components/ContentSkeleton.vue';
+import DirectoryPicker from '@/components/DirectoryPicker.vue';
+import EmptyNotice from '@/components/EmptyNotice.vue';
+import ErrorBanner from '@/components/ErrorBanner.vue';
+import PageHeader from '@/components/PageHeader.vue';
+import StatusBadge from '@/components/StatusBadge.vue';
+import StrategyVersionUploadForm from '@/components/StrategyVersionUploadForm.vue';
+import SurfaceCard from '@/components/SurfaceCard.vue';
 import {
   confirmAction,
   describeApiFailure,
   showFailureToast,
   showSuccessToast,
-} from '../composables/use-feedback';
-import { formatDateTime } from '../domain/format';
+} from '@/composables/use-feedback';
+import { formatDateTime } from '@/domain/format';
 import {
   describeGrantPermission,
   describeParameterControl,
   describeStrategyVisibility,
-} from '../domain/labels';
+} from '@/domain/labels';
 import {
   deriveParameterDescriptors,
   parseStrategyConfigurationTemplate,
-} from '../domain/strategy-configuration';
-import type { ParameterDescriptor } from '../domain/strategy-configuration';
-import { useSessionStore } from '../stores/session';
-import { useUserDirectoryStore } from '../stores/user-directory';
+} from '@/domain/strategy-configuration';
+import type { ParameterDescriptor } from '@/domain/strategy-configuration';
+import { useSessionStore } from '@/stores/session';
+import { useUserDirectoryStore } from '@/stores/user-directory';
 
 /** 与 `run_submission.CONFIGURATION_UNREADABLE_MESSAGE` 同一件事, 这里只负责说在版本清单上. */
 const PRE_CHANGE_VERSION_MESSAGE = '该版本落在改形态之前, 没有配置模板';

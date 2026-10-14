@@ -8,20 +8,20 @@
 
 import { computed, ref, watch } from 'vue';
 
-import { fetchRunResultTable } from '../api/runs';
+import { fetchRunResultTable } from '@/api/runs';
 import {
   DEFAULT_PAGE_SIZE,
   PAGE_SIZE_OPTIONS,
   RESULT_TABLE_LABELS,
   RESULT_TABLE_NAMES,
-} from '../api/types';
+} from '@/api/types';
 import type {
   ResultTableName,
   ResultTableRecord,
   ResultTableValue,
-} from '../api/types';
-import { describeApiFailure } from '../composables/use-feedback';
-import { ABSENT_PLACEHOLDER, formatAmount, formatCount, formatFlag, formatTradingDay } from '../domain/format';
+} from '@/api/types';
+import { describeApiFailure } from '@/composables/use-feedback';
+import { ABSENT_PLACEHOLDER, formatAmount, formatCount, formatFlag, formatTradingDay } from '@/domain/format';
 import EmptyNotice from './EmptyNotice.vue';
 import ErrorBanner from './ErrorBanner.vue';
 import LoadingNotice from './LoadingNotice.vue';

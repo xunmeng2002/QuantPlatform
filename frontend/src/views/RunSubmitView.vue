@@ -39,33 +39,33 @@ import { computed, onMounted, ref } from 'vue';
 import { ElAlert, ElButton, ElDialog, ElInput, ElOption, ElSelect, ElSelectV2 } from 'element-plus';
 import { RouterLink, useRouter } from 'vue-router';
 
-import { fetchMarketDataContracts, fetchMarketDataCoverage } from '../api/market-data';
-import { collectAllPages } from '../api/pagination';
-import { fetchCommissionGroupOptions } from '../api/reference-data';
-import { submitRun } from '../api/runs';
-import { createRunTemplate, fetchRunTemplates } from '../api/run-templates';
-import { fetchLastSubmittedParameters, fetchStrategyDetail } from '../api/strategies';
-import { SUBMITTABLE_MATCH_MODE } from '../api/types';
-import type { CommissionGroupOption, LastSubmittedParameters, MarketDataContractList, MarketDataCoverage, MarketDataType, RunSubmitPayload, RunTemplate, StrategyDetail } from '../api/types';
-import EmptyNotice from '../components/EmptyNotice.vue';
-import ErrorBanner from '../components/ErrorBanner.vue';
-import PageHeader from '../components/PageHeader.vue';
-import ParameterForm from '../components/ParameterForm.vue';
-import SurfaceCard from '../components/SurfaceCard.vue';
-import { describeApiFailure, showSuccessToast } from '../composables/use-feedback';
-import { buildContractCode, buildContractOptions, SUBSCRIPTION_BAR_PERIODS } from '../domain/market-data';
+import { fetchMarketDataContracts, fetchMarketDataCoverage } from '@/api/market-data';
+import { collectAllPages } from '@/api/pagination';
+import { fetchCommissionGroupOptions } from '@/api/reference-data';
+import { submitRun } from '@/api/runs';
+import { createRunTemplate, fetchRunTemplates } from '@/api/run-templates';
+import { fetchLastSubmittedParameters, fetchStrategyDetail } from '@/api/strategies';
+import { SUBMITTABLE_MATCH_MODE } from '@/api/types';
+import type { CommissionGroupOption, LastSubmittedParameters, MarketDataContractList, MarketDataCoverage, MarketDataType, RunSubmitPayload, RunTemplate, StrategyDetail } from '@/api/types';
+import EmptyNotice from '@/components/EmptyNotice.vue';
+import ErrorBanner from '@/components/ErrorBanner.vue';
+import PageHeader from '@/components/PageHeader.vue';
+import ParameterForm from '@/components/ParameterForm.vue';
+import SurfaceCard from '@/components/SurfaceCard.vue';
+import { describeApiFailure, showSuccessToast } from '@/composables/use-feedback';
+import { buildContractCode, buildContractOptions, SUBSCRIPTION_BAR_PERIODS } from '@/domain/market-data';
 import {
   createInitialParameterInputs,
   deriveParameterDescriptors,
   deriveParameterValues,
   findUnrenderableParameterKeys,
   parseStrategyConfigurationTemplate,
-} from '../domain/strategy-configuration';
-import type { ParameterInput } from '../domain/strategy-configuration';
-import { EMPTY_RUN_FIELDS, buildCoverageQuery, buildPrefilledRunFields, buildTemplateDraft, validateRunForm } from '../domain/run-form';
-import type { RunFieldInputs, RunFormInput, RunFormPrefill } from '../domain/run-form';
-import { formatDateTime } from '../domain/format';
-import { useStrategyCatalogStore } from '../stores/strategy-catalog';
+} from '@/domain/strategy-configuration';
+import type { ParameterInput } from '@/domain/strategy-configuration';
+import { EMPTY_RUN_FIELDS, buildCoverageQuery, buildPrefilledRunFields, buildTemplateDraft, validateRunForm } from '@/domain/run-form';
+import type { RunFieldInputs, RunFormInput, RunFormPrefill } from '@/domain/run-form';
+import { formatDateTime } from '@/domain/format';
+import { useStrategyCatalogStore } from '@/stores/strategy-catalog';
 
 /** 提交侧唯一可用的行情模式, 取自 `api/types` 的契约镜像而不是写死字面量. */
 const MATCH_MODE: MarketDataType = SUBMITTABLE_MATCH_MODE;

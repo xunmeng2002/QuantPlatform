@@ -5,15 +5,15 @@
  * 把后端的枚举值翻成中文, 换一套文案不影响任何逻辑.
  */
 
-import type { RunSortColumn } from '../api/runs';
-import { BOTH_DIRECTIONS } from '../api/types';
+import type { RunSortColumn } from '@/api/runs';
+import { BOTH_DIRECTIONS } from '@/api/types';
 import type {
   GrantPermission,
   ParameterValueType,
   StrategyVisibility,
   UserStatus,
   UserType,
-} from '../api/types';
+} from '@/api/types';
 import type { StatusPresentation } from './run-status';
 
 const USER_TYPE_LABELS: Record<UserType, string> = {

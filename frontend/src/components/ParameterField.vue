@@ -18,7 +18,7 @@ import { computed } from 'vue';
 import { ElCheckbox, ElInput } from 'element-plus';
 import type { CheckboxValueType } from 'element-plus';
 
-import type { ParameterDescriptor, ParameterInput } from '../domain/strategy-configuration';
+import type { ParameterDescriptor, ParameterInput } from '@/domain/strategy-configuration';
 
 const props = defineProps<{
   descriptor: ParameterDescriptor;

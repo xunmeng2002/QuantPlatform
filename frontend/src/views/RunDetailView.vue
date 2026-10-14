@@ -30,29 +30,29 @@ import {
   fetchRunArtifacts,
   fetchRunArtifactBlob,
   fetchRunDetail,
-} from '../api/runs';
-import type { JobArtifact, RunDetail } from '../api/types';
-import ArtifactList from '../components/ArtifactList.vue';
-import ContentSkeleton from '../components/ContentSkeleton.vue';
-import EmptyNotice from '../components/EmptyNotice.vue';
-import EquityChartPanel from '../components/EquityChartPanel.vue';
-import ErrorBanner from '../components/ErrorBanner.vue';
-import PageHeader from '../components/PageHeader.vue';
-import ResultTablePanel from '../components/ResultTablePanel.vue';
-import StatusBadge from '../components/StatusBadge.vue';
-import SurfaceCard from '../components/SurfaceCard.vue';
+} from '@/api/runs';
+import type { JobArtifact, RunDetail } from '@/api/types';
+import ArtifactList from '@/components/ArtifactList.vue';
+import ContentSkeleton from '@/components/ContentSkeleton.vue';
+import EmptyNotice from '@/components/EmptyNotice.vue';
+import EquityChartPanel from '@/components/EquityChartPanel.vue';
+import ErrorBanner from '@/components/ErrorBanner.vue';
+import PageHeader from '@/components/PageHeader.vue';
+import ResultTablePanel from '@/components/ResultTablePanel.vue';
+import StatusBadge from '@/components/StatusBadge.vue';
+import SurfaceCard from '@/components/SurfaceCard.vue';
 import {
   confirmAction,
   describeApiFailure,
   showFailureToast,
   showSuccessToast,
-} from '../composables/use-feedback';
-import { usePolling } from '../composables/use-polling';
-import { artifactFilename, saveBlobAsFile } from '../domain/download';
-import { formatJsonText } from '../domain/format';
-import { buildDetailMetricSections } from '../domain/run-metrics';
-import { describeEngineVerdict, describeRunStatus, isTerminalRunStatus } from '../domain/run-status';
-import { useStrategyCatalogStore } from '../stores/strategy-catalog';
+} from '@/composables/use-feedback';
+import { usePolling } from '@/composables/use-polling';
+import { artifactFilename, saveBlobAsFile } from '@/domain/download';
+import { formatJsonText } from '@/domain/format';
+import { buildDetailMetricSections } from '@/domain/run-metrics';
+import { describeEngineVerdict, describeRunStatus, isTerminalRunStatus } from '@/domain/run-status';
+import { useStrategyCatalogStore } from '@/stores/strategy-catalog';
 
 const props = defineProps<{ id: string }>();
 

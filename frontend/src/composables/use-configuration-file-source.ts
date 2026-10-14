@@ -11,7 +11,7 @@
 import { computed, ref, watch } from 'vue';
 import type { ComputedRef, Ref } from 'vue';
 
-import { parseStrategyConfigurationTemplate } from '../domain/strategy-configuration';
+import { parseStrategyConfigurationTemplate } from '@/domain/strategy-configuration';
 
 export const CONFIGURATION_REQUIRED_MESSAGE = '请选择配置文件';
 export const CONFIGURATION_FILE_READ_FAILED_MESSAGE = '无法读取该文件';

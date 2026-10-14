@@ -11,8 +11,8 @@
 import { ref } from 'vue';
 import { ElButton, ElInput } from 'element-plus';
 
-import type { JobArtifact } from '../api/types';
-import { formatByteSize } from '../domain/format';
+import type { JobArtifact } from '@/api/types';
+import { formatByteSize } from '@/domain/format';
 
 defineProps<{
   artifacts: JobArtifact[];

@@ -11,7 +11,7 @@
  * `alignEquitySeries` 对齐到同一根 x 轴再交给图表. 对齐是纯逻辑, 放这里而不是组件里.
  */
 
-import type { EquityPoint } from '../api/types';
+import type { EquityPoint } from '@/api/types';
 import { formatTradingDay } from './format';
 
 export interface EquitySeries {

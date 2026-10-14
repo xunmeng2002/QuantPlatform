@@ -12,9 +12,9 @@ import { createPinia } from 'pinia';
 import 'element-plus/dist/index.css';
 
 import App from './App.vue';
-import { configureUnauthorizedHandler } from './api/client';
+import { configureUnauthorizedHandler } from '@/api/client';
 import { router } from './router';
-import { useSessionStore } from './stores/session';
+import { useSessionStore } from '@/stores/session';
 import './style.css';
 
 const app = createApp(App);

@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { MarketDataContract } from '../api/types';
+import type { MarketDataContract } from '@/api/types';
 import {
   buildContractCode,
   buildContractOptions,

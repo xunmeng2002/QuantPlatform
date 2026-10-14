@@ -21,7 +21,7 @@ import type {
   MarketDataType,
   RunSubmitPayload,
   RunTemplateCreatePayload,
-} from '../api/types';
+} from '@/api/types';
 import { SUBSCRIPTION_BAR_PERIODS } from './market-data';
 import type { SubscriptionBarPeriod } from './market-data';
 

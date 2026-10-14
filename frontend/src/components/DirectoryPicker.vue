@@ -10,9 +10,9 @@
 import { onMounted, ref } from 'vue';
 import { ElButton, ElInput } from 'element-plus';
 
-import type { UserDirectoryEntry } from '../api/types';
-import { describeApiFailure } from '../composables/use-feedback';
-import { useUserDirectoryStore } from '../stores/user-directory';
+import type { UserDirectoryEntry } from '@/api/types';
+import { describeApiFailure } from '@/composables/use-feedback';
+import { useUserDirectoryStore } from '@/stores/user-directory';
 
 const emit = defineEmits<{
   select: [entry: UserDirectoryEntry];

@@ -18,8 +18,8 @@ import type { EChartsOption } from 'echarts';
 import { computed } from 'vue';
 import VChart from 'vue-echarts';
 
-import type { AlignedEquityCurve } from '../domain/equity';
-import { formatAmount } from '../domain/format';
+import type { AlignedEquityCurve } from '@/domain/equity';
+import { formatAmount } from '@/domain/format';
 import EmptyNotice from './EmptyNotice.vue';
 
 use([LineChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, CanvasRenderer]);
