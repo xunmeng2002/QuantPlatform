@@ -1,7 +1,9 @@
 fastapi>=0.115
 uvicorn>=0.34
 pydantic>=2.9
-sqlalchemy>=2.0
+# 必须带 asyncio 额外项: 它才是 greenlet 的来源, 而 `sqlalchemy.ext.asyncio` 没有它直接
+# ImportError —— 开发机上 greenlet 是别处手工装上的, 缺了它只有新环境才炸.
+sqlalchemy[asyncio]>=2.0
 aiosqlite>=0.20
 
 # 策略上传走 multipart (UploadFile), Starlette 解析该编码需要此包.
