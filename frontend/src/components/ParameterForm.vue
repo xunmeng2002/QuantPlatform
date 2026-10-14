@@ -15,13 +15,10 @@ import type { ParameterDescriptor, ParameterInput } from '../domain/strategy-con
 
 const props = defineProps<{
   descriptors: ParameterDescriptor[];
-  modelValue: Record<string, ParameterInput>;
   errors: Record<string, string>;
 }>();
 
-const emit = defineEmits<{
-  'update:modelValue': [value: Record<string, ParameterInput>];
-}>();
+const parameterValues = defineModel<Record<string, ParameterInput>>({ required: true });
 
 /**
  * 模板里必须写成 `updateParameter(descriptor.key, $event)` —— 那个 `$event` 不能省.
@@ -29,7 +26,7 @@ const emit = defineEmits<{
  * `($event) => updateParameter(descriptor.key)`: 参数被丢掉, 值永远冒不到父状态, 界面上一声不响.
  */
 function updateParameter(parameterKey: string, value: ParameterInput): void {
-  emit('update:modelValue', { ...props.modelValue, [parameterKey]: value });
+  parameterValues.value = { ...parameterValues.value, [parameterKey]: value };
 }
 </script>
 
@@ -39,7 +36,7 @@ function updateParameter(parameterKey: string, value: ParameterInput): void {
       v-for="descriptor in descriptors"
       :key="descriptor.key"
       :descriptor="descriptor"
-      :model-value="modelValue[descriptor.key] ?? ''"
+      :model-value="parameterValues[descriptor.key] ?? ''"
       :error-message="errors[descriptor.key]"
       @update:model-value="updateParameter(descriptor.key, $event)"
     />

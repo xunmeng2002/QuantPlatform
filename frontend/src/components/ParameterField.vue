@@ -22,13 +22,10 @@ import type { ParameterDescriptor, ParameterInput } from '../domain/strategy-con
 
 const props = defineProps<{
   descriptor: ParameterDescriptor;
-  modelValue: ParameterInput;
   errorMessage?: string;
 }>();
 
-const emit = defineEmits<{
-  'update:modelValue': [value: ParameterInput];
-}>();
+const parameterValue = defineModel<ParameterInput>({ required: true });
 
 const inputIdentifier = computed(() => `parameter-${props.descriptor.key}`);
 const errorIdentifier = computed(() => `${inputIdentifier.value}-error`);
@@ -39,12 +36,12 @@ const isBoolean = computed(() => props.descriptor.type === 'boolean');
  * 那套用法. 本组件从不传这两个 prop, 故实际值恒为 `true` / `false`; 下面这一行是**类型收窄**,
  * 不是语义转换 (`ParameterInput` 里布尔就是布尔).
  */
-function emitBooleanValue(checkboxValue: CheckboxValueType): void {
-  emit('update:modelValue', checkboxValue === true);
+function handleCheckboxChange(checkboxValue: CheckboxValueType): void {
+  parameterValue.value = checkboxValue === true;
 }
 
-function emitTextValue(text: string): void {
-  emit('update:modelValue', text);
+function handleTextInput(text: string): void {
+  parameterValue.value = text;
 }
 </script>
 
@@ -66,9 +63,9 @@ function emitTextValue(text: string): void {
       v-if="isBoolean"
       :id="inputIdentifier"
       class="self-start"
-      :model-value="modelValue === true"
+      :model-value="parameterValue === true"
       :aria-describedby="errorMessage ? errorIdentifier : undefined"
-      @change="emitBooleanValue"
+      @change="handleCheckboxChange"
     />
 
     <!-- `step="any"` 而不是 `1`: JSON 只有一种数, 整数与小数都能存; 而数字框自带的 min/max 会拦在
@@ -76,11 +73,11 @@ function emitTextValue(text: string): void {
     <ElInput
       v-else
       :id="inputIdentifier"
-      :model-value="String(modelValue)"
+      :model-value="String(parameterValue)"
       :type="descriptor.type === 'number' ? 'number' : 'text'"
       :step="descriptor.type === 'number' ? 'any' : undefined"
       :aria-describedby="errorMessage ? errorIdentifier : undefined"
-      @input="emitTextValue"
+      @input="handleTextInput"
     />
 
     <p

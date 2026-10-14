@@ -9,31 +9,25 @@
 
 import { ref, watch } from 'vue';
 
-const props = defineProps<{
-  modelValue: File | null;
+const selectedFile = defineModel<File | null>({ required: true });
+
+defineProps<{
   accept?: string;
   hint?: string;
 }>();
 
-const emit = defineEmits<{
-  'update:modelValue': [file: File | null];
-}>();
-
 const fileInputElement = ref<HTMLInputElement | null>(null);
 
-watch(
-  () => props.modelValue,
-  (selectedFile) => {
-    if (selectedFile === null && fileInputElement.value !== null) {
-      fileInputElement.value.value = '';
-    }
-  },
-);
+watch(selectedFile, (newValue) => {
+  if (newValue === null && fileInputElement.value !== null) {
+    fileInputElement.value.value = '';
+  }
+});
 
-function emitSelectedFile(event: Event): void {
+function handleFileSelection(event: Event): void {
   const inputElement = event.target as HTMLInputElement;
 
-  emit('update:modelValue', inputElement.files?.[0] ?? null);
+  selectedFile.value = inputElement.files?.[0] ?? null;
 }
 </script>
 
@@ -44,10 +38,10 @@ function emitSelectedFile(event: Event): void {
       type="file"
       class="text-sm text-slate-600"
       :accept="accept"
-      @change="emitSelectedFile"
+      @change="handleFileSelection"
     >
     <p class="text-xs text-slate-400">
-      {{ modelValue?.name ?? '未选择文件' }}
+      {{ selectedFile?.name ?? '未选择文件' }}
       <span v-if="hint"> · {{ hint }}</span>
     </p>
   </div>

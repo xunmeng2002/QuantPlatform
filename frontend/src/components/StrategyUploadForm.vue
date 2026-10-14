@@ -20,7 +20,7 @@ import {
   STRATEGY_VISIBILITIES,
 } from '../api/types';
 import type { StrategyVisibility } from '../api/types';
-import { useConfigurationFileSource } from '../composables/useConfigurationFileSource';
+import { useConfigurationFileSource } from '../composables/use-configuration-file-source';
 import { describeApiFailure } from '../composables/use-feedback';
 import { describeStrategyVisibility } from '../domain/labels';
 import ErrorBanner from './ErrorBanner.vue';

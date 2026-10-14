@@ -47,7 +47,7 @@ import {
   showFailureToast,
   showSuccessToast,
 } from '../composables/use-feedback';
-import { usePolling } from '../composables/usePolling';
+import { usePolling } from '../composables/use-polling';
 import { artifactFilename, saveBlobAsFile } from '../domain/download';
 import { formatJsonText } from '../domain/format';
 import { buildDetailMetricSections } from '../domain/run-metrics';

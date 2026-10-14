@@ -22,7 +22,7 @@ import PaginationToolbar from '../components/PaginationToolbar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import SurfaceCard from '../components/SurfaceCard.vue';
 import { describeApiFailure } from '../composables/use-feedback';
-import { usePolling } from '../composables/usePolling';
+import { usePolling } from '../composables/use-polling';
 import {
   formatAmount,
   formatCount,
