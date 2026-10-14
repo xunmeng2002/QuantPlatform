@@ -39,7 +39,42 @@ Python 策略**。
 
 ## ✅ 已完成
 
-### D.41 · 2026-10-14 （第四十一批） 前端按 web-style.md 重构：`@/` 别名 + 目录分层 + 事件处理器改名 + 行尾归一
+### D.42 · 2026-10-14 （第四十二批） 引擎探针的运行时库名改按平台取 + 同步上游两份发布包契约
+
+> 用户问「平台按着新引擎与 QuoteHub 的改动调整好了吗」，并定下落地路线：**先在 Windows 上验证，
+> 通过后再部署到 WSL**。本批是那条路线上平台侧欠的两笔 —— 把 D.37 之后**第二处**硬编码库名收口，
+> 以及把平台手里那份**陈旧**的引擎 Linux 发布包契约换回上游原文。
+
+- **运行时库名改按平台取**（`76f7a0f`）：`ENGINE_RUNTIME_FILENAMES` 原先写死
+  `("BackTest.dll", "Core.dll", "Network.dll")`，于是 Linux 上 `missing_runtime_filenames()` **恒返回
+  这三项**、`/api/health` 的 `ready` **恒为 false**，而发布包本身完全正常。改法：拆出
+  `ENGINE_RUNTIME_LIBRARY_NAMES = ("BackTest", "Core", "Network")`，文件名按 `sys.platform` 派生
+  （Windows `X.dll` / Linux `libX.so`）。**公开名与次序一字未动**（`health.py` 与既有用例零改动；
+  次序另由新用例钉住 —— 内容摘要对输入次序敏感）。三个 `libX.so` 在
+  `QuantTrading-1.0.0-linux-x86_64.zip` 里逐个在册，修完 WSL 上这三个旗标即转正。
+- **它是潜伏缺陷，不是拦路虎**：`/api/health` **前端一个调用点都没有**（`frontend/src` 下搜不到
+  `health`），受害面只有管理面自检与日后的运维排查，不挡回测闭环 —— 记的是**可观测面**，
+  别读成「WSL 部署前必须先修」。
+- **契约文档换回上游原文**：`docs/engine-linux-release-package.md` 与上游**逐字节相同**（平台那份
+  308 行快照的 **77 处独有行**经逐行核对，**全是上游早已改写的旧版文字**，无一是平台自己的口径）；
+  新收 `docs/engine-windows-release-package.md`（Linux 那份的 §2.3 交叉引用它）。**判据本身也变了**：
+  上游把「每个 `.so` 的 `RUNPATH` 恰为 `$ORIGIN`」放宽成「**判含不判恰为**」—— `$ORIGIN` 在首位即可，
+  绝对路径的构建机条目是**有意留下的权衡**（构建树在原地仍要能跑），不当作缺陷。
+- **发布包复验（用户重打后）**：zip **28,203,076 B**（与引擎 `9d59af6` 记的验收数相同）、22 项、
+  `engine-version.txt` 在包内且两平台同字节、`MdOffer` 的 `DT_NEEDED` 已是**裸文件名**（故换机后能起来，
+  代价是目标机须把 `libthostmduserapi_se.so` 放进发布目录，见契约 §2.3）。逐 ELF 核 `DT_NEEDED`：
+  **包内唯一缺失的就是 §2.3 那条 CTP 例外**。
+- **`acceptance-checklist.md` §14 两处跟着上游改**：走查片段不再 `from BaoStock import DB_PATH`
+  （那个符号已不在组件里），改从 `config.json` 取 `database_path`；账表那句「v2.3.0 才有的」改成
+  「较晚才进 schema 的」（组件版本号已回退成 v1.0.0，旧写法会被读成「这库该有却没有」）。
+- **验收**：后端 `pytest` **748 全过**（D.40 基线 747 + 本批 1）；新用例
+  `test_the_runtime_library_filenames_follow_this_platforms_naming`；订正后的 §14.1 片段在本机实跑
+  通过（账表在 `True`、24 张表）；无 CRLF 引入。
+- **仍欠**：WSL 部署前只剩 `strategy_store.py` 那条版本占用依赖 Windows `rename` 语义（❓ 段那条 ②）；
+  真引擎的 **Windows 侧验收**按用户路线由用户自己跑（会真联网、并往 QuoteHub 的生产库里写行，见
+  `test_real_engine_acceptance.py` 的警示）。
+
+### D.40 + D.41 · 2026-10-14 （第四十、四十一批，合并成一条记录） 编码规范基线自查 → 前端按 web-style.md 重构：`@/` 别名 + 目录分层 + 事件处理器改名 + 行尾归一
 
 > 用户点名「前端的代码，按着规则去重构」，把 D.40 记下「查了但有意没动」的前端几处逐条落地。
 > **全批无功能改动**（只有名字与位置变），验收口径不变：`npm run type-check` 通过 + `npm test` 238/30。
@@ -71,11 +106,12 @@ Python 策略**。
   「logger」只会多造一个概念（Harness §6）。
 - **已提交、未推送**：本批四笔都在 `master` 上，推送按既定分工由用户做。
 
-
+**D.40（第四十批）· 编码规范基线自查：Python 3.14 收口 + 前端 kebab-case 与版本钉死**
+（与 D.41 同日，两条**合并成一条记录**以压 `✅` 区的批次数；段头保留两个 ID，条目原文一字未删。）
 
 > **本批无功能改动**：用户更新了全局 `~/.claude/rules/` 下的三份规范，要求本仓按新规范自查。
 > 下面只记「按规范动了什么」与「查了但**有意没动**」两类，后者按 Harness §1「禁止擅自重构」待用户点名
-> （用户当日即点名「前端的代码，按着规则去重构」，逐条落地见末条与 **D.41**）。
+> （用户当日即点名「前端的代码，按着规则去重构」，逐条落地见上方 **D.41** 那半）。
 
 - **Python 侧四笔**（`641d84f` / `5d72b8a` / `bddeb98` / `b11759a`，均**纯格式与类型**改动）：
   - **3.14 语法基线**（`641d84f`，92 文件 +24/−228）：删掉**全部** `from __future__ import annotations`
@@ -194,74 +230,23 @@ Python 策略**。
 
 ### D.37 · 2026-10-09 （第三十七批） 引擎探针改按解释器后缀表认扩展模块：迁 Linux 的前置
 
-> **本条为补记**：改动由 `17012ca` 落地（提交信息里写明「PROGRESS.md 的 D.37 条目待补」），
-> 2026-10-09 本次会话据提交原文补写。
-
-- **触发**：云主机定为 **Linux** 后回头审「有没有硬编码 `.pyd`」，`engine_probe` 是第一处：
-  它把后缀写死成 `.pyd`、并要求文件名里含 `cpXXX`，在 Linux 上**永远**找不到
-  `QuantTrading.cpython-314-x86_64-linux-gnu.so`——`.pyd` 那关就过不去，`cpython-314` 也不含
-  `cp314` 子串。
-- **改法**：后缀表改由**解释器**给出（`importlib.machinery.EXTENSION_SUFFIXES`），逐个试
-  「模块名 + 后缀」，取首个存在者。那份表就是 import 机制自己用的，判据因此与它**同源**，
-  跨平台不必分档。刻意**不**用 `endswith`：`QuantTrading.cp39-win_amd64.pyd` 同样以 `.pyd`
-  结尾，用后缀匹配会把它当成合法绑定——而这正是 import 机制拒收它、也是 `test_health` 三条
-  反向用例要钉住的。`PYTHON_BINDING_FILENAME_SUFFIX` 随之退役（全仓无引用点）。
-- **夹具一并改**：测试夹具里的 `BINDING_FILENAME` 改为按平台派生，否则两个测试文件被绑死在
-  Windows 上，换到 Linux 跑时红的理由是「夹具自己造了一份当前解释器永不认识的假引擎」。
-- **验收**：Windows 上 `test_engine_probe` + `test_health` **31 全过**，后端全量 **744 全过**；
-  WSL 里用真 Python 3.14.4 单独加载本模块跑真引擎目录，binding 命中。
-- **提交状态**：**已提交**（`17012ca`）。
+> **全条见归档 D.37**。一段话：`engine_probe` 原先把扩展模块后缀写死成 `.pyd` 且要求文件名含
+> `cpXXX`，在 Linux 上**永远**找不到 `QuantTrading.cpython-314-x86_64-linux-gnu.so`（`.pyd` 那关
+> 就过不去，`cpython-314` 也不含 `cp314` 子串）。改法是后缀表改由**解释器**给出
+> （`importlib.machinery.EXTENSION_SUFFIXES`），判据与 import 机制**同源**，跨平台不必分档；刻意
+> **不用** `endswith` —— 那会把别的 ABI 编出来的 `QuantTrading.cp39-win_amd64.pyd` 当成合法绑定。
+> 测试夹具的 `BINDING_FILENAME` 随之按平台派生，否则两个测试文件被绑死在 Windows 上（换机跑时红的
+> 理由是「夹具自己造了一份当前解释器永不认识的假引擎」）。**本条无未决项** —— 同一族的第二处硬编码
+> （运行时库名写死三个 `.dll`）由 **D.42** 收口。
 
 ### D.36 · 2026-10-08 （第三十六批） 422 回执走 `jsonable_encoder`：修掉异常对象导致的 500
 
-> **本批原编号 D.35**：2026-10-08 两台电脑各做了一批，**各自认领了同一个批次号 D.35**（同一天、
-> 同一批号、两件无关的事）。另一台那批先落进 `origin` / `github` 两个远程，故 2026-10-09 合流时
-> **本批让号改 D.36**，条目原文一字未动；`PROGRESS-archive.md` 两处"归档于"脚注与
-> `✅` 区的降序位置随后一并订正。
-
-- **触发**：D.25 实施中记下的那条既有缺陷（2026-10-01 起挂在 ❓ 区，本批结清后移出）。当时以
-  "改动面横跨八段"为由没顺手修，并写明"另起一批改，判据也更好写"——本批即那一批。
-- **根因**：`UploadFile` 的 pydantic 校验器（`fastapi/datastructures.py` 的 `_validate`）对
-  收到的普通字段**抛 `ValueError`**，该异常对象原样躺进校验错误的 `ctx`；处理器直接把
-  `error.errors()` 交给 `JSONResponse`，序列化在 `json.dumps` 那里抛
-  `TypeError: Object of type ValueError is not JSON serializable` —— 422 变 500，真实原因被
-  兜底文案盖掉。修法是补一道 `jsonable_encoder`（**框架自带的那个处理器本来就这么做**）。
-  **`msg` 与 `input` 一字未动**：它们承载的是可读原因。
-- **订正 D.25 记的可达路径（那条写错了）**：原记"已认证客户端 POST 一个 `filename=""` 的 part
-  即可"。**空串不是它** —— Starlette 只要看到 `filename` 这个项名就按**文件**解析
-  （`formparsers.py` 判的是 `b"filename" in options`），空串照样生成 `UploadFile`，于是被应用
-  自己那条 400 拦下（`filename` 是载荷的一部分）。真正触发的是 **`filename` 整个缺失**的分部：
-  它在 Starlette 那里降级成普通字段，作为 `str` 撞上 `UploadFile` 注解，**在框架层就被拒**，
-  根本轮不到处理函数。
-- **落点**：`backend/app/main.py` **一处** —— 加 `from fastapi.encoders import jsonable_encoder`；
-  处理器内先算出 `redacted_errors`（抹敏感值的**次序不变**），再整体编码；docstring 补上"这道
-  编码不能省"的理由。**不改状态码、不改文案、不加新常量**。
-- **验收**：新增
-  `tests/test_strategy_upload.py::test_a_part_that_is_not_a_file_still_gets_a_json_422` ——
-  **先复现**（`TypeError` 从处理器里抛出，`ctx.error` 就是那个 `ValueError`），修复后回 **422**
-  且响应体是 JSON、不含 `ValueError`。后端 `pytest` **741 项全过**（D.34 基线 740 + 本节 1）。
-  测试助手 `post_raw_upload` 的 `entry_filename` 放宽为 `str | None`（`None` = 分部不带
-  `filename`），与既有那条空串用例并列。
-- **已知外观（有意与框架默认一致）**：`ctx` 编码后是 `{"error": {}}` —— 异常对象被 `vars()`
-  编成空字典（框架自带的处理器同样如此），可读原因在 `msg` 里。
-- **顺带订正一条、问明一条**：① D.31–D.34 的"提交状态"当时都写着**未提交**，实际已由
-  **`f32ac48`** 一并提交（同一棵树），四条已改写为"已提交"；② 备注里那条 **Python 3.11.1 /
-  `cp311`** 与本机实测（**3.14.5 + `cp314`**，平台自己的探针量为可用）看似冲突，**已问明成因：
-  那是另一台电脑**（那台 Windows 3.11 / WSL 3.12），两台各自与自己的 `.pyd` 自洽、**都维持现状
-  不升级**；原文保留，备注「环境锁定」里补了归属说明，并把"**云主机那台的 Python 要与包内
-  `.pyd` 的 ABI 对上**"补进 ❓ 的"引擎发布包"那条（P8 前置）。
-- **顺带做了一次归档滚动（同日）**：`PROGRESS.md` 当时 67.2 KB（目标 ≤ 50 KB）。查账后
-  **D.23–D.30 那七条早就滚过了**（全条在归档，主文件里只有 §8.1 要求留下的未决短版），真正
-  占地方的是最近几批的**全条**。故按 §8.1「保留最近 3–5 批」的口径把**最旧的 D.31 / D.32
-  两条全条搬进归档**（升序落在 D.30 之后，各加"归档于"脚注 + 短版指针），主文件
-  67.2 → **57.7 KB**（记完本段后是 **59.3 KB** —— 这 1.5 KB 是本节自己）。
-  搬移用脚本对条目边界取原文（不手抄，可重入），并给 [`PROGRESS-index.md`](PROGRESS-index.md)
-  补了两行索引。**剩下的 7.7 KB 缺口是有意不补的**：能再砍的只有备注区（17.3 KB）与 R.01
-  （10.8 KB）里的**活规则**，砍了就是把跨批约定埋掉，与 §8.1 的立意相反。
-  **2026-10-09 合流补记**：并入另一台那批的 D.35 全条后为 **62.9 KB**（含本 D.36 全条），
-  缺口从 7.7 变为 12.9 KB；滚动的取舍不变，仍待用户定夺。
-- **提交状态**：本批 5 个文件（`app/main.py` + 该用例 + 本文件 + `PROGRESS-archive.md` +
-  `PROGRESS-index.md`）。**已提交**（`1606b97`）。
+> **全条见归档 D.36**（本批原编号 D.35，2026-10-09 两台电脑撞号后让号，归档保留了那段订正）。
+> 一段话：`UploadFile` 的校验器把 `ValueError` **对象**塞进校验错误的 `ctx`，处理器把它直接交给
+> `JSONResponse`，于是 422 在 `json.dumps` 那里变成 500、真实原因被兜底文案盖掉；修法是在
+> `app/main.py` **一处**补 `jsonable_encoder`（**框架自带的那个处理器本来就这么做**），`msg` 与
+> `input` 一字未动。同批**订正了 D.25 记的触发路径**：够得着的是 `filename` **整个缺失**的分部
+> （Starlette 把它降级成普通字段、撞上 `UploadFile` 注解），不是此前记的空串。**本条无未决项。**
 
 ### D.35 · 2026-10-08 （第三十五批） `DbInitHost` 改常量相对路径 + 策略脚本删「`__file__` 反推仓根」
 
@@ -553,14 +538,15 @@ Python 策略**。
     与今日定案直接冲突，**待订正**（未改，留待与 §5.1 的部署方案一并重写）。
   - **引擎 Linux 发布包要求已落地**（见 D.38 与
     `../QuantTrading/docs/engine-linux-release-package.md`）：扁平单目录 +
-    `RUNPATH: $ORIGIN` 家规（已进 `../CMakeCommon`）。**待引擎侧落实**：把 `bin/` 与 `lib/` 输出
-    合一的那个一行改动、以及 `engine-version.txt` 在 Linux 侧的产出、以及确认 §2.1 那 6 个
-    API 中间层 `.so` 是否随包发运。**要不要重发 Spark / DbAdapters 已定：不用**（它们是动态库
-    但无绝对 RUNPATH，理由见 D.38 —— 别记成「静态链入」）。
-  - **平台侧尚有两处 Linux 残留待改**：① `engine_probe.ENGINE_RUNTIME_FILENAMES` 写死三个
-    `.dll`（Linux 上是 `.so`，须按平台分档）；② `strategy_store.py:97` 的版本占用依赖 Windows
-    `rename` 语义——POSIX `rename(2)` 会**静默覆盖空目录**，须改成显式占位（既有 docstring
-    已预警）。
+    `RUNPATH: $ORIGIN` 家规（已进 `../CMakeCommon`）。**引擎侧那三项已于 2026-10-14 复验结清**
+    （据 `QuantTrading-1.0.0-linux-x86_64.zip`）：包内 `engine-version.txt` 在册、§2.1 那 6 个
+    API 中间层 `.so` 逐个在册、`bin/` 与 `lib/` 不再分家（引擎 `CMakeLists.txt:61-63` 把运行库与
+    共享库都落 `bin/$<CONFIG>`，`lib/` 只剩静态档）。**要不要重发 Spark / DbAdapters 已定：不用**
+    （它们是动态库但无绝对 RUNPATH，理由见 D.38 —— 别记成「静态链入」）。
+  - **平台侧两处 Linux 残留**：① `engine_probe.ENGINE_RUNTIME_FILENAMES` 写死三个 `.dll`
+    —— **已收口**（D.42，`76f7a0f`）；② `strategy_store.py` 的版本占用依赖 Windows `rename`
+    语义 —— POSIX `rename(2)` 会**静默覆盖空目录**，须改成显式占位（既有 docstring 已预警）。
+    **② 是 WSL 部署前唯一还欠的一笔。**
   - **Python 3.14 统一**：**已了结（2026-10-14 实测）**——两台机与引擎两侧现均 3.14（本机
     `python --version` = 3.14.7；引擎 `CMakePresets.json` 的 windows-base 与 linux-base
     两档 preset 皆 `QUANTTRADING_PYTHON_VERSION: "3.14"`）。云主机那台的 Python 要与包内
@@ -793,3 +779,9 @@ Python 策略**。
     永远被压成 0（父级高度是 auto，百分比高度解析为 0px），图就画在零高容器里：
     界面全空，只留一句「Can't get DOM width or height」。**图表高度必须给外层 div**
     （`EquityChartPanel.vue` 里留了这条注释，日后任何图表容器照此办理）。
+- **本文件尺寸（2026-10-14，即 §9.1 那条「尺寸行」）**：**72.8 KB**（`✅` 35.3 / `🔄` 10.9 /
+  `❓` 5.8 / 备注 18.8），高于 §9.1 的 ≤ 50 KB 目标，**缺口是有意不补的**。可再砍的只剩备注区与
+  `R.01` 里的**活约定** —— 砍了就是把跨批口径埋掉，正是 §9.1 立分层要防的那种损失。D.36 那轮
+  记过同一条判断并把取舍留给用户，**那条「仍待用户定夺」随 2026-10-14 作废**：用户把本文件的
+  维护权整个交给 AI 且明言不看，故由 AI 按 §6「简洁不越权」自行裁定 —— **砍行数不得砍掉口径。**
+  `✅` 区已按「最近 3–5 批」滚到 D.37 为止，更早的只留指针与未决部分。
