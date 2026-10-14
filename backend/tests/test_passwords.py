@@ -4,8 +4,6 @@
 长度 0 派生, 两个空串比对相等, 于是任何口令都能通过.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from app.auth.passwords import PBKDF2_ITERATIONS, hash_password, verify_password

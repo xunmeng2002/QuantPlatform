@@ -10,10 +10,6 @@ public 对全体登录用户. 运行只有提交人本人可见, 授权不延伸
 表现为不存在.
 """
 
-from __future__ import annotations
-
-from typing import TypeVar
-
 from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,8 +17,6 @@ from ..errors import ResourceNotFoundError
 from .enums import StrategyVisibility, UserType
 from .models import RunModel, RunTemplateModel, StrategyGrantModel, StrategyModel, UserModel
 
-
-RecordType = TypeVar("RecordType")
 
 STRATEGY_NOT_FOUND_MESSAGE = "策略不存在"
 RUN_NOT_FOUND_MESSAGE = "运行不存在"
@@ -92,7 +86,7 @@ def build_owned_run_template_query(
     )
 
 
-async def _load_one_or_raise(
+async def _load_one_or_raise[RecordType](
     session: AsyncSession,
     query: Select[tuple[RecordType]],
     not_found_message: str,

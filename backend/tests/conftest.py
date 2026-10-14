@@ -4,8 +4,6 @@
 客户端经 ASGI 直连并走完整 lifespan, 故建表与播种这两步与线上是同一条路径.
 """
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator
 from pathlib import Path
 

@@ -4,8 +4,6 @@
 并发闸门读成 0 会让作业永久排队, 而队列看上去一切正常.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 from pathlib import Path

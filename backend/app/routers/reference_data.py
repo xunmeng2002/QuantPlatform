@@ -22,10 +22,6 @@
 任何一条写路由的权限.
 """
 
-from __future__ import annotations
-
-from typing import TypeVar
-
 from fastapi import APIRouter, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -96,10 +92,7 @@ COMMISSION_GROUP_TEMPLATE_REFERENCED_MESSAGE_TEMPLATE = (
 COMMISSION_GROUP_REFERENCED_MESSAGE = "该手续费组仍被费率明细引用, 先删掉那些明细"
 
 
-RecordType = TypeVar("RecordType")
-
-
-async def _load_record(
+async def _load_record[RecordType](
     session: AsyncSession,
     model: type[RecordType],
     record_id: str,

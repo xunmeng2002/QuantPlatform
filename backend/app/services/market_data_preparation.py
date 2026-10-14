@@ -15,8 +15,6 @@ QuoteHub 组件下载落地, 落地后**复判**再决定放行还是让这一�
     年度文件本就按年整份导出, 只有取过整年, 第一次落地的那份才不含半年的空洞.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from dataclasses import dataclass

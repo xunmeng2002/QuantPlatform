@@ -18,8 +18,6 @@
 读取方一律以 `settings.user_library_root / version.storage_path` 还原.
 """
 
-from __future__ import annotations
-
 import hashlib
 import shutil
 from dataclasses import dataclass

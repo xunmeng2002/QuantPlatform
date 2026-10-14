@@ -5,8 +5,6 @@
 `app/routers/users.py::list_user_directory_handler`.
 """
 
-from __future__ import annotations
-
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient

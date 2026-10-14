@@ -4,8 +4,6 @@
 默认口令, 也不把随机生成的口令打进日志——平台此刻还没有改口令的入口, 一旦打进日志就收不回.
 """
 
-from __future__ import annotations
-
 import logging
 
 from sqlalchemy import func, select

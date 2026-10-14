@@ -12,8 +12,6 @@
 (`platform-plan.md` §12.20 的表名清单).
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 

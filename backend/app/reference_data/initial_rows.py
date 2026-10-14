@@ -13,8 +13,6 @@ CSV 的读取规则逐条对齐 `QuantTrading/makeseeddb.py`: `utf-8-sig` (容�
 等于引擎列序 (否则报错而不是静默错位)、空行跳过、数值空单元按 0、字符列原样.
 """
 
-from __future__ import annotations
-
 import asyncio
 import csv
 import logging

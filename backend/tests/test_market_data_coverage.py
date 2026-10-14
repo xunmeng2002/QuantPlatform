@@ -15,8 +15,6 @@
 变了, 那套 schema 断言也该跟着变.
 """
 
-from __future__ import annotations
-
 import sqlite3
 from pathlib import Path
 

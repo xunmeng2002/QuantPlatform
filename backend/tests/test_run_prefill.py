@@ -9,8 +9,6 @@
 "别人更新的轮次""同 SubmittedAt 的平局""坏 JSON"这几条需要伪造数据, 手搓更直接.
 """
 
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass
 from datetime import timedelta

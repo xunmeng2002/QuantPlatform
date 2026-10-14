@@ -11,8 +11,6 @@
 由它一次算出——分成两处算, 迟早会出现 `failed` 却写着"已取消"这种自相矛盾的行.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import os

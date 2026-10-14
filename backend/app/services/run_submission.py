@@ -15,8 +15,6 @@
 比拿一个 500 更难归因.
 """
 
-from __future__ import annotations
-
 import logging
 from collections.abc import Mapping
 

@@ -11,8 +11,6 @@ P4 的产物用例可以把 `.db` 当成 16 字节的占位文本, 那是因为�
 `test_real_engine_acceptance` 那一轮真回测兜底, 这里要守的是读路径.
 """
 
-from __future__ import annotations
-
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path

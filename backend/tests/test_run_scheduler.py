@@ -8,8 +8,6 @@
 平台的内存状态: "此刻有几个 running" 这类采样在采样偏差下几乎恒真, 杀不掉任何变异.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest

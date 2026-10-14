@@ -5,8 +5,6 @@
 策略按硬编码名字 `open()` 的那份文件, 两个都由上传方给定, 故都得逐条挡住.
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 

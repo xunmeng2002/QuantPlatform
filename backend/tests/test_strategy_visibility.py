@@ -4,8 +4,6 @@ private 仅供归属人, 授权表对它不生效; shared 才吃授权表; publi
 授权列表只回给归属人——被授权人若看得到, 就知道还有谁也被授权了.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 import pytest

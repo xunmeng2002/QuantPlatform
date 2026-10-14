@@ -14,8 +14,6 @@
 入口, 那里因为历史数据而报错, 用户既看不懂也无从修复.
 """
 
-from __future__ import annotations
-
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime

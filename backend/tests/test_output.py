@@ -11,8 +11,6 @@
 任何差别, 只有常驻内存会随策略的输出量一起涨——等于让被执行的代码决定后端的常驻内存.
 """
 
-from __future__ import annotations
-
 import tracemalloc
 from pathlib import Path
 

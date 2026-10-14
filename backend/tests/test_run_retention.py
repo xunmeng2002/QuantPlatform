@@ -13,8 +13,6 @@
 "默认关"单独有用例: 它守的是"升级之后不该有任何东西被删".
 """
 
-from __future__ import annotations
-
 import logging
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass

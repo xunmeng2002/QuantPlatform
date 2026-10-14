@@ -8,8 +8,6 @@
 真实做了什么", 而接口会把结果按平台的判据重新解释一遍.
 """
 
-from __future__ import annotations
-
 import asyncio
 import dataclasses
 import json

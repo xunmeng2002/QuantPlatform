@@ -21,8 +21,6 @@
 (`services/result_database.py`), 不为此引入 aiosqlite.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import sqlite3

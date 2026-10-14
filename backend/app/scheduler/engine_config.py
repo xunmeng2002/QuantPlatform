@@ -19,8 +19,6 @@ job 目录** (见 `workspace.py`), 于是它是一条活在 job 目录里的路�
 去验证"引擎容忍它们缺席"——而这件事从未被验证过.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 from collections.abc import Mapping

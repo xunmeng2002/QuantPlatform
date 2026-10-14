@@ -12,8 +12,6 @@
 只会在某个指标悄悄不落库时才显形.
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 

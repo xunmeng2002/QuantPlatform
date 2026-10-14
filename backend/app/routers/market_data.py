@@ -12,8 +12,6 @@
 漂移 (见 `quote_hub.read_ingested_codes` 关于"少传一个就静默挤掉"的说明).
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 

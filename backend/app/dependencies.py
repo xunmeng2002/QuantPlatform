@@ -3,10 +3,8 @@
 应用级对象在装配时挂到 app.state, 依赖函数只做取出, 不在请求期构造.
 """
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator
-from typing import Annotated, TypeAlias
+from typing import Annotated
 
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,12 +46,10 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
         yield session
 
 
-SettingsDependency: TypeAlias = Annotated[PlatformSettings, Depends(get_settings)]
+type SettingsDependency = Annotated[PlatformSettings, Depends(get_settings)]
 
-SessionDependency: TypeAlias = Annotated[AsyncSession, Depends(get_session)]
+type SessionDependency = Annotated[AsyncSession, Depends(get_session)]
 
-SchedulerDependency: TypeAlias = Annotated[RunScheduler, Depends(get_scheduler)]
+type SchedulerDependency = Annotated[RunScheduler, Depends(get_scheduler)]
 
-LoginThrottleDependency: TypeAlias = Annotated[
-    LoginAttemptThrottle, Depends(get_login_throttle)
-]
+type LoginThrottleDependency = Annotated[LoginAttemptThrottle, Depends(get_login_throttle)]

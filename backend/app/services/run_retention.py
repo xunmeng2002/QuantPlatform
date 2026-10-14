@@ -16,8 +16,6 @@
 安全, 只会把"多开了一个进程"从"删错"变成"看着有保护其实没有".
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from collections.abc import Iterable, Sequence

@@ -7,8 +7,6 @@
 "本地明明有"变成"每次都整所重下".
 """
 
-from __future__ import annotations
-
 import asyncio
 import dataclasses
 from pathlib import Path

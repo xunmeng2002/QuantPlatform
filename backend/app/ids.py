@@ -4,8 +4,6 @@
 兼具目录名用途, 见 job 工作目录契约.
 """
 
-from __future__ import annotations
-
 import uuid
 
 

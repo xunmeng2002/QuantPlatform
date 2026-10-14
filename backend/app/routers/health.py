@@ -16,8 +16,6 @@
 (见 `services.run_submission`), 自检不必再承担这一项.
 """
 
-from __future__ import annotations
-
 import sys
 import tempfile
 from pathlib import Path

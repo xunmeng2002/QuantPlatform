@@ -5,8 +5,6 @@
 只是因为这条记录压根不存在, 那样测的就不是归属校验了.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 import pytest_asyncio

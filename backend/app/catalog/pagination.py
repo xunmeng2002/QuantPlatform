@@ -4,23 +4,17 @@
 一遍, 改一处漏两处就会出现前后端页长不一致, 而这类偏差在单页数据下看不出来.
 """
 
-from __future__ import annotations
-
-from typing import TypeVar
-
 from sqlalchemy import ColumnElement, Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .schemas import PageResponse
 
 
-RecordType = TypeVar("RecordType")
-
 DEFAULT_PAGE_SIZE = 20
 MAXIMUM_PAGE_SIZE = 100
 
 
-async def fetch_page(
+async def fetch_page[RecordType](
     session: AsyncSession,
     base_query: Select[tuple[object]],
     response_model: type[RecordType],

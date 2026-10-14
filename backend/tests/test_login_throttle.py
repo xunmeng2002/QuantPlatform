@@ -10,8 +10,6 @@
 去 patch `time.monotonic` 不会生效.
 """
 
-from __future__ import annotations
-
 import inspect
 
 import pytest

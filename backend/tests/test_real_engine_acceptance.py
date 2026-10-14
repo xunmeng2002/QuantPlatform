@@ -47,8 +47,6 @@
 「环境锁定」段）。耗时那两个数保留 —— 它们与解释器版本无关。
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import os

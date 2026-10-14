@@ -8,14 +8,11 @@
 不是疏漏.
 """
 
-from __future__ import annotations
-
 import ipaddress
 import logging
 import math
 from dataclasses import dataclass
 from time import monotonic
-from typing import TypeAlias
 
 from ..config import PlatformSettings
 
@@ -34,8 +31,8 @@ MAXIMUM_TRACKED_KEYS_PER_DIMENSION = 4096
 USERNAME_DIMENSION = "用户名"
 CLIENT_ADDRESS_DIMENSION = "来源地址"
 
-IPAddress: TypeAlias = ipaddress.IPv4Address | ipaddress.IPv6Address
-IPNetwork: TypeAlias = ipaddress.IPv4Network | ipaddress.IPv6Network
+type IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+type IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 
 @dataclass

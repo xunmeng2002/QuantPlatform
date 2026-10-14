@@ -7,8 +7,6 @@
 要验的正是"播种怎么读 CSV" —— 那份 CSV 长什么样、什么时候播, 得由用例自己说了算.
 """
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator
 from pathlib import Path
 

@@ -13,8 +13,6 @@
 详情接口的响应模型上炸成 500——提交方的笔误变成平台的内部错误.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 from collections.abc import Mapping

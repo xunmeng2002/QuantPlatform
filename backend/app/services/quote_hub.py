@@ -15,16 +15,14 @@
 `market_data_preparation`. 本模块只负责"把事实读出来"与"把命令跑起来".
 """
 
-from __future__ import annotations
-
 import asyncio
 import sqlite3
 import sys
 from collections import deque
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
 
 from ..config import (
     QUOTE_HUB_CLI_FILENAME,

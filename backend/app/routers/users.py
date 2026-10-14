@@ -4,8 +4,6 @@
 平台上有谁. `/directory` 是一处**有意的、收了口的**放宽, 边界写在那个处理器的 docstring 里.
 """
 
-from __future__ import annotations
-
 from fastapi import APIRouter, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError

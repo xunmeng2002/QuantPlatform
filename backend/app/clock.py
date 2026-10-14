@@ -4,8 +4,6 @@
 存入带时区的值会在往返中被静默剥掉, 故此处统一去掉, 由前端按 UTC 解释后本地化.
 """
 
-from __future__ import annotations
-
 from datetime import datetime, timezone
 
 

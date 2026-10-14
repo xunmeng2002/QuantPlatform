@@ -16,8 +16,6 @@
 指标互异、覆盖区间不同"三件事一起成立.
 """
 
-from __future__ import annotations
-
 import json
 import sqlite3
 from collections.abc import Sequence

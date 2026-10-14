@@ -11,8 +11,6 @@
 而"这里的表结构与真组件一致"正是替身唯一能提供的东西.
 """
 
-from __future__ import annotations
-
 import json
 import sqlite3
 from datetime import date, timedelta

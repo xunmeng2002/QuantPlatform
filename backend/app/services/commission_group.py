@@ -12,8 +12,6 @@
 ——两处各写一遍的话, 文案迟早分叉, 而用户看到的是"存模板时说的一回事、提交时说的另一回事".
 """
 
-from __future__ import annotations
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

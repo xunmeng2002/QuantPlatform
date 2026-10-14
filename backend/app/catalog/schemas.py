@@ -7,10 +7,8 @@
 `ProductResponse` 的文档串里 —— 一句话是"库里出现枚举外取值时, 枚举类型会让列表接口 500".
 """
 
-from __future__ import annotations
-
 from datetime import datetime
-from typing import Annotated, Generic, TypeVar
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -25,8 +23,6 @@ from .enums import (
     UserType,
 )
 
-
-T = TypeVar("T")
 
 USERNAME_PATTERN = r"^[A-Za-z0-9_.-]+$"
 MINIMUM_PASSWORD_LENGTH = 8
@@ -52,7 +48,7 @@ MAXIMUM_COMMISSION_GROUP_NAME_LENGTH = 64
 MAXIMUM_PRODUCT_CODE_LENGTH = 4
 
 
-class PageResponse(BaseModel, Generic[T]):
+class PageResponse[T](BaseModel):
     """分页信封, 各列表接口共用."""
 
     total: int

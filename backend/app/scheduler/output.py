@@ -8,8 +8,6 @@
 后端的常驻内存. 裁剪只在字节层面做, 且永不切进多字节字符——见 `decode_tail`.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from types import TracebackType
 from typing import BinaryIO

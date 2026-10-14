@@ -32,8 +32,6 @@ SQLite 的列类型只决定亲和性, 两边等价.
 见 `docs/acceptance-checklist.md`.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 

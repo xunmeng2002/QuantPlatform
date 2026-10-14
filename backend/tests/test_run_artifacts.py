@@ -8,8 +8,6 @@
 故它的断言落在"解析后的真实路径"上.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 import pytest

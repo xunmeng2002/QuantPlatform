@@ -3,8 +3,6 @@
 各枚举是该字段合法取值的唯一来源: 数据库列以其 value 落盘, pydantic 直接以枚举类型校验.
 """
 
-from __future__ import annotations
-
 from enum import IntEnum, StrEnum
 
 

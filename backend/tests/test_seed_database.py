@@ -7,8 +7,6 @@
 故这里不再有发布失败、字节比对、启动期补生成那一类用例 —— 它们验的那条路已经不存在了.
 """
 
-from __future__ import annotations
-
 from dataclasses import replace
 from pathlib import Path
 

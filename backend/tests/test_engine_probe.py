@@ -5,8 +5,6 @@
 `find_python_binding` 另占一节: 它认不出扩展模块时, 现象与"引擎包整个坏了"长得一样.
 """
 
-from __future__ import annotations
-
 from importlib.machinery import EXTENSION_SUFFIXES
 from pathlib import Path
 

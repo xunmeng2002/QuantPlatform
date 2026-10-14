@@ -4,8 +4,6 @@
 制造缺失再断言判据.
 """
 
-from __future__ import annotations
-
 from importlib.machinery import EXTENSION_SUFFIXES
 from pathlib import Path
 

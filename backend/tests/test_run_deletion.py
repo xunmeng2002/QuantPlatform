@@ -10,8 +10,6 @@
 有这一列), 报成功等于把磁盘泄漏变成看不见的.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
 

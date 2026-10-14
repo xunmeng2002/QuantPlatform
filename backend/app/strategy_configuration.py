@@ -19,8 +19,6 @@
 两句文案不同, 不该由这里决定.
 """
 
-from __future__ import annotations
-
 import json
 
 

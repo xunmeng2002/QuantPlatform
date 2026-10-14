@@ -8,8 +8,6 @@
 要么当场红.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from app.catalog.enums import CommissionDirection, RateDirection

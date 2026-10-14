@@ -4,8 +4,6 @@
 FastAPI, 状态码映射也只有一处.
 """
 
-from __future__ import annotations
-
 
 class ResourceNotFoundError(LookupError):
     """资源对当前用户不存在, 或存在但无权知晓. 两者刻意不区分."""

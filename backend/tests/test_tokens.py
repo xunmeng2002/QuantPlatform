@@ -3,8 +3,6 @@
 覆盖三类必须拒绝的令牌: 换密钥签的、载荷被改过的、头部声明不受支持的算法的.
 """
 
-from __future__ import annotations
-
 import base64
 import json
 import time

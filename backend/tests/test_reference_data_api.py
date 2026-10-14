@@ -9,8 +9,6 @@ CRUD 本身, 还盯着两件容易漏掉的事: 各种冲突给出的说法彼�
 `reference_data.seed_database`), 管理端写完只提交事务.
 """
 
-from __future__ import annotations
-
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient

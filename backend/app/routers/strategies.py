@@ -8,8 +8,6 @@
 归属人开放, 非归属人一律 404, 不区分"无权"与"不存在".
 """
 
-from __future__ import annotations
-
 import ast
 from typing import Annotated
 

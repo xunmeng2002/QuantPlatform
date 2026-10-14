@@ -31,8 +31,6 @@
 不引入任何可调阈值.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from enum import Enum
 

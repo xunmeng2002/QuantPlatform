@@ -9,8 +9,6 @@
 删干净了、清理不认"这种只在某一条路径上泄漏磁盘的偏差.
 """
 
-from __future__ import annotations
-
 import logging
 import shutil
 from dataclasses import dataclass

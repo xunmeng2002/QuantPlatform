@@ -3,8 +3,6 @@
 集中解析环境变量, 各模块以显式参数接收配置对象, 不在业务代码里散落 os.getenv.
 """
 
-from __future__ import annotations
-
 import ipaddress
 import logging
 import os

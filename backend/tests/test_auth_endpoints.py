@@ -4,8 +4,6 @@
 账号停用是例外——那要先通过口令校验才谈得上, 不构成枚举面.
 """
 
-from __future__ import annotations
-
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import func, select

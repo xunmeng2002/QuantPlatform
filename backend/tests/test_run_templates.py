@@ -8,8 +8,6 @@
 只按归属人, 共享与公开策略下别人存不进你的、也读不到你的模板.
 """
 
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass
 

@@ -6,8 +6,6 @@
 变更 (改类型 / 删列 / 加约束) 仍需重建库.
 """
 
-from __future__ import annotations
-
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager

@@ -6,8 +6,6 @@
 启动方式: 在 backend 目录下 `python -m app.main`.
 """
 
-from __future__ import annotations
-
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager

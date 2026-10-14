@@ -9,8 +9,6 @@
 下作业永远不落结果". 故此处记一条 warning, 让这个前提在日志里留着痕迹.
 """
 
-from __future__ import annotations
-
 import logging
 
 from sqlalchemy import select, update

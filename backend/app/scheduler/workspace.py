@@ -12,8 +12,6 @@
 `result.json` 绝不在构造阶段创建: 它的缺席是"本轮没走完收尾"的唯一信号, 见 §4.3 的仲裁表.
 """
 
-from __future__ import annotations
-
 import os
 import shutil
 from dataclasses import dataclass

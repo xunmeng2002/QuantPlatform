@@ -45,8 +45,6 @@
 本模块是**纯函数**: 不碰库、不碰文件系统, 进出的都是契约列序的元组 (见 `seed_contract`)。
 """
 
-from __future__ import annotations
-
 from collections.abc import Iterable, Sequence, Set
 from dataclasses import dataclass
 

@@ -9,8 +9,6 @@
 除"能不能跑"之外, 这里还回答"跑的是哪一版" —— 见 `read_engine_version`.
 """
 
-from __future__ import annotations
-
 import hashlib
 import sys
 from importlib.machinery import EXTENSION_SUFFIXES

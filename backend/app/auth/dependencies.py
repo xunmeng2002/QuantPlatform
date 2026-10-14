@@ -3,9 +3,7 @@
 认证失败一律 401 且不区分"令牌无效"与"用户不存在": 区分开就等于把账号是否存在透给未持令牌者.
 """
 
-from __future__ import annotations
-
-from typing import Annotated, TypeAlias
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -25,7 +23,7 @@ ADMIN_REQUIRED_DETAIL = "需要管理员权限"
 BEARER_SCHEME = "Bearer"
 
 
-BearerCredentials: TypeAlias = Annotated[
+type BearerCredentials = Annotated[
     HTTPAuthorizationCredentials | None, Depends(HTTPBearer(auto_error=False))
 ]
 
@@ -77,6 +75,6 @@ async def require_admin(
     return current_user
 
 
-CurrentUserDependency: TypeAlias = Annotated[UserModel, Depends(get_current_user)]
+type CurrentUserDependency = Annotated[UserModel, Depends(get_current_user)]
 
-AdminUserDependency: TypeAlias = Annotated[UserModel, Depends(require_admin)]
+type AdminUserDependency = Annotated[UserModel, Depends(require_admin)]

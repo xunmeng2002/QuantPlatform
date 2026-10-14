@@ -5,8 +5,6 @@ type 为 access: 不校验 alg 的话, 攻击者可把头部改成 "alg":"none" 
 令签名校验形同虚设.
 """
 
-from __future__ import annotations
-
 import base64
 import hashlib
 import hmac

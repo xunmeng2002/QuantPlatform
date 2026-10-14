@@ -3,8 +3,6 @@
 本模块的两个端点中, 登录不需要令牌, 其余全部端点由各路由模块各自的依赖把关.
 """
 
-from __future__ import annotations
-
 import secrets
 
 from fastapi import APIRouter, HTTPException, Request, status

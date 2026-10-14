@@ -12,8 +12,6 @@ DumpPath, MissingRateKeys 是长尾数组, 留在结果文件里按需读取.
 一致的验收判据.
 """
 
-from __future__ import annotations
-
 from datetime import datetime
 
 from sqlalchemy import (

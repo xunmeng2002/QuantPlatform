@@ -6,8 +6,6 @@
 未经校验的请求一条都不该落库, 否则会留下一个既非旧名单也非新名单的授权集合.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 import pytest

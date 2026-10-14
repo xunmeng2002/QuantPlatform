@@ -4,15 +4,12 @@
 归属校验生效, 还是因为调用者本来就不是管理员.
 """
 
-from __future__ import annotations
-
 import sqlite3
 from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TypeVar
 
 from httpx import AsyncClient, Response
 from pydantic import BaseModel
@@ -38,9 +35,6 @@ from app.catalog.schemas import PageResponse, StrategyDetailResponse, StrategyRe
 from app.clock import utc_now
 from app.ids import generate_identifier
 
-
-ModelType = TypeVar("ModelType", bound=DeclarativeBase)
-RecordType = TypeVar("RecordType", bound=BaseModel)
 
 DEFAULT_MEMBER_PASSWORD = "member-table-password"
 LOGIN_PATH = "/api/auth/login"
@@ -111,7 +105,7 @@ def assert_rejected(
         assert rejected_value not in response.text
 
 
-async def fetch_page(
+async def fetch_page[RecordType: BaseModel](
     client: AsyncClient,
     path: str,
     token: str,
@@ -127,7 +121,7 @@ async def fetch_page(
     return PageResponse[response_model].model_validate(response.json())
 
 
-def record_ids(page: PageResponse[RecordType]) -> list[str]:
+def record_ids[RecordType](page: PageResponse[RecordType]) -> list[str]:
     """当页各记录的 id, 保持既有顺序."""
 
     return [record.id for record in page.records]
@@ -192,7 +186,9 @@ async def read_strategy_status_code(
     return (await get_strategy_response(client, token, strategy_id)).status_code
 
 
-async def persist_record(database: PlatformDatabase, record: ModelType) -> ModelType:
+async def persist_record[ModelType: DeclarativeBase](
+    database: PlatformDatabase, record: ModelType
+) -> ModelType:
     """直接落库一条新记录."""
 
     async with database.session_scope() as session:
@@ -202,7 +198,7 @@ async def persist_record(database: PlatformDatabase, record: ModelType) -> Model
     return record
 
 
-async def update_record_by_id(
+async def update_record_by_id[ModelType: DeclarativeBase](
     database: PlatformDatabase,
     model_type: type[ModelType],
     record_id: str,

@@ -4,8 +4,6 @@
 因此这里既验白名单内可用, 也验白名单外(含疑似注入载荷)既不报错也不改行为.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from datetime import timedelta
 

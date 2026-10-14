@@ -20,8 +20,6 @@
 去过滤 parquet, 磁盘上没有那一族, 于是整轮以 `ErrorMarketDataNotExist` 收场.
 """
 
-from __future__ import annotations
-
 import inspect
 import json
 from pathlib import Path

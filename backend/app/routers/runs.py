@@ -7,8 +7,6 @@
 集合逐字相同, 故走 `load_visible_strategy`, 不新增越权分支也不新增查询收口.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import sqlite3

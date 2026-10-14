@@ -14,13 +14,11 @@
 而这里是"读一份外部产物", 与 `engine_probe` 同类 —— 本层不依赖 FastAPI, 只抛领域异常.
 """
 
-from __future__ import annotations
-
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
 
 from ..errors import ResourceNotFoundError
 

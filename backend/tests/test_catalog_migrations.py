@@ -5,8 +5,6 @@
 "表 X 没有列 Y"的英文报错, 与真正的原因隔着一层.
 """
 
-from __future__ import annotations
-
 import logging
 
 import pytest

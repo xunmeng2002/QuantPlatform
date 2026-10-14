@@ -11,8 +11,6 @@
 (一条难归因的 500), 而这两组测试会先红在测试里.
 """
 
-from __future__ import annotations
-
 import sqlite3
 from contextlib import closing
 from pathlib import Path

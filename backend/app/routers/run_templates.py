@@ -15,8 +15,6 @@
 不影响历史运行——那一轮的取值在提交时就烤进了 `Runs.ParamsJson`.
 """
 
-from __future__ import annotations
-
 from fastapi import APIRouter, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError

@@ -8,8 +8,6 @@
 只断言状态码的话, 一个"先落行再校验"的实现会让被拒的提交**照常排队跑起来**, 而接口回的是 400.
 """
 
-from __future__ import annotations
-
 import json
 
 import pytest

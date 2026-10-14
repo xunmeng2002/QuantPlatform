@@ -12,8 +12,6 @@
 模块是**纯函数**: 不碰库、不碰文件系统. 于是"哪些取值能过"可以不起服务就逐条测.
 """
 
-from __future__ import annotations
-
 import logging
 import math
 from collections.abc import Mapping

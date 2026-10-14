@@ -8,8 +8,6 @@ UPDATE 回答.
 不保证系统里只有一个调度器. 故 `uvicorn --workers 2` 是明确不支持的用法 (见 recovery 模块).
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import sys

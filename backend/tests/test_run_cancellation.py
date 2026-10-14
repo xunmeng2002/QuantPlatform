@@ -11,8 +11,6 @@
   而**不允许出现"状态说跑完了、指标说没跑完"的行**——那正是收尾绕过 CAS 写指标的症状.
 """
 
-from __future__ import annotations
-
 import asyncio
 
 import pytest
