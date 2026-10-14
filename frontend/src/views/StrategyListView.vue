@@ -65,7 +65,7 @@ async function refreshStrategies(): Promise<void> {
   }
 }
 
-function goToOffset(nextOffset: number): void {
+function handleGoToOffset(nextOffset: number): void {
   offset.value = nextOffset;
   void refreshStrategies();
 }
@@ -178,7 +178,7 @@ onMounted(() => {
         v-model:limit="limit"
         :total="totalCount"
         :offset="offset"
-        @update:offset="goToOffset"
+        @update:offset="handleGoToOffset"
       />
     </template>
   </section>

@@ -160,7 +160,7 @@ async function handleVersionUploaded(): Promise<void> {
   await loadStrategyDetail();
 }
 
-function addGrant(entry: UserDirectoryEntry): void {
+function handleAddGrant(entry: UserDirectoryEntry): void {
   grantErrorMessage.value = null;
 
   if (grantDraft.value.some((grant) => grant.grantee_user_id === entry.id)) {
@@ -176,7 +176,7 @@ function addGrant(entry: UserDirectoryEntry): void {
   ];
 }
 
-function removeGrant(granteeUserId: string): void {
+function handleRemoveGrant(granteeUserId: string): void {
   grantDraft.value = grantDraft.value.filter(
     (grant) => grant.grantee_user_id !== granteeUserId,
   );
@@ -188,7 +188,7 @@ function removeGrant(granteeUserId: string): void {
  * 第二参是 `ElSelect` 的 `@change` 载荷 —— 它是**值本身**, 不是 DOM 事件 (原手写 `<select>` 那份
  * 代码读的是 `event.target.value`). 照抄旧签名会在运行时炸.
  */
-function changeGrantPermission(
+function handleChangeGrantPermission(
   granteeUserId: string,
   permission: GrantPermission,
 ): void {
@@ -199,7 +199,7 @@ function changeGrantPermission(
   );
 }
 
-async function saveGrants(): Promise<void> {
+async function handleSaveGrants(): Promise<void> {
   grantErrorMessage.value = null;
   isSavingGrants.value = true;
 
@@ -215,7 +215,7 @@ async function saveGrants(): Promise<void> {
   }
 }
 
-async function deleteStrategyWithConfirmation(): Promise<void> {
+async function handleDeleteStrategyWithConfirmation(): Promise<void> {
   const isConfirmed = await confirmAction({
     title: '删除这个策略',
     message: '策略会被标记为已删除, 不再出现在列表与提交页; 已有的运行记录仍指向它。这一步不可撤销。',
@@ -273,7 +273,7 @@ onMounted(() => {
           type="danger"
           plain
           :loading="isDeleting"
-          @click="deleteStrategyWithConfirmation"
+          @click="handleDeleteStrategyWithConfirmation"
         >
           {{ isDeleting ? '删除中…' : '删除策略' }}
         </ElButton>
@@ -476,11 +476,11 @@ onMounted(() => {
             </span>
             <div class="flex items-center gap-2">
               <!-- el-select 默认铺满容器, 在 flex 行里会把「移除」挤出去, 故给一个显式宽度.
-                   载荷是值不是事件 (见 `changeGrantPermission` 的说明). -->
+                   载荷是值不是事件 (见 `handleChangeGrantPermission` 的说明). -->
               <ElSelect
                 :model-value="grant.permission_type"
                 class="w-28"
-                @change="changeGrantPermission(grant.grantee_user_id, $event)"
+                @change="handleChangeGrantPermission(grant.grantee_user_id, $event)"
               >
                 <ElOption
                   v-for="permission in GRANT_PERMISSIONS"
@@ -493,7 +493,7 @@ onMounted(() => {
                 type="danger"
                 plain
                 size="small"
-                @click="removeGrant(grant.grantee_user_id)"
+                @click="handleRemoveGrant(grant.grantee_user_id)"
               >
                 移除
               </ElButton>
@@ -501,14 +501,14 @@ onMounted(() => {
           </li>
         </ul>
 
-        <DirectoryPicker @select="addGrant" />
+        <DirectoryPicker @select="handleAddGrant" />
 
         <div class="mt-4 flex items-center gap-3">
           <ElButton
             type="primary"
             :loading="isSavingGrants"
             :disabled="isSavingGrants || !isGrantDraftDirty"
-            @click="saveGrants"
+            @click="handleSaveGrants"
           >
             {{ isSavingGrants ? '保存中…' : '保存授权' }}
           </ElButton>

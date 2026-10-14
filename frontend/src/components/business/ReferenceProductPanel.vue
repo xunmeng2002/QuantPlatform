@@ -117,11 +117,11 @@ const {
   isSubmitting,
   deletingRecordId,
   refresh,
-  goToOffset,
+  handleGoToOffset,
   beginEditing: markRowAsEditing,
   cancelEditing,
-  submitForm,
-  removeRecord,
+  handleSubmitForm,
+  handleRemoveRecord,
 } = useReferenceTable<Product, ProductPayload>({
   fetchPage: fetchProducts,
   createRecord: createProduct,
@@ -169,7 +169,7 @@ const {
 });
 
 /** 点「编辑」把那一行的取值装进表单; 表单住的地方与新建是同一个. */
-function beginEditing(product: Product): void {
+function handleBeginEditing(product: Product): void {
   form.exchangeId = product.exchange_id;
   form.productId = product.product_id;
   form.productName = product.product_name;
@@ -214,7 +214,7 @@ onMounted(() => {
 
       <form
         class="space-y-4"
-        @submit.prevent="submitForm()"
+        @submit.prevent="handleSubmitForm()"
       >
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div class="flex flex-col gap-1">
@@ -495,7 +495,7 @@ onMounted(() => {
               <ElButton
                 size="small"
                 :disabled="deletingRecordId !== null"
-                @click="beginEditing(row as Product)"
+                @click="handleBeginEditing(row as Product)"
               >
                 编辑
               </ElButton>
@@ -505,7 +505,7 @@ onMounted(() => {
                 plain
                 :disabled="deletingRecordId !== null"
                 :loading="deletingRecordId === row.id"
-                @click="removeRecord(row as Product)"
+                @click="handleRemoveRecord(row as Product)"
               >
                 删除
               </ElButton>
@@ -518,7 +518,7 @@ onMounted(() => {
         v-model:limit="limit"
         :total="totalCount"
         :offset="offset"
-        @update:offset="goToOffset"
+        @update:offset="handleGoToOffset"
       />
     </template>
   </div>

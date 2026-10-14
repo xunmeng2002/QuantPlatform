@@ -76,11 +76,11 @@ export interface ReferenceTable<RecordShape extends IdentifiedRecord> {
   /** 正在删的那一行. 非空时全表按钮禁用 (防连点), 但只有它指向的那一行转圈. */
   deletingRecordId: Ref<string | null>;
   refresh(): Promise<void>;
-  goToOffset(nextOffset: number): void;
+  handleGoToOffset(nextOffset: number): void;
   beginEditing(record: RecordShape): void;
   cancelEditing(): void;
-  submitForm(): Promise<void>;
-  removeRecord(record: RecordShape): Promise<void>;
+  handleSubmitForm(): Promise<void>;
+  handleRemoveRecord(record: RecordShape): Promise<void>;
 }
 
 export function useReferenceTable<
@@ -118,7 +118,7 @@ export function useReferenceTable<
     }
   }
 
-  function goToOffset(nextOffset: number): void {
+  function handleGoToOffset(nextOffset: number): void {
     offset.value = nextOffset;
     void refresh();
   }
@@ -134,7 +134,7 @@ export function useReferenceTable<
     options.resetForm();
   }
 
-  async function submitForm(): Promise<void> {
+  async function handleSubmitForm(): Promise<void> {
     const payload = options.buildPayload();
 
     if (payload === null || isSubmitting.value) {
@@ -173,7 +173,7 @@ export function useReferenceTable<
     }
   }
 
-  async function removeRecord(record: RecordShape): Promise<void> {
+  async function handleRemoveRecord(record: RecordShape): Promise<void> {
     const isConfirmed = await confirmAction({
       title: '删除',
       message: options.describeDeleteQuestion(record),
@@ -218,10 +218,10 @@ export function useReferenceTable<
     isSubmitting,
     deletingRecordId,
     refresh,
-    goToOffset,
+    handleGoToOffset,
     beginEditing,
     cancelEditing,
-    submitForm,
-    removeRecord,
+    handleSubmitForm,
+    handleRemoveRecord,
   };
 }

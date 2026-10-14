@@ -108,7 +108,7 @@ function isRunSelected(runId: string): boolean {
 }
 
 /** 勾/取消勾: 只改地址栏, 取数由 `watch(route.query.ids)` 统一发起; 取消到空就不再请求. */
-function toggleRunSelection(runId: string): void {
+function handleToggleRunSelection(runId: string): void {
   const nextRunIds = isRunSelected(runId)
     ? selectedRunIds.value.filter((selectedRunId) => selectedRunId !== runId)
     : [...selectedRunIds.value, runId];
@@ -257,7 +257,7 @@ onMounted(() => {
           <ElCheckbox
             :model-value="isRunSelected(run.id)"
             :disabled="isSelectionFull && !isRunSelected(run.id)"
-            @change="toggleRunSelection(run.id)"
+            @change="handleToggleRunSelection(run.id)"
           >
             <span class="font-mono text-xs text-slate-700">{{ run.id }}</span>
           </ElCheckbox>

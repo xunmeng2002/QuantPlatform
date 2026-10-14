@@ -77,12 +77,12 @@ async function refreshRuns(): Promise<void> {
   }
 }
 
-function reloadFromFirstPage(): void {
+function handleReloadFromFirstPage(): void {
   offset.value = 0;
   void refreshRuns();
 }
 
-function goToOffset(nextOffset: number): void {
+function handleGoToOffset(nextOffset: number): void {
   offset.value = nextOffset;
   void refreshRuns();
 }
@@ -138,7 +138,7 @@ onMounted(() => {
             clearable
             placeholder="全部状态"
             :value-on-clear="''"
-            @change="reloadFromFirstPage"
+            @change="handleReloadFromFirstPage"
           >
             <ElOption
               v-for="status in RUN_STATUSES"
@@ -156,7 +156,7 @@ onMounted(() => {
             clearable
             placeholder="全部策略"
             :value-on-clear="''"
-            @change="reloadFromFirstPage"
+            @change="handleReloadFromFirstPage"
           >
             <ElOption
               v-for="strategy in strategyCatalog.strategies"
@@ -174,7 +174,7 @@ onMounted(() => {
           排序
           <ElSelect
             v-model="sortBy"
-            @change="reloadFromFirstPage"
+            @change="handleReloadFromFirstPage"
           >
             <ElOption
               v-for="sortColumn in RUN_SORT_COLUMNS"
@@ -191,7 +191,7 @@ onMounted(() => {
       <div class="mt-3">
         <ElCheckbox
           v-model="descending"
-          @change="reloadFromFirstPage"
+          @change="handleReloadFromFirstPage"
         >
           倒序
         </ElCheckbox>
@@ -289,7 +289,7 @@ onMounted(() => {
         v-model:limit="limit"
         :total="totalCount"
         :offset="offset"
-        @update:offset="goToOffset"
+        @update:offset="handleGoToOffset"
       />
     </template>
   </section>

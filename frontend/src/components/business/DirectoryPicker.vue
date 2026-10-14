@@ -37,7 +37,7 @@ async function runSearch(): Promise<void> {
   }
 }
 
-function selectEntry(entry: UserDirectoryEntry): void {
+function handleSelectEntry(entry: UserDirectoryEntry): void {
   emit('select', entry);
 }
 </script>
@@ -89,7 +89,7 @@ function selectEntry(entry: UserDirectoryEntry): void {
         <span class="text-sm text-slate-700">{{ entry.display_name }}</span>
         <ElButton
           size="small"
-          @click="selectEntry(entry)"
+          @click="handleSelectEntry(entry)"
         >
           选择
         </ElButton>

@@ -85,7 +85,7 @@ const brandMarkUrl = '/favicon.svg';
 /** 头像位只放首字. 用 `Array.from` 而不是 `[0]`: 显示名可能以表情等代理对字符开头. */
 const avatarInitial = computed(() => Array.from(session.displayName.trim())[0] ?? '?');
 
-async function signOut(): Promise<void> {
+async function handleSignOut(): Promise<void> {
   session.clear();
   await router.push({ name: 'login' });
 }
@@ -153,7 +153,7 @@ async function signOut(): Promise<void> {
 
           <ElButton
             size="small"
-            @click="signOut"
+            @click="handleSignOut"
           >
             退出登录
           </ElButton>

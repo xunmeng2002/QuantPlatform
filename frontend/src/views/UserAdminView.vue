@@ -113,7 +113,7 @@ async function refreshUsers(): Promise<void> {
   }
 }
 
-function goToOffset(nextOffset: number): void {
+function handleGoToOffset(nextOffset: number): void {
   offset.value = nextOffset;
   void refreshUsers();
 }
@@ -125,7 +125,7 @@ function resetCreateForm(): void {
   newUserType.value = 'user';
 }
 
-async function submitCreateUser(): Promise<void> {
+async function handleSubmitCreateUser(): Promise<void> {
   if (isCreateDisabled.value) {
     return;
   }
@@ -153,7 +153,7 @@ async function submitCreateUser(): Promise<void> {
   }
 }
 
-async function changeUserStatus(user: User): Promise<void> {
+async function handleChangeUserStatus(user: User): Promise<void> {
   const nextStatus: UserStatus = user.status === 'active' ? 'disabled' : 'active';
 
   const isConfirmed = await confirmAction({
@@ -214,7 +214,7 @@ onMounted(async () => {
     >
       <form
         class="space-y-4"
-        @submit.prevent="submitCreateUser"
+        @submit.prevent="handleSubmitCreateUser"
       >
         <div class="grid gap-4 sm:grid-cols-2">
           <div class="flex flex-col gap-1">
@@ -369,7 +369,7 @@ onMounted(async () => {
                 size="small"
                 :disabled="statusChangingUser !== null"
                 :loading="statusChangingUser?.id === row.id"
-                @click="changeUserStatus(row as User)"
+                @click="handleChangeUserStatus(row as User)"
               >
                 {{ row.status === 'active' ? '停用' : '启用' }}
               </ElButton>
@@ -382,7 +382,7 @@ onMounted(async () => {
         v-model:limit="limit"
         :total="totalCount"
         :offset="offset"
-        @update:offset="goToOffset"
+        @update:offset="handleGoToOffset"
       />
     </template>
   </section>

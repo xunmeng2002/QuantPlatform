@@ -26,7 +26,7 @@ const emit = defineEmits<{
   'update:offset': [offset: number];
 }>();
 
-function changePageSize(nextLimit: number): void {
+function handleChangePageSize(nextLimit: number): void {
   emit('update:limit', nextLimit);
   emit('update:offset', 0);
 }
@@ -42,7 +42,7 @@ function changePageSize(nextLimit: number): void {
         :model-value="props.limit"
         class="w-20"
         aria-label="每页条数"
-        @change="changePageSize"
+        @change="handleChangePageSize"
       >
         <ElOption
           v-for="pageSize in PAGE_SIZE_OPTIONS"

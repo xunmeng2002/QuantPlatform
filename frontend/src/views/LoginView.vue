@@ -46,7 +46,7 @@ const redirectTarget = computed(() => {
   return requestedTarget.startsWith('//') ? null : requestedTarget;
 });
 
-async function submit(): Promise<void> {
+async function handleSubmit(): Promise<void> {
   if (isSubmitDisabled.value) {
     return;
   }
@@ -89,7 +89,7 @@ async function submit(): Promise<void> {
 
     <form
       class="space-y-4"
-      @submit.prevent="submit"
+      @submit.prevent="handleSubmit"
     >
       <ErrorBanner
         :message="errorMessage"

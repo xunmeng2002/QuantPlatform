@@ -61,11 +61,11 @@ const {
   isSubmitting,
   deletingRecordId,
   refresh,
-  goToOffset,
+  handleGoToOffset,
   beginEditing: markRowAsEditing,
   cancelEditing,
-  submitForm,
-  removeRecord,
+  handleSubmitForm,
+  handleRemoveRecord,
 } = useReferenceTable<CommissionGroup, CommissionGroupPayload>({
   fetchPage: fetchCommissionGroups,
   createRecord: createCommissionGroup,
@@ -107,7 +107,7 @@ const {
 });
 
 /** 点「编辑」把那一行的取值装进表单; 表单住的地方与新建是同一个. */
-function beginEditing(commissionGroup: CommissionGroup): void {
+function handleBeginEditing(commissionGroup: CommissionGroup): void {
   form.commissionGroupId = commissionGroup.commission_group_id;
   form.commissionGroupName = commissionGroup.commission_group_name;
 
@@ -141,7 +141,7 @@ onMounted(() => {
 
       <form
         class="space-y-4"
-        @submit.prevent="submitForm()"
+        @submit.prevent="handleSubmitForm()"
       >
         <div class="grid gap-4 sm:grid-cols-2">
           <div class="flex flex-col gap-1">
@@ -246,7 +246,7 @@ onMounted(() => {
               <ElButton
                 size="small"
                 :disabled="deletingRecordId !== null"
-                @click="beginEditing(row as CommissionGroup)"
+                @click="handleBeginEditing(row as CommissionGroup)"
               >
                 编辑
               </ElButton>
@@ -256,7 +256,7 @@ onMounted(() => {
                 plain
                 :disabled="deletingRecordId !== null"
                 :loading="deletingRecordId === row.id"
-                @click="removeRecord(row as CommissionGroup)"
+                @click="handleRemoveRecord(row as CommissionGroup)"
               >
                 删除
               </ElButton>
@@ -269,7 +269,7 @@ onMounted(() => {
         v-model:limit="limit"
         :total="totalCount"
         :offset="offset"
-        @update:offset="goToOffset"
+        @update:offset="handleGoToOffset"
       />
     </template>
   </div>

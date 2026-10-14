@@ -114,7 +114,7 @@ async function refreshRun(): Promise<void> {
   await Promise.all([loadRunDetail(), loadArtifacts()]);
 }
 
-async function downloadArtifact(artifact: JobArtifact): Promise<void> {
+async function handleDownloadArtifact(artifact: JobArtifact): Promise<void> {
   // 这里**不碰** `artifactErrorMessage`: 清单加载失败与这一次下载是两件事, 顺手清掉前者等于
   // 把一条还成立的信息抹了.
   downloadingPath.value = artifact.relative_path;
@@ -132,7 +132,7 @@ async function downloadArtifact(artifact: JobArtifact): Promise<void> {
   }
 }
 
-async function cancelRunWithConfirmation(): Promise<void> {
+async function handleCancelRunWithConfirmation(): Promise<void> {
   const isConfirmed = await confirmAction({
     title: '取消这次运行',
     message: '引擎进程会被终止, 该轮将标记为已中断。已写出的产物会保留。',
@@ -168,11 +168,11 @@ const { isPolling, start: startPolling, stop: stopPolling } = usePolling(refresh
  * 状态源在它自己的地址栏上). 与其在这里猜一份可能已经过期的选择, 不如老实起步, 让用户在对比页上
  * 继续勾.
  */
-function addToComparison(): void {
+function handleAddToComparison(): void {
   void router.push({ name: 'compare', query: { ids: props.id } });
 }
 
-async function deleteRunWithConfirmation(): Promise<void> {
+async function handleDeleteRunWithConfirmation(): Promise<void> {
   const isConfirmed = await confirmAction({
     title: '删除这次运行',
     message: '该轮的作业目录 (结果库、日志与全部产物) 会被一并删除, 不可恢复。',
@@ -251,7 +251,7 @@ onMounted(async () => {
       <template #actions>
         <ElButton
           v-if="run"
-          @click="addToComparison"
+          @click="handleAddToComparison"
         >
           加入对比
         </ElButton>
@@ -263,7 +263,7 @@ onMounted(async () => {
           type="danger"
           plain
           :loading="isCancelling"
-          @click="cancelRunWithConfirmation"
+          @click="handleCancelRunWithConfirmation"
         >
           {{ isCancelling ? '取消中…' : '取消运行' }}
         </ElButton>
@@ -273,7 +273,7 @@ onMounted(async () => {
           type="danger"
           plain
           :loading="isDeleting"
-          @click="deleteRunWithConfirmation"
+          @click="handleDeleteRunWithConfirmation"
         >
           {{ isDeleting ? '删除中…' : '删除运行' }}
         </ElButton>
@@ -410,7 +410,7 @@ onMounted(async () => {
           :artifacts="artifacts"
           :is-downloading="downloadingPath !== null"
           :downloading-path="downloadingPath"
-          @download="downloadArtifact"
+          @download="handleDownloadArtifact"
         />
         <EmptyNotice
           v-else-if="!artifactErrorMessage"

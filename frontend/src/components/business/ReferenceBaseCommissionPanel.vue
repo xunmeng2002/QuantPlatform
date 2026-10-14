@@ -246,7 +246,7 @@ const selectedProductOption = computed<string>({
  * 那正是"不另存一列"想避免的自相矛盾. 交易所那一格不清: 三级都挂在同一个交易所下, 留着省一次
  * 输入; 品种级时它还会被选中的品种覆写.
  */
-function changeScope(nextScope: RateScope): void {
+function handleChangeScope(nextScope: RateScope): void {
   form.scope = nextScope;
   form.instrumentId = '';
 }
@@ -296,11 +296,11 @@ const {
   isSubmitting,
   deletingRecordId,
   refresh,
-  goToOffset,
+  handleGoToOffset,
   beginEditing: markRowAsEditing,
   cancelEditing,
-  submitForm,
-  removeRecord,
+  handleSubmitForm,
+  handleRemoveRecord,
 } = useReferenceTable<BaseCommission, BaseCommissionPayload>({
   fetchPage: fetchBaseCommissions,
   createRecord: createBaseCommission,
@@ -351,7 +351,7 @@ const {
 });
 
 /** 点「编辑」把那一行的取值装进表单; 表单住的地方与新建是同一个. */
-function beginEditing(baseCommission: BaseCommission): void {
+function handleBeginEditing(baseCommission: BaseCommission): void {
   form.commissionGroupId = baseCommission.commission_group_id;
   // 作用域从合约格读回来, 而不是另存一列 —— 库里的那一格是唯一真相.
   form.scope = resolveRateScope(baseCommission.instrument_id);
@@ -401,7 +401,7 @@ onMounted(() => {
 
       <form
         class="space-y-4"
-        @submit.prevent="submitForm()"
+        @submit.prevent="handleSubmitForm()"
       >
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div class="flex flex-col gap-1">
@@ -429,7 +429,7 @@ onMounted(() => {
             <ElSelect
               id="base-commission-scope"
               :model-value="form.scope"
-              @update:model-value="changeScope"
+              @update:model-value="handleChangeScope"
             >
               <ElOption
                 v-for="scope in RATE_SCOPES"
@@ -684,7 +684,7 @@ onMounted(() => {
               <ElButton
                 size="small"
                 :disabled="deletingRecordId !== null"
-                @click="beginEditing(row as BaseCommission)"
+                @click="handleBeginEditing(row as BaseCommission)"
               >
                 编辑
               </ElButton>
@@ -694,7 +694,7 @@ onMounted(() => {
                 plain
                 :disabled="deletingRecordId !== null"
                 :loading="deletingRecordId === row.id"
-                @click="removeRecord(row as BaseCommission)"
+                @click="handleRemoveRecord(row as BaseCommission)"
               >
                 删除
               </ElButton>
@@ -707,7 +707,7 @@ onMounted(() => {
         v-model:limit="limit"
         :total="totalCount"
         :offset="offset"
-        @update:offset="goToOffset"
+        @update:offset="handleGoToOffset"
       />
     </template>
   </div>

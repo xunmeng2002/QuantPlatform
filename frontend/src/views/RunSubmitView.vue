@@ -366,7 +366,7 @@ function applyFormForCurrentSelection(): void {
 }
 
 /** 「重置为默认值」: 丢掉本轮套用的那份取值, 把整张表单恢复成模板里的取值. */
-function resetToDefaults(): void {
+function handleResetToDefaults(): void {
   appliedPrefill.value = null;
   runFields.value = { ...EMPTY_RUN_FIELDS };
   parameterInputs.value = createInitialParameterInputs(descriptors.value);
@@ -480,7 +480,7 @@ async function loadRunTemplates(
 }
 
 /** 模板区的「重新加载」: 复用当前的选择与序号, 免得模板里要去读那个裸的 `selectionToken`. */
-function reloadRunTemplates(): void {
+function handleReloadRunTemplates(): void {
   void loadRunTemplates(selectedStrategyId.value, selectionToken);
 }
 
@@ -511,7 +511,7 @@ function handleVersionChange(): void {
 }
 
 /** 「套用」: 把选中那份模板填进表单. 与按记忆预填走**同一条路**, 只是换一份取值. */
-function applyTemplate(): void {
+function handleApplyTemplate(): void {
   const selectedTemplate = runTemplates.value.find(
     (template) => template.id === selectedTemplateId.value,
   );
@@ -535,7 +535,7 @@ function applyTemplate(): void {
  * 红字 (与点「提交回测」走同一条路), 用户看到的是"哪里要改", 而不是"点了没反应"或一句笼统的
  * "表单不完整". 按钮因此**不置灰**: 置灰就没人告诉他为什么点不动.
  */
-function openTemplateDialog(): void {
+function handleOpenTemplateDialog(): void {
   hasAttemptedSubmit.value = true;
 
   if (submissionPayload.value === null) {
@@ -553,7 +553,7 @@ function openTemplateDialog(): void {
  * 请求体的取值一律由 `buildTemplateDraft` 从 `formInput` 上抄 (提交得出去的东西才存得下来), 故这
  * 里不另判一次表单——它若此刻仍不合法, 那是弹窗开着的这段时间里表单被改了, 而弹窗是模态的, 走不到.
  */
-async function saveTemplate(): Promise<void> {
+async function handleSaveTemplate(): Promise<void> {
   const draftResult = buildTemplateDraft(templateNameInput.value, formInput.value);
 
   if (!draftResult.ok) {
@@ -583,7 +583,7 @@ async function saveTemplate(): Promise<void> {
   }
 }
 
-async function submit(): Promise<void> {
+async function handleSubmit(): Promise<void> {
   hasAttemptedSubmit.value = true;
   submitErrorMessage.value = null;
 
@@ -764,7 +764,7 @@ onMounted(() => {
     <form
       v-else
       class="space-y-6"
-      @submit.prevent="submit"
+      @submit.prevent="handleSubmit"
     >
       <!-- 外面这个 div 不是多余的: EP 的 `.el-alert{margin:0}` 是无层样式, 会压掉 `space-y-6`
            给它的上边距, 所以纵向间距只能挂在我们自己的包裹层上. -->
@@ -780,7 +780,7 @@ onMounted(() => {
             <button
               type="button"
               class="text-brand hover:underline"
-              @click="resetToDefaults"
+              @click="handleResetToDefaults"
             >
               重置为默认值
             </button>
@@ -912,7 +912,7 @@ onMounted(() => {
         <ErrorBanner
           :message="templateErrorMessage"
           retry-label="重新加载模板"
-          @retry="reloadRunTemplates"
+          @retry="handleReloadRunTemplates"
         />
 
         <div class="flex flex-wrap items-center gap-3">
@@ -934,12 +934,12 @@ onMounted(() => {
 
           <ElButton
             :disabled="selectedTemplateId === ''"
-            @click="applyTemplate"
+            @click="handleApplyTemplate"
           >
             套用
           </ElButton>
 
-          <ElButton @click="openTemplateDialog">
+          <ElButton @click="handleOpenTemplateDialog">
             存为模板
           </ElButton>
         </div>
@@ -1184,7 +1184,7 @@ onMounted(() => {
           v-model="templateNameInput"
           maxlength="64"
           placeholder="例如 沪深300 日线 慢速"
-          @keyup.enter="saveTemplate"
+          @keyup.enter="handleSaveTemplate"
         />
       </label>
 
@@ -1207,7 +1207,7 @@ onMounted(() => {
         <ElButton
           type="primary"
           :loading="isSavingTemplate"
-          @click="saveTemplate"
+          @click="handleSaveTemplate"
         >
           {{ isSavingTemplate ? '保存中…' : '保存' }}
         </ElButton>

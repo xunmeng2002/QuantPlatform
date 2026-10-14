@@ -69,7 +69,7 @@ async function loadTablePage(): Promise<void> {
 }
 
 /** 换页签回第一页: 沿用上一页的 `offset` 会落到新表的中间, 而用户刚打开它. */
-function selectTable(tableName: ResultTableName): void {
+function handleSelectTable(tableName: ResultTableName): void {
   if (tableName === activeTable.value) {
     return;
   }
@@ -79,11 +79,11 @@ function selectTable(tableName: ResultTableName): void {
 }
 
 /** 换页大小回第一页: 留在原来的 `offset` 上会跳过或重看一段. */
-function resetToFirstPage(): void {
+function handleResetToFirstPage(): void {
   offset.value = 0;
 }
 
-function goToOffset(nextOffset: number): void {
+function handleGoToOffset(nextOffset: number): void {
   offset.value = nextOffset;
 }
 
@@ -139,7 +139,7 @@ watch([activeTable, offset, pageSize], loadTablePage, { immediate: true });
           type="button"
           class="rounded border px-3 py-1 text-xs font-medium"
           :class="describeTabClass(tableName)"
-          @click="selectTable(tableName)"
+          @click="handleSelectTable(tableName)"
         >
           {{ RESULT_TABLE_LABELS[tableName] }}
         </button>
@@ -150,7 +150,7 @@ watch([activeTable, offset, pageSize], loadTablePage, { immediate: true });
         <select
           v-model.number="pageSize"
           class="rounded border border-line bg-surface px-2 py-1.5 text-sm"
-          @change="resetToFirstPage"
+          @change="handleResetToFirstPage"
         >
           <option v-for="pageSizeOption in PAGE_SIZE_OPTIONS" :key="pageSizeOption" :value="pageSizeOption">
             {{ pageSizeOption }}
@@ -191,7 +191,7 @@ watch([activeTable, offset, pageSize], loadTablePage, { immediate: true });
         :total="total"
         :offset="offset"
         :limit="pageSize"
-        @update:offset="goToOffset"
+        @update:offset="handleGoToOffset"
       />
     </template>
   </section>

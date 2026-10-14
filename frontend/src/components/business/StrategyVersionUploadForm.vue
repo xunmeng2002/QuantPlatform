@@ -45,7 +45,7 @@ function resetForm(): void {
   clearConfigurationFile();
 }
 
-async function submit(): Promise<void> {
+async function handleSubmit(): Promise<void> {
   const selectedSourceFile = sourceFile.value;
   const selectedConfigurationFile = configurationFile.value;
 
@@ -76,7 +76,7 @@ async function submit(): Promise<void> {
 <template>
   <form
     class="space-y-4"
-    @submit.prevent="submit"
+    @submit.prevent="handleSubmit"
   >
     <ErrorBanner
       :message="errorMessage"
