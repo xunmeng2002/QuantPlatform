@@ -93,7 +93,9 @@ Python 策略**。
   之外、删了取不回来。改为照同族脚本的形状整体拒（空值 / `.` / `..`、符号链接、仓根与家目录及其上级、
   已存在的非目录），并**在清空前逐项核对顶层条目**：认不出的一个都不清。
 
-**判据**：后端 **765 全过**；打包脚本端到端跑通两次（含 `--zip`）；发布包按 `docs/deployment.md`
+**判据**：后端 **767 全过**（2026-10-15 复跑实测；原记 765 是「D.42 基线 748 + 新增 17 个测试函数」
+算出来的，漏了 `test_release_packaging.py:54` 那个 `parametrize` 三值展开 —— 收集数比分函数数多 2）；
+打包脚本端到端跑通两次（含 `--zip`）；发布包按 `docs/deployment.md`
 §4 走查如上。同批订正 `platform-plan.md` 三处（§5.1「Linux 无解」、§8.1 补生产形态、§12.17 的
 Vite 代理缺口销账）。**本条的未决项**：前端仍无 e2e（P4 起的老缺口，不在本批）。
 
@@ -602,10 +604,11 @@ Vite 代理缺口销账）。**本条的未决项**：前端仍无 e2e（P4 起�
     API 中间层 `.so` 逐个在册、`bin/` 与 `lib/` 不再分家（引擎 `CMakeLists.txt:61-63` 把运行库与
     共享库都落 `bin/$<CONFIG>`，`lib/` 只剩静态档）。**要不要重发 Spark / DbAdapters 已定：不用**
     （它们是动态库但无绝对 RUNPATH，理由见 D.38 —— 别记成「静态链入」）。
-  - **平台侧两处 Linux 残留**：① `engine_probe.ENGINE_RUNTIME_FILENAMES` 写死三个 `.dll`
-    —— **已收口**（D.42，`76f7a0f`）；② `strategy_store.py` 的版本占用依赖 Windows `rename`
-    语义 —— POSIX `rename(2)` 会**静默覆盖空目录**，须改成显式占位（既有 docstring 已预警）。
-    **② 是 WSL 部署前唯一还欠的一笔。**
+  - **平台侧两处 Linux 残留，两条均已收口**：① `engine_probe.ENGINE_RUNTIME_FILENAMES` 写死三个 `.dll`
+    —— **已收口**（D.42，`76f7a0f`）；② `strategy_store.py` 的版本占用依赖 Windows `rename` 语义
+    （POSIX `rename(2)` 对空目录目标是**静默替换**）—— **已收口**（D.43，`cbe5fd6`：改 `mkdir()` 占位，
+    两平台共同语义；现行口径见下方「备注」）。**WSL 部署前平台侧已无欠账。**
+    （2026-10-15 订正：② 的原文写「须改成显式占位」「唯一还欠的一笔」，是 D.43 落地当日未同步的旧口径。）
   - **Python 3.14 统一**：**已了结（2026-10-14 实测）**——两台机与引擎两侧现均 3.14（本机
     `python --version` = 3.14.7；引擎 `CMakePresets.json` 的 windows-base 与 linux-base
     两档 preset 皆 `QUANTTRADING_PYTHON_VERSION: "3.14"`）。云主机那台的 Python 要与包内
