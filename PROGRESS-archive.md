@@ -2140,6 +2140,42 @@
   **27 个名字 / 93 处**。**`strict: true` 已由 `@vue/tsconfig` 基座开启**，非缺失。
 - **已提交、未推送**：五笔都在 `master` 上，推送按既定分工由用户做。
 
+## D.42 · 2026-10-14 （第四十二批） 引擎探针的运行时库名改按平台取 + 同步上游两份发布包契约
+
+> 用户问「平台按着新引擎与 QuoteHub 的改动调整好了吗」，并定下落地路线：**先在 Windows 上验证，
+> 通过后再部署到 WSL**。本批是那条路线上平台侧欠的两笔 —— 把 D.37 之后**第二处**硬编码库名收口，
+> 以及把平台手里那份**陈旧**的引擎 Linux 发布包契约换回上游原文。
+
+- **运行时库名改按平台取**（`76f7a0f`）：`ENGINE_RUNTIME_FILENAMES` 原先写死
+  `("BackTest.dll", "Core.dll", "Network.dll")`，于是 Linux 上 `missing_runtime_filenames()` **恒返回
+  这三项**、`/api/health` 的 `ready` **恒为 false**，而发布包本身完全正常。改法：拆出
+  `ENGINE_RUNTIME_LIBRARY_NAMES = ("BackTest", "Core", "Network")`，文件名按 `sys.platform` 派生
+  （Windows `X.dll` / Linux `libX.so`）。**公开名与次序一字未动**（`health.py` 与既有用例零改动；
+  次序另由新用例钉住 —— 内容摘要对输入次序敏感）。三个 `libX.so` 在
+  `QuantTrading-1.0.0-linux-x86_64.zip` 里逐个在册，修完 WSL 上这三个旗标即转正。
+- **它是潜伏缺陷，不是拦路虎**：`/api/health` **前端一个调用点都没有**（`frontend/src` 下搜不到
+  `health`），受害面只有管理面自检与日后的运维排查，不挡回测闭环 —— 记的是**可观测面**，
+  别读成「WSL 部署前必须先修」。
+- **契约文档换回上游原文**：`docs/engine-linux-release-package.md` 与上游**逐字节相同**（平台那份
+  308 行快照的 **77 处独有行**经逐行核对，**全是上游早已改写的旧版文字**，无一是平台自己的口径）；
+  新收 `docs/engine-windows-release-package.md`（Linux 那份的 §2.3 交叉引用它）。**判据本身也变了**：
+  上游把「每个 `.so` 的 `RUNPATH` 恰为 `$ORIGIN`」放宽成「**判含不判恰为**」—— `$ORIGIN` 在首位即可，
+  绝对路径的构建机条目是**有意留下的权衡**（构建树在原地仍要能跑），不当作缺陷。
+- **发布包复验（用户重打后）**：zip **28,203,076 B**（与引擎 `9d59af6` 记的验收数相同）、22 项、
+  `engine-version.txt` 在包内且两平台同字节、`MdOffer` 的 `DT_NEEDED` 已是**裸文件名**（故换机后能起来，
+  代价是目标机须把 `libthostmduserapi_se.so` 放进发布目录，见契约 §2.3）。逐 ELF 核 `DT_NEEDED`：
+  **包内唯一缺失的就是 §2.3 那条 CTP 例外**。
+- **`acceptance-checklist.md` §14 两处跟着上游改**：走查片段不再 `from BaoStock import DB_PATH`
+  （那个符号已不在组件里），改从 `config.json` 取 `database_path`；账表那句「v2.3.0 才有的」改成
+  「较晚才进 schema 的」（组件版本号已回退成 v1.0.0，旧写法会被读成「这库该有却没有」）。
+- **验收**：后端 `pytest` **748 全过**（D.40 基线 747 + 本批 1）；新用例
+  `test_the_runtime_library_filenames_follow_this_platforms_naming`；订正后的 §14.1 片段在本机实跑
+  通过（账表在 `True`、24 张表）；无 CRLF 引入。
+- **仍欠**：WSL 部署前只剩 `strategy_store.py` 那条版本占用依赖 Windows `rename` 语义（❓ 段那条 ②）；
+  真引擎的 **Windows 侧验收**按用户路线由用户自己跑（会真联网、并往 QuoteHub 的生产库里写行，见
+  `test_real_engine_acceptance.py` 的警示）。
+
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型
