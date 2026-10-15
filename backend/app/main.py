@@ -52,7 +52,7 @@ from .strategy_configuration import MAXIMUM_CONFIGURATION_BYTES
 
 APPLICATION_TITLE = "QuantPlatform"
 APPLICATION_DESCRIPTION = "薪火量化: 包裹 QuantTrading 引擎, 运行用户上传的 Python 策略"
-APPLICATION_VERSION = "0.1.1"
+APPLICATION_VERSION = "1.0.0"
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
