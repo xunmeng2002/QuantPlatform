@@ -29,6 +29,8 @@ from app.services.market_data_coverage import (
     request_exceeds_calendar,
 )
 
+from .quote_hub_stub import TEST_BUSY_TIMEOUT_MILLISECONDS, hold_database_write_lock
+
 
 #: 账与 bar 都在, 且完全覆盖 —— 判"够".
 INGESTED_CONTRACT = "sh.600519"
@@ -583,3 +585,40 @@ def test_a_drifted_ledger_table_reports_unavailable(tmp_path: Path) -> None:
             CALENDAR_START_DAY,
             CALENDAR_LAST_TRADING_DAY,
         )
+
+
+def test_a_file_that_is_not_a_database_reports_unavailable(tmp_path: Path) -> None:
+    """库文件在、但不是一个 SQLite 库 (拷到一半 / 被别的程序覆盖过) 也归"读不了", 不是 500.
+
+    与上一族的区别只在**给用户的话**, 而这一档连话都说不上就走不到: `sqlite3.DatabaseError` 原样
+    冒出去在路由层就是 500, 在准备阶段就变成"调度器内部异常"—— 两处都把"组件那一侧的文件坏了"
+    说成了"平台自己有 bug".
+    """
+
+    (tmp_path / quote_hub.QUOTE_HUB_DATABASE_FILENAME).write_bytes(
+        b"not a sqlite database, just some bytes\n"
+    )
+
+    with pytest.raises(quote_hub.QuoteHubUnavailableError) as raised:
+        quote_hub.read_ingested_codes(tmp_path)
+
+    assert not isinstance(raised.value, quote_hub.QuoteHubBusyError)
+
+
+def test_a_database_held_by_a_writer_reports_busy(quote_hub_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """写者占着库时读不了 —— 报的是"正忙"那一档, 不是"组件不在位".
+
+    两档给用户的话不同: 不在位要人去查部署路径, 正忙只是重试一次. 归错档会把人送上一条查不出
+    东西的路, 故这里钉的是**类型**. 同时也是那条必须成立的前提: 它是
+    `QuoteHubUnavailableError` 的子类, 认不出它的调用方按"不可用"处理也不算错.
+    """
+
+    monkeypatch.setattr(
+        quote_hub, "SQLITE_BUSY_TIMEOUT_MILLISECONDS", TEST_BUSY_TIMEOUT_MILLISECONDS
+    )
+
+    with hold_database_write_lock(quote_hub_root):
+        with pytest.raises(quote_hub.QuoteHubBusyError) as raised:
+            quote_hub.read_ingested_codes(quote_hub_root)
+
+    assert isinstance(raised.value, quote_hub.QuoteHubUnavailableError)

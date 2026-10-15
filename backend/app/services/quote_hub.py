@@ -16,6 +16,7 @@
 """
 
 import asyncio
+import logging
 import sqlite3
 import sys
 from collections import deque
@@ -27,7 +28,11 @@ from pathlib import Path
 from ..config import (
     QUOTE_HUB_CLI_FILENAME,
     QUOTE_HUB_DATABASE_FILENAME,
+    SQLITE_BUSY_TIMEOUT_MILLISECONDS,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 # 组件的表名与列名. 集中在此是为了让"组件改了 schema"这件事只需要改一个地方, 且由下面的
@@ -119,6 +124,30 @@ class QuoteHubUnavailableError(Exception):
     """组件或其数据不在位. 文案必须是固定中文字符串, 且不带路径 (同 `UnrunnableJob` 的纪律)."""
 
 
+class QuoteHubBusyError(QuoteHubUnavailableError):
+    """组件在位, 但它的库正被写者独占, 忙等满了也没轮上读.
+
+    **是子类**: 调用方那几处 `except QuoteHubUnavailableError` 已经把"读不了组件"译成一句给用户的
+    话与一个不阻断的出口, 这一档不该另开一条路走. 但两者要给不同的话 —— 不在位要人去查路径, 正忙
+    只是重试一次的事 —— 故另立一个类, 认得出的调用方分开放行, 认不出的按"不可用"处理也不算错.
+    """
+
+
+def _is_database_contention(error: sqlite3.Error) -> bool:
+    """这条 `sqlite3` 报错是不是"锁争用". 按错误码判, 不按文案 —— 文案随 SQLite 版本与语言变.
+
+    比的是**主码** (`code & 0xFF`): sqlite3 也会回扩展码 (如 `SQLITE_BUSY_SNAPSHOT` = 517、
+    `SQLITE_CANTOPEN_ISDIR` = 526), 拿扩展码跟主码比大小会把它们判成另一个分支.
+    """
+
+    error_code = getattr(error, "sqlite_errorcode", None)
+
+    if error_code is None:
+        return False
+
+    return (error_code & 0xFF) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+
+
 def _read_table_columns(connection: sqlite3.Connection, table_name: str) -> set[str]:
     """表存在时回它的列名集合; 表不在回空集."""
 
@@ -153,6 +182,25 @@ def open_quote_hub_database_readonly(quote_hub_root: Path) -> Iterator[sqlite3.C
 
     收目录而不是收连接: sqlite3 的连接不能跨线程用, 调用方要把它整个丢进 `asyncio.to_thread`,
     于是"开连接 → 查询 → 关连接"必须在同一个 worker 里完成.
+
+    **两件事合起来才挡得住"下载进行中读库"**: 一是忙等 (`PRAGMA busy_timeout`) —— 组件的写者提交
+    事务时独占全库, 而 SQLite 默认的日志模式下写锁挡住读者, 不等就是把一次正常的提交撞成报错;
+    二是等满之后的**归类** —— 剩下的那种争用翻成 `QuoteHubBusyError`, 否则它会以
+    `sqlite3.OperationalError` 冒到路由层变成一个 500, 而实情只是"这会儿正忙".
+
+    **其余 `sqlite3.Error` 一律归成"组件读不了"**: 文件在、却不是一个库 (`SQLITE_NOTADB`), 或读不动
+    (`SQLITE_CANTOPEN`) —— 都是组件那一侧的事, 与平台逻辑对不对无关, 而放它原样冒出去就是给用户一个
+    500. 故这里按"是谁的问题"收口, 而不是按"是哪个异常类": 争用另立一档是为了给不同的话, 不是留一条
+    能逃出去的路.
+
+    **例外是平台自己用错** (`ProgrammingError` —— SQL 或绑定参数写错; `InterfaceError` —— 连接用错):
+    那说明**我们**的代码有问题, 原样冒出去. 把它们说成"组件不在位"等于替平台 bug 打掩护, 而这层没有
+    资格替用户下这个判断. 根因也不丢: 收口之前先按原异常记一条带栈的日志, 给用户的那句话仍然脱敏.
+
+    `mode=ro` 只保证平台**不写**; 读者仍要拿共享锁, 故仍会被写者挡住 —— 两件事互不替代.
+
+    忙等取值刻意**显式**给: `sqlite3.connect` 的 `timeout` 默认恰好也是 5 秒, 靠默认值写成的代码
+    在别人换掉连接参数的那一刻就会静默失效, 而症状是"偶尔 500"。
     """
 
     database_file = quote_hub_root / QUOTE_HUB_DATABASE_FILENAME
@@ -160,14 +208,30 @@ def open_quote_hub_database_readonly(quote_hub_root: Path) -> Iterator[sqlite3.C
     if not database_file.is_file():
         raise QuoteHubUnavailableError("行情组件的数据库不在位")
 
-    connection = sqlite3.connect(f"{database_file.as_uri()}?mode=ro", uri=True)
-    connection.row_factory = sqlite3.Row
+    connection: sqlite3.Connection | None = None
 
     try:
+        # 开库也在 `try` 里: `mode=ro` 下它是**当场读文件**的, 真开不了就在这一句抛错 —— 放到 `try`
+        # 外面的话, "打不开"这一档会绕开下面的收口, 又在路由层变成一个 500.
+        connection = sqlite3.connect(f"{database_file.as_uri()}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+
+        connection.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MILLISECONDS}")
+
         _assert_expected_schema(connection)
         yield connection
+    except (sqlite3.ProgrammingError, sqlite3.InterfaceError):
+        raise
+    except sqlite3.Error as error:
+        if _is_database_contention(error):
+            raise QuoteHubBusyError("行情组件的数据库正被写入, 忙等超时") from error
+
+        logger.error("读取行情组件的数据库失败: %s", error, exc_info=error)
+
+        raise QuoteHubUnavailableError("行情组件的数据库读不了") from error
     finally:
-        connection.close()
+        if connection is not None:
+            connection.close()
 
 
 @dataclass(frozen=True)

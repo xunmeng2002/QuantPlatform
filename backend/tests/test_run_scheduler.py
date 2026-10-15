@@ -48,6 +48,7 @@ from .helpers import (
     DEFAULT_COMMISSION_GROUP_ID,
     SignedInAccount,
     create_signed_in_account,
+    read_seed_csv_rows,
     read_seed_database_rows,
     soft_delete_strategy_record,
 )
@@ -60,7 +61,6 @@ from .quote_hub_stub import (
 from .run_helpers import (
     ARGV0_FILENAME,
     DEFAULT_BAR_PERIOD,
-    DEFAULT_COMMISSION_GROUP_NAME,
     DEFAULT_END_TRADING_DAY,
     DEFAULT_EXCHANGE_ID,
     DEFAULT_INITIAL_CAPITAL,
@@ -131,6 +131,15 @@ GBK_ERROR_MESSAGE = "引擎报告: 行情数据缺失"
 # 第二个手续费组: 用来验"交到作业目录的那份种子库是按**这一轮冻结的那个组**生成的".
 SECOND_COMMISSION_GROUP_ID = 2
 REPORTED_FAILURE_ERROR_ID = 4242
+
+# 库里的费率组本该长什么样, 取自随包发布的那份 CSV. 在用例里另抄一份的话, 改了播种数据的提交只会
+# 让用例以"名字对不上"红掉, 而看不到正是这份文件与用例分家了.
+SEEDED_COMMISSION_GROUP_ROWS = [
+    (int(commission_group_id), commission_group_name)
+    for commission_group_id, commission_group_name in read_seed_csv_rows(
+        "CommissionGroups.csv"
+    )
+]
 
 # 桩那份模板里的全部键 (即它的五个参数旋钮). 用例把它与盘上的键集合对起来, 于是"渲染结果恰好
 # 等于 {模板的键} ∪ {平台那三个}"成了可验的性质.
@@ -230,9 +239,10 @@ async def test_the_job_directory_holds_a_seed_database_for_this_contract_only(cl
 
     assert seed_database_path.is_file()
 
-    assert read_seed_database_rows(seed_database_path, "CommissionGroups") == [
-        (DEFAULT_COMMISSION_GROUP_ID, DEFAULT_COMMISSION_GROUP_NAME)
-    ]
+    assert (
+        read_seed_database_rows(seed_database_path, "CommissionGroups")
+        == SEEDED_COMMISSION_GROUP_ROWS
+    )
 
     assert read_seed_database_rows(seed_database_path, "BaseCommissions") == [
         (

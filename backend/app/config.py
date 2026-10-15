@@ -22,6 +22,12 @@ PLATFORM_ROOT = BACKEND_ROOT.parent
 # 不一致", 而那种不一致没有任何东西能看出来.
 REFERENCE_SEED_CSV_DIRECTORY = BACKEND_ROOT / "reference_seed"
 
+# 两处 SQLite 读数共用的忙等上限: 平台自己的 catalog 库, 以及行情组件那个库的**只读**连接. 后者的
+# 写者是组件自己那条下载子进程, 它提交时独占全库, 而 SQLite 的默认日志模式下写锁会挡住读者 ——
+# 不等就是把一次正常的提交撞成 `database is locked` 报给用户. 值为 0 则关上忙等, 退回"立即失败".
+# 放在这里而不是某一侧的模块里, 是因为这是同一条策略, 两侧取值必须一致.
+SQLITE_BUSY_TIMEOUT_MILLISECONDS = 5000
+
 DEFAULT_MAX_CONCURRENT_RUNS = 1
 DEFAULT_RUN_TIMEOUT_SECONDS = 1800
 DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES = 1440
@@ -35,6 +41,14 @@ JWT_SECRET_KEY_BYTES = 48
 # 运行行, 且不可逆. 默认开启意味着升级后的第一次启动就批量删历史——用户没提过这个要求.
 DEFAULT_RUN_RETENTION_ENABLED = False
 DEFAULT_RETAINED_RUNS_PER_USER = 50
+
+# 非管理员能否自行上传策略. 默认放行——带自己的策略来正是本平台的常规用法.
+# 关上是为了**对外托管**那一类部署 (演示机、开放给不可信用户的机器): 上传会落成一份任意 Python,
+# 而平台在回测时直接执行它, 本期只有目录级隔离, 挡不住恶意读盘. 于是"陌生人此后写不进代码"是
+# 这类机器上唯一不需要额外隔离机制就能成立的口径 (存量策略不受影响, 仍在库里照跑).
+# 管理员不受这道闸限制: 关掉它的机器恰恰要靠管理员把策略配发进去 (建新策略; 给别人的既有
+# 策略传新版本仍受归属人约束).
+DEFAULT_STRATEGY_UPLOAD_ALLOWED = True
 
 # 布尔取值按常见的几套写法都收, 但**只收这几套**: 其余一律报错. `true`/`false` 之外还认 1/0,
 # 是因为环境文件里手写 `=1` 比 `=true` 常见.
@@ -297,6 +311,7 @@ class PlatformSettings:
     maximum_output_tail_bytes: int = DEFAULT_MAXIMUM_OUTPUT_TAIL_BYTES
     run_retention_enabled: bool = DEFAULT_RUN_RETENTION_ENABLED
     retained_runs_per_user: int = DEFAULT_RETAINED_RUNS_PER_USER
+    strategy_upload_allowed: bool = DEFAULT_STRATEGY_UPLOAD_ALLOWED
     quote_hub_root: Path = DEFAULT_QUOTE_HUB_ROOT
     market_data_prepare_timeout_seconds: int = DEFAULT_MARKET_DATA_PREPARE_TIMEOUT_SECONDS
     login_throttle_maximum_failures: int = DEFAULT_LOGIN_THROTTLE_MAXIMUM_FAILURES
@@ -435,6 +450,9 @@ class PlatformSettings:
                 entry.strip()
                 for entry in os.getenv("QUANT_TRUSTED_PROXY_ADDRESSES", "").split(",")
                 if entry.strip()
+            ),
+            strategy_upload_allowed=read_boolean_environment(
+                "QUANT_STRATEGY_UPLOAD_ALLOWED", DEFAULT_STRATEGY_UPLOAD_ALLOWED
             ),
         )
 

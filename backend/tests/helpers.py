@@ -4,6 +4,7 @@
 归属校验生效, 还是因为调用者本来就不是管理员.
 """
 
+import csv
 import sqlite3
 from collections.abc import Callable
 from contextlib import closing
@@ -50,6 +51,19 @@ DEFAULT_COMMISSION_GROUP_ID = 1
 BASELINE_TRADE_COUNT = 84
 BASELINE_ORDER_COUNT = 654
 BASELINE_BALANCE = 998951.4506464996
+
+SEED_CSV_DIRECTORY = Path(__file__).resolve().parents[1] / "reference_seed"
+
+
+def read_seed_csv_rows(csv_filename: str) -> list[list[str]]:
+    """读随包发布的某份初始化 CSV 的数据行 (不含表头).
+
+    用例凡要断言"库的初始内容", 就该以那份文件为准: 在用例里另抄一份, 改了数据的提交只会让用例以
+    "数字对不上"红掉, 而看不到正是这份文件与用例分家了.
+    """
+
+    with (SEED_CSV_DIRECTORY / csv_filename).open(encoding="utf-8-sig", newline="") as csv_file:
+        return list(csv.reader(csv_file))[1:]
 
 
 @dataclass(frozen=True)

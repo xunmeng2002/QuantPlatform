@@ -38,7 +38,7 @@
 D:\QuantPlatform\                              ← 部署根（解压平台包即得这一层）
 ├── backend\
 │   ├── app\                                   包内：后端源码
-│   ├── reference_seed\                        包内：三份初始化费率 CSV（代码资产，首次播种用）
+│   ├── reference_seed\                        包内：三份初始化 CSV（A 股品种码 + 默认费率，首次播种用）
 │   ├── requirements.txt  pyproject.toml  .env.example
 │   ├── .env                                   部署时写（不在包里）
 │   └── data\catalog.db  data\jwt_secret.key   首次启动自建（不在包里）
@@ -120,7 +120,7 @@ QUANT_QUOTE_HUB_ROOT=/opt/quant-platform/QuoteHub
 QUANT_INITIAL_ADMIN_PASSWORD=换成你自己的口令
 ```
 
-两条容易踩的：
+三条容易踩的：
 
 - **默认值指向部署根的上一级**。`QUANT_ENGINE_ROOT` 默认是 `<部署根>/../QuantTrading/bin/Release`，
   `QUANT_QUOTE_HUB_ROOT` 默认是 `<部署根>/../QuoteHub`。开发机的仓是同级的，部署根里它是子目录，
@@ -130,6 +130,10 @@ QUANT_INITIAL_ADMIN_PASSWORD=换成你自己的口令
   **挡不住恶意读盘**。只对可信网络开放；开放给不可信用户之前，系统级隔离是前置门槛。
   真有反向代理在前面，还要把 `QUANT_TRUSTED_PROXY_ADDRESSES` 配对，否则全部用户挤进同一个
   登录节流桶，任意 5 次失败就能把所有人一起锁住。
+- **交给不可信的人用（演示、对外托管），把 `QUANT_STRATEGY_UPLOAD_ALLOWED` 设成 `false`**。
+  它只放行管理员上传，此后新入库的策略便全部出自你手（**存量不受影响**）——这是系统级隔离
+  到位之前，唯一能把 §5.2 那条风险关掉的做法。它管不着**运行**那一侧：库里已有的策略仍以
+  平台身份执行，故不是系统级隔离的替代品。默认是 `true`（常规用法就是用户带策略来）。
 
 ## 6. 判据
 
@@ -162,6 +166,13 @@ curl -s http://127.0.0.1:8000/api/health -H 'Authorization: Bearer <令牌>'
 - 打开首页是**登录页**而不是一串 JSON；随便点两条路由再按 F5，不出现 404
   （前端是 history 模式，靠后端那一条 `index.html` 回退接住深链接）。
 - 提交一轮回测跑到 `succeeded`。这一条同时证了引擎、行情数据与行情组件三者在位。
+- 登管理员进「基础数据」页：品种表里已有 13 个 A 股品种码（沪深主板 / 科创板 / 创业板），费率
+  明细里有 1 号组「A股默认费率」的 SSE / SZSE 两行（交易所级、双向：佣金 0.01%、平仓印花税
+  0.05%、过户费 0.001%、佣金下限 5 元）。**全新安装不必手工录任何费率**——随包的三份 CSV 在首次
+  启动时播种一次，此后要改就在这一页改，下一轮即生效。
+  这三项按 2026 年的现行标准给：印花税 0.05% 卖出单边，过户费 0.001% 买卖双向（沪深已统一），
+  佣金那一列按**全佣**填（含经手费与证管费），最低 5 元是监管硬性规定。佣金是三项里唯一可协商的
+  ——0.01%(万1) 是优惠账户的常见档，你的券商不是这个数就在这一页改。
 - 平台自身的功能验收走 `docs/acceptance-checklist.md`。
 
 > **提示**：本节与 §4 的步骤在 2026-10-14 用 `QuantPlatform-0.1.0-2026-10-14.zip` 原样走过一遍
@@ -215,8 +226,10 @@ curl -s http://127.0.0.1:8000/api/health -H 'Authorization: Bearer <令牌>'
 | 启动即 `RuntimeError`（初始管理员口令） | 空库且没给 `QUANT_INITIAL_ADMIN_PASSWORD` |
 | 提交回测 400「行情数据根目录不存在」 | `market-data/` 没建（§4 第 3 步；它不会自建） |
 | 提交页的**合约下拉框是空的** | 没跑 §4 的 5b：`Securities` 是空的。平台自己那条下载命令填不上它 |
+| 重启后**费率明细仍是空的** | 库里的组号不含 `1`（费率种子指着 1 号组），播种跳过该表并在启动日志留一行 WARNING。按库里实际有的组号手工补录，或在「基础数据」页把费率建到那个组下 |
 | 提交回测 400「会话表文件不存在」 | 引擎包没解压全：`Sessions.json` 是它包里的件 |
 | 每一轮都失败，提示行情组件不在位 | `QUANT_QUOTE_HUB_ROOT` 指错，或组件的库没建（§4 第 5 步） |
+| 上传策略返回 403「本部署不接受用户上传策略」 | 这台部署把 `QUANT_STRATEGY_UPLOAD_ALLOWED` 设成了 false，且当前账号不是管理员（§5 第三条）。要传就用管理员，或把那项改回 true |
 | 下载行情那一步 `ModuleNotFoundError: baostock` | venv 里没装组件依赖（没照 `requirements.deploy.txt` 装） |
 | `/api/health` 的 `ready` 为假 | 逐项对着 §6 那张表看：引擎路径 / 运行时库 / `Sessions.json` / `market-data` |
 | 别的机器打不开 | `QUANT_HTTP_HOST` 还是 `127.0.0.1`（改之前先读 §5 的第二条） |

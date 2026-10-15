@@ -2027,6 +2027,47 @@
   （删掉，或把 `.gitignore` 的 `backend/_acc_tmp/` 放宽成 `backend/_acc_tmp*/`）。
 - **提交状态**：**已提交**（`4ed9dec`）。
 
+## D.39 · 2026-10-14 （第三十九批） 同步上游两处契约：引擎表名一律复数 + QuoteHub 入口改名与建库前置
+
+- **触发**：用户「QuantTrading 做了较大的调整、尤其是数据库表名的变化，配置变化。另外就是
+  QuoteHub 这边应该也有调整。你先大致看一下，先从哪开始」。
+- **上游事实（实测，不采信记载）**：引擎 2026-10-13 起把 **21 张表名一律加 s**，准据是
+  `QuantTrading/src/Mdb/MdbStructs.cpp` 的 `GetSchema()` 里 `TableSchema::tableName`；
+  `BackTestInitDbTableList.h` / `BackTestTableList.h` 写的是 C++ 结构体名（**一直是单数**），
+  **不是表名的准据**。本机 `bin/Release/BackTest.dll` 于 2026-10-14 11:19 重编（在那次改名之后），
+  引擎根下的 `BackTestInit.db` 里已是复数表名。
+- **为什么种子库那三张是静默故障**：名字写错**不报错**——引擎查不到
+  `Products` / `CommissionGroups` / `BaseCommissions`，照跑完整轮并把 `Success` 报成 true，只是
+  费率按 0 计、合约乘数全部退化；唯一的线索是 `result.json` 的 `CommissionMissingCount`。结果库那
+  五张是**响的**（名字错即五个明细页签全 404），故两者危害不同级。
+- **落点（种子库）**：`reference_data/seed_contract.py` 三张表名改复数（并在 docstring 写明"表名与
+  C++ 结构体名逐字不同"）、`seed_database.py` 的 `SEED_TABLE_MODELS` 键与四处字面查找、
+  `reference_seed/*.csv` 三份 `git mv` 改名（文件名即表名，`initial_rows.py` 按 `table.table_name`
+  拼路径，不改名就找不到）。
+- **落点（结果库）**：`services/result_database.py` 的 `RESULT_TABLE_NAMES` 改复数，前端
+  `api/types.ts` 的镜像同步。「表名一律加双引号」那条理由原是"`Order` 是 SQLite 保留字"，
+  改名后不再成立，改成不受名字变化影响的统一引用（引号照加）。
+- **落点（QuoteHub）**：入口文件名 `BaoStockParquet.py` → `bao_stock_parquet.py`（只 `config.py`
+  一处常量；桩脚本按它派生名字，故一处生效）。**新增一类失败**——组件 v1.0.0 起**不建表、不迁移**，
+  库未建好或版本戳不符时退非零并指向 `init_database.py`（发生在联网登录**之前**），平台原本把它
+  混进"行情下载失败"，现单列 `MARKET_DATA_SCHEMA_NOT_INITIALIZED_MESSAGE`。
+- **新增两条"钉住上游"的断言**：本仓其余同类断言都是**自指**的（契约 ↔ 生成物 ↔ ORM 模型三处同源），
+  把契约改回单数照样全绿。故 `test_seed_contract.py::test_the_contract_pins_the_engine_table_names`
+  与 `test_run_results.py::test_the_whitelist_pins_the_engine_table_names` 把表名抄成**字面量**、
+  **故意与契约不同源**。
+- **文档同步**：`acceptance-checklist.md`（§14/§16 的表名、"引擎侧是单数表名"那句改为复数并点名
+  漂移对照的准据、`BaoStockParquet.py`、组件的建库前置）、`platform-plan.md`、`job-workspace.md`、
+  `.env.example`、以及本文件。**带日期的历史实测行有意保留原名**——那时确实是单数，改写会篡改实测
+  记录。
+- **验收**：后端 `pytest` **747 项全过**；真引擎验收 `pytest -m real_engine` **5 项全过**，且逐份看
+  作业目录里的 `result.json`：`BasicDataLoaded=true`、`CommissionMissingCount=0`、
+  `CommissionZeroRateKeyCount=0`、`VolumeMultipleFallbackProductCount=0`——**这一条才证明种子库
+  真被引擎装载**（`Success=true` 单独不够，它同时对错误的表名成立）。前端 `type-check` 干净 +
+  `vitest` **238 项全绿**。
+- **仍未决 —— 待用户手工验收**：`acceptance-checklist.md` §16.3 那三条 `sqlite3` 判据（现已改成复数
+  表名）与 §14 的组件建库前置走查。
+- **提交状态**：**已提交**（本批与上述文档同步同一棵树入库）。
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型
@@ -2293,3 +2334,47 @@
 - **验收**：Windows 上 `test_engine_probe` + `test_health` **31 全过**，后端全量 **744 全过**；
   WSL 里用真 Python 3.14.4 单独加载本模块跑真引擎目录，binding 命中。
 - **提交状态**：**已提交**（`17012ca`）。
+
+### D.38 · 2026-10-09 （第三十八批） 引擎 Linux 包改用 `RUNPATH: $ORIGIN`：家规进 `CMakeCommon` + 《引擎 Linux 发布包要求》
+
+> 归档于 2026-10-15（D.44 滚动：`✅` 区只留最近 5 批全文，D.38 是滚出的那一批）。
+> 下列原文取自 `git HEAD`，一字未改。
+
+- **触发**：用户问「离正式发布和上云还差什么」，一路追到「云主机是 Linux，Windows 做服务不太行」
+  → 审 `.pyd` 硬编码（见 D.37）→ 追问引擎 `.so` 里那把 RUNPATH 怎么办 → 最后问到点子上：
+  「既然是 `$ORIGIN` 方案，不是应该这些项目都改成这种吗……从整体来说，还是要统一的吧？」
+- **实测（WSL，`QuantTrading.cpython-312-x86_64-linux-gnu.so`）**：Linux 产物落在
+  `bin/$<CONFIG>`（扩展模块）与 `lib/$<CONFIG>`（7 个 `.so` + 15 个 `.a`）两处
+  （`QuantTrading/CMakeLists.txt:59-61`）。引擎那个 `lib/$<CONFIG>` 里**只有引擎自己的
+  7 个 `.so`**，Spark / DbAdapters 的库不在其中。各 `.so` 现有的 RUNPATH 是 **CMake 默认的
+  build RPATH**，即**构建机绝对路径**（`/home/xunmeng/.vs/...`），换机即废。四家仓
+  （QuantTrading / Spark / DbAdapters / CMakeCommon）**此前没有任何 RPATH 策略**——源码侧
+  一处都没有，`grep` 命中全来自生成的 `CMakeCache.txt` 默认值。
+- **改动①（引擎同族仓）**：`../CMakeCommon/CMakeCommon.cmake` 顶部加家规
+  `set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)`（需 CMake ≥ 3.14，三家现状 3.20 / 3.25）。三家产品仓
+  都在各自 `CMakeLists.txt` **第 2 行** include 它，故此开关对**全部 target** 一体生效——
+  这正是「统一」的落点：**一处改，三家下次构建全带**。**不需要重新打 tag**：`RUNPATH` 是
+  链接期写进 ELF 的字段，随各自**下一次构建**生效（是重链接而非重编译，`.o` 复用）。
+- **改动②（引擎仓）**：新增 `../QuantTrading/docs/engine-linux-release-package.md`
+  《引擎 Linux 发布包要求》——平台对上游引擎包的**验收契约**：扁平单目录 + 12 个文件、
+  **每个 `.so` 必自带 `RUNPATH: $ORIGIN`**（`RUNPATH` 不传递，故必须逐个设）、`bin/`+`lib/`
+  合一的一行改法、`engine-version.txt` 在 Linux 侧缺失的排查、以及「`ldd ./*.so` + 已知
+  dlopen 名单」的四条自检。
+- **三条硬结论**（**2026-10-09 当场订正过**：初稿据 `NEEDED` 表**误推**「Spark / DbAdapters
+  静态链入」，用户指出「我编的都是动态库」后重测，那条被推翻——记此以防复犯）：
+  ① **Spark / DbAdapters 是动态库，且正是引擎的运行时闭包**——`libBackTest.so` 直接
+  `NEEDED` 了 `libAsyncDbWriter` / `libDuckdbWrapper` / `libSerialization` / `libNetwork` /
+  `libCore` 五个；引擎 `lib/Release` 里**根本没有**这些 `.so`，它们靠**绝对 `RUNPATH`** 指到
+  `~/.vs/Libs/{Spark,DbAdapters}/x64-linux/lib` 加载。**带绝对 RUNPATH 的全是引擎自己的产物**
+  （扩展模块 + 7 个 `.so`），故本次 Release 只需重建引擎。
+  ② **「无需重打 tag」仍成立，但理由不同**：Spark / DbAdapters 的 ship 库要么**无**
+  `RUNPATH`，要么已自带正确的 `$ORIGIN`（`libDuckdbWrapper.so` 找 `libduckdb.so`）；其唯一的
+  非系统依赖 `libCore.so` 又恰好是**扩展模块的直接 `NEEDED`**、必先映射。这是**加载顺序的
+  巧合**，统一 `$ORIGIN` 后即消除。
+  ③ **`libSqliteWrapper.so` 与 6 个 API 中间层 `.so` 是 dyld 盲区**——按名 `dlopen`，
+  `ldd` **看不见**；清单须「`ldd` 结果 + 手工补的 dlopen 名单」两者合并。
+- **提交状态**：本批 3 个文件（`../CMakeCommon/CMakeCommon.cmake` +
+  `../QuantTrading/docs/engine-linux-release-package.md` + 本文件）。**未提交**（按惯例由用户执行）。
+  **2026-10-09 追记**：文档初稿误放在本仓 `docs/`（未提交），用户指出「我以为是放到
+  QuantTrading 里面去呢」后**迁到引擎仓**——`QuantTrading/docs/` 里已有
+  `backtest-run-contract.md`，跨仓契约本就住那儿。

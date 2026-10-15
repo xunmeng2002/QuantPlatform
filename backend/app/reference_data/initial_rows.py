@@ -5,9 +5,8 @@
 它, 是因为一个全空的 `Products` 表会让每一轮回测都缺品种乘数, 而平台自己无从知道 A 股的
 交易所与三位代码是什么.
 
-故**空表视作未初始化**. 想让某张表一直空着 (例如费率表, 建库时有意留空等人工录入), 就把那份
-CSV 只留表头 —— 这是刻意的空起点, 不是漏配. 反过来, 把一张表删空并重启, 会被 CSV 重新填回;
-要彻底空掉它, 得同时改这份 CSV.
+故**空表视作未初始化**. 想让某张表一直空着, 就把那份 CSV 只留表头 —— 这是刻意的空起点, 不是
+漏配. 反过来, 把一张表删空并重启, 会被 CSV 重新填回; 要彻底空掉它, 得同时改这份 CSV.
 
 CSV 的读取规则逐条对齐 `QuantTrading/makeseeddb.py`: `utf-8-sig` (容忍 BOM)、表头必须逐字
 等于引擎列序 (否则报错而不是静默错位)、空行跳过、数值空单元按 0、字符列原样.
@@ -19,8 +18,10 @@ import logging
 from pathlib import Path
 
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..catalog.database import PlatformDatabase
+from ..catalog.models import Base
 from ..config import REFERENCE_SEED_CSV_DIRECTORY
 from ..ids import generate_identifier
 from .seed_contract import SEED_TABLES, SeedColumn, SeedTable
@@ -82,15 +83,68 @@ def read_initial_rows(csv_path: Path, table: SeedTable) -> list[tuple[object, ..
         ]
 
 
+async def _read_missing_references(
+    session: AsyncSession, table: SeedTable, model: type[Base], attribute_names: tuple[str, ...],
+    rows: list[tuple[object, ...]]
+) -> list[tuple[str, str]]:
+    """这些行里, 有没有指向别的表、而那一行并不存在的外键值; 回 (被指向的表名, "列=值") 的列表.
+
+    初始化 CSV 里只有一处这样的引用 (费率明细的组号指向 `CommissionGroups`), 但它足够典型: 那张表
+    非空就整个不播, 于是库里的组可能压根不含 CSV 引的那个号. 真到插入那一刻才撞外键的话, 整个播种
+    事务连别的表一起回滚, 而用户只看见日志里一行 ERROR —— 下次重启重来一遍, 永远如此. 故先问一句.
+
+    走 SQLAlchemy 的外键元数据而不是写死表名: 这一处引用是模型自己声明的, 再写一份就多一处会漂移的
+    真相. 列名那两侧各取各的 —— 报给用户的话语是引擎那套列名 (`CommissionGroupId`), 与同一句里的
+    表名同源.
+    """
+
+    missing_references = []
+
+    for foreign_key in model.__table__.foreign_keys:
+        local_attribute_name = model.__mapper__.get_property_by_column(foreign_key.parent).key
+        local_column_name = table.column_names()[attribute_names.index(local_attribute_name)]
+
+        referenced_values = {
+            row[attribute_names.index(local_attribute_name)] for row in rows
+        }
+
+        if not referenced_values:
+            continue
+
+        existing_values = set(
+            (
+                await session.execute(
+                    select(foreign_key.column).where(
+                        foreign_key.column.in_(referenced_values)
+                    )
+                )
+            ).scalars()
+        )
+
+        missing_references.extend(
+            (foreign_key.column.table.name, f"{local_column_name}={value}")
+            for value in sorted(referenced_values - existing_values)
+        )
+
+    return missing_references
+
+
 async def ensure_initial_reference_data(database: PlatformDatabase) -> None:
     """逐表检查, **该表为空**才播种. 幂等: 非空的表一概不动.
 
     一次启动只提交一次: 三张表在同一事务里落库, 中途出错就一张都不留 —— 半播的库更难解释
     (哪几行是初始化带的、哪几行是人工录的, 事后分不出来).
+
+    **一处例外**: 这份 CSV 指向库里的行, 而那一行不存在时 (费率明细的组号 → 库里管理员自建的组),
+    只跳过这张表并报警, 不连累别的表 —— 那是**这一张表**与库里已有数据不合, 而别的表并没有错.
+
+    **但"引用的行"若来自本次刚播下去的那张表**, 就回到上面那条整体回滚: 那意味着随包的那几份 CSV
+    自相矛盾 (费率引了组 5, 而组表只定义到组 1), 属"这份包有问题", 与表头不对同一类 —— 只是跳过的话,
+    一张静默空着的费率表会让每一轮都按零费用算钱.
     """
 
     async with database.session_scope() as session:
-        seeded_table_names = []
+        seeded_row_counts: dict[str, int] = {}
 
         for table in SEED_TABLES:
             model = SEED_TABLE_MODELS[table.table_name]
@@ -110,6 +164,31 @@ async def ensure_initial_reference_data(database: PlatformDatabase) -> None:
 
             attribute_names = engine_attribute_names(table, model)
 
+            missing_references = await _read_missing_references(
+                session, table, model, attribute_names, rows
+            )
+
+            if missing_references:
+                if any(
+                    referenced_table_name in seeded_row_counts
+                    for referenced_table_name, _ in missing_references
+                ):
+                    raise ValueError(
+                        f"{table.table_name}.csv 引用了本次播种没有的键: "
+                        + ", ".join(
+                            f"{referenced_table_name} 的 {reference}"
+                            for referenced_table_name, reference in missing_references
+                        )
+                    )
+
+                logger.warning(
+                    "初始化 CSV 的 %s 指向库里没有的行 (%s), 这张表保持原样",
+                    table.table_name,
+                    ", ".join(reference for _, reference in missing_references),
+                )
+
+                continue
+
             for row in rows:
                 session.add(
                     model(
@@ -120,15 +199,21 @@ async def ensure_initial_reference_data(database: PlatformDatabase) -> None:
 
             # 逐表冲一次盘. 费率明细对组有外键, 而本仓不用 `relationship()`, 于是 SQLAlchemy
             # 排不出这两张表的插入次序 (它按映射名排, `BaseCommissions` 恰好排在
-            # `CommissionGroups` 前面). 冲一次就把"组已落库"这件事钉在"明细开始插入"之前;
-            # 当前两份 CSV 都只有表头, 这一行暂时无事可做, 但等谁往里填了数据再发现就晚了.
+            # `CommissionGroups` 前面). 冲一次就把"组已落库"这件事钉在"明细开始插入"之前 ——
+            # 费率那两份 CSV 都带数据, 这一步是必须的, 不是留白.
             await session.flush()
 
-            seeded_table_names.append(f"{table.table_name}({len(rows)} 行)")
+            seeded_row_counts[table.table_name] = len(rows)
 
-        if not seeded_table_names:
+        if not seeded_row_counts:
             return
 
         await session.commit()
 
-        logger.info("基础数据已按初始化 CSV 播种: %s", ", ".join(seeded_table_names))
+        logger.info(
+            "基础数据已按初始化 CSV 播种: %s",
+            ", ".join(
+                f"{table_name}({row_count} 行)"
+                for table_name, row_count in seeded_row_counts.items()
+            ),
+        )

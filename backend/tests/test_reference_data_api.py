@@ -44,6 +44,7 @@ from .helpers import (
     create_signed_in_account,
     fetch_page,
     login,
+    read_seed_csv_rows,
     record_ids,
 )
 
@@ -56,17 +57,28 @@ BASE_COMMISSIONS_PATH = f"{REFERENCE_DATA_PATH}/base-commissions"
 
 MEMBER_USERNAME = "reference-data-member"
 
-# 初始化 CSV 播种进来的 A 股两行 (见 `backend/reference_seed/Products.csv`), 加上用例自己建的
-# 品种, 列表的期望次序就是它们按 (交易所, 品种代码) 排出来的样子.
-SEEDED_PRODUCT_KEYS = [("SSE", "600"), ("SZSE", "000")]
+# 初始化 CSV 播种进来的内容 (见 `backend/reference_seed/`), 直接读那份文件而不是在这里抄一份:
+# 抄一份的话, 改数据的提交只会让这里以"行数对不上"红掉, 而看不出正是这份文件与用例分家了.
+SEEDED_PRODUCT_KEYS = sorted(
+    (row[0], row[1]) for row in read_seed_csv_rows("Products.csv")
+)
+SEEDED_COMMISSION_GROUP_KEYS = [
+    (int(row[0]), row[1]) for row in read_seed_csv_rows("CommissionGroups.csv")
+]
+SEEDED_RATE_ROW_COUNT = len(read_seed_csv_rows("BaseCommissions.csv"))
 
 EXCHANGE_LEVEL_INSTRUMENT_ID = ""
 REGISTERED_PRODUCT_ID = "600"
 REGISTERED_PRODUCT_EXCHANGE_ID = "SSE"
-UNREGISTERED_SHORT_PRODUCT_ID = "601"
+# 三位数字、且**没**登记在初始化 CSV 的品种表里: 守门据此判"这是品种码但不认识".
+UNREGISTERED_SHORT_PRODUCT_ID = "199"
 EXCHANGE_ID_WITHOUT_THAT_PRODUCT = "SZSE"
 # 比品种码阈值长一格: 守门据此认定"这是合约码", 一律放行.
 SHORTEST_CONTRACT_INSTRUMENT_ID = "6" * (MAXIMUM_PRODUCT_CODE_LENGTH + 1)
+# 用例自己建组用的组号, 刻意避开初始化 CSV 播下去的那一组 —— 那一组在新库里已经存在, 拿它建单
+# 会撞唯一约束.
+UNSEEDED_COMMISSION_GROUP_ID = 20
+UNSEEDED_COMMISSION_GROUP_NAME = "用例自建费率组"
 
 OVER_LONG_EXCHANGE_ID = "S" * 9
 OVER_LONG_PRODUCT_ID = "6" * 33
@@ -102,15 +114,16 @@ def _product_payload(exchange_id: str = "SSE", product_id: str = "600519", produ
     }
 
 
-def _commission_group_payload(commission_group_id: int = 1, commission_group_name: str = "默认组") -> dict[str, object]:
+def _commission_group_payload(commission_group_id: int = UNSEEDED_COMMISSION_GROUP_ID,
+    commission_group_name: str = UNSEEDED_COMMISSION_GROUP_NAME) -> dict[str, object]:
     return {
         "commission_group_id": commission_group_id,
         "commission_group_name": commission_group_name,
     }
 
 
-def _base_commission_payload(commission_group_id: int = 1, exchange_id: str = "SSE", instrument_id: str = "600519",
-    direction: int = CommissionDirection.SELL.value) -> dict[str, object]:
+def _base_commission_payload(commission_group_id: int = UNSEEDED_COMMISSION_GROUP_ID, exchange_id: str = "SSE",
+    instrument_id: str = "600519", direction: int = CommissionDirection.SELL.value) -> dict[str, object]:
     return {
         "commission_group_id": commission_group_id,
         "exchange_id": exchange_id,
@@ -120,6 +133,15 @@ def _base_commission_payload(commission_group_id: int = 1, exchange_id: str = "S
         "min_commission": 5.0,
         "max_commission": 100.0,
     }
+
+
+def _expected_commission_group_rows() -> list[tuple[int, str]]:
+    """组表在该用例收场时应当有的全部行: 初始化 CSV 播下的那些, 加上用例自己建的那一组."""
+
+    return [
+        *SEEDED_COMMISSION_GROUP_KEYS,
+        (UNSEEDED_COMMISSION_GROUP_ID, UNSEEDED_COMMISSION_GROUP_NAME),
+    ]
 
 
 async def _create_product(client: AsyncClient, token: str, **payload: object) -> ProductResponse:
@@ -183,7 +205,7 @@ async def test_products_are_listed_by_exchange_then_code(client: AsyncClient, ad
 
     assert [
         (product.exchange_id, product.product_id) for product in page.records
-    ] == [SEEDED_PRODUCT_KEYS[0], ("SSE", "600519"), SEEDED_PRODUCT_KEYS[1]]
+    ] == sorted([*SEEDED_PRODUCT_KEYS, ("SSE", "600519")])
 
 
 async def test_the_same_product_code_cannot_be_entered_twice_for_one_exchange(client: AsyncClient, admin_token: str) -> None:
@@ -321,13 +343,15 @@ async def test_deleting_a_commission_group_that_is_still_referenced_is_rejected(
         client, BASE_COMMISSIONS_PATH, admin_token, BaseCommissionResponse
     )
 
-    assert rate_page.total == 1
+    assert rate_page.total == SEEDED_RATE_ROW_COUNT + 1
 
     group_page = await fetch_page(
         client, COMMISSION_GROUPS_PATH, admin_token, CommissionGroupResponse
     )
 
-    assert record_ids(group_page) == [commission_group.id]
+    assert [
+        (row.commission_group_id, row.commission_group_name) for row in group_page.records
+    ] == _expected_commission_group_rows()
 
 
 async def test_renumbering_a_referenced_commission_group_is_rejected(client: AsyncClient, admin_token: str) -> None:
@@ -358,13 +382,14 @@ async def test_renumbering_a_referenced_commission_group_is_rejected(client: Asy
 
     assert [
         (row.commission_group_id, row.commission_group_name) for row in group_page.records
-    ] == [(1, "默认组")]
+    ] == _expected_commission_group_rows()
 
     rate_page = await fetch_page(
         client, BASE_COMMISSIONS_PATH, admin_token, BaseCommissionResponse
     )
 
-    assert record_ids(rate_page) == [rate_row.id]
+    assert rate_page.total == SEEDED_RATE_ROW_COUNT + 1
+    assert rate_row.id in record_ids(rate_page)
 
 
 async def test_renumbering_an_unreferenced_commission_group_succeeds(client: AsyncClient, admin_token: str) -> None:
@@ -396,7 +421,7 @@ async def test_renumbering_an_unreferenced_commission_group_succeeds(client: Asy
 
     assert [
         (row.commission_group_id, row.commission_group_name) for row in group_page.records
-    ] == [(8, "自有费率")]
+    ] == [*SEEDED_COMMISSION_GROUP_KEYS, (8, "自有费率")]
 
 
 async def test_deleting_an_unreferenced_commission_group_succeeds(client: AsyncClient, admin_token: str) -> None:
@@ -419,7 +444,7 @@ async def test_deleting_an_unreferenced_commission_group_succeeds(client: AsyncC
         client, COMMISSION_GROUPS_PATH, admin_token, CommissionGroupResponse
     )
 
-    assert group_page.total == 0
+    assert group_page.total == len(SEEDED_COMMISSION_GROUP_KEYS)
 
 
 async def test_deleting_a_rate_row_succeeds(client: AsyncClient, admin_token: str) -> None:
@@ -444,7 +469,7 @@ async def test_deleting_a_rate_row_succeeds(client: AsyncClient, admin_token: st
         client, BASE_COMMISSIONS_PATH, admin_token, BaseCommissionResponse
     )
 
-    assert rate_page.total == 0
+    assert rate_page.total == SEEDED_RATE_ROW_COUNT
 
 
 async def test_deleting_a_rate_row_that_is_gone_reports_it_as_absent(client: AsyncClient, admin_token: str) -> None:
@@ -496,7 +521,8 @@ async def test_a_member_can_read_the_commission_group_options(client: AsyncClien
     option_page = PageResponse.model_validate(response.json())
 
     assert option_page.records == [
-        {"commission_group_id": 1, "commission_group_name": "默认组"}
+        {"commission_group_id": group_id, "commission_group_name": group_name}
+        for group_id, group_name in _expected_commission_group_rows()
     ]
 
 
@@ -590,7 +616,8 @@ async def test_the_both_directions_wildcard_is_a_rule_that_is_accepted(client: A
         client, BASE_COMMISSIONS_PATH, admin_token, BaseCommissionResponse
     )
 
-    assert [row.direction for row in rate_page.records] == [BOTH_DIRECTIONS]
+    assert rate_page.total == SEEDED_RATE_ROW_COUNT + 1
+    assert {row.direction for row in rate_page.records} == {BOTH_DIRECTIONS}
 
 
 async def test_a_negative_rate_is_rejected(client: AsyncClient, admin_token: str) -> None:

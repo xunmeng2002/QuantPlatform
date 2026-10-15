@@ -1,4 +1,4 @@
-"""当前用户与管理员依赖.
+"""当前用户与管理员依赖, 以及随部署变化的那道上传闸.
 
 认证失败一律 401 且不区分"令牌无效"与"用户不存在": 区分开就等于把账号是否存在透给未持令牌者.
 """
@@ -20,6 +20,7 @@ MISSING_TOKEN_DETAIL = "缺少访问令牌"
 INVALID_TOKEN_DETAIL = "访问令牌无效或已过期"
 DISABLED_ACCOUNT_DETAIL = "账号已被停用"
 ADMIN_REQUIRED_DETAIL = "需要管理员权限"
+STRATEGY_UPLOAD_DISABLED_DETAIL = "本部署不接受用户上传策略, 请联系管理员配发"
 BEARER_SCHEME = "Bearer"
 
 
@@ -69,6 +70,26 @@ async def require_admin(current_user: Annotated[UserModel, Depends(get_current_u
     return current_user
 
 
+async def require_strategy_upload_allowed(current_user: Annotated[UserModel, Depends(get_current_user)], settings: SettingsDependency) -> UserModel:
+    """上传策略这道闸: 部署关掉它时, 只有管理员还能传.
+
+    与 `require_admin` 的区别是**闸门从哪儿来**: 那一条判的是身份, 这一条判的是这台部署的策略,
+    只是管理员凭身份豁免 (关掉它的机器要靠管理员把策略配发进去).
+
+    豁免只到"能传"这一层为止, 不到"能替别人传": 传新版本随后仍走 `load_owned_strategy`,
+    管理员对**非本人所属**的既有策略照样 404. 配发指的是建新策略.
+    """
+
+    if not settings.strategy_upload_allowed and not is_admin(current_user):
+        raise PermissionDeniedError(STRATEGY_UPLOAD_DISABLED_DETAIL)
+
+    return current_user
+
+
 type CurrentUserDependency = Annotated[UserModel, Depends(get_current_user)]
 
 type AdminUserDependency = Annotated[UserModel, Depends(require_admin)]
+
+type StrategyUploadUserDependency = Annotated[
+    UserModel, Depends(require_strategy_upload_allowed)
+]

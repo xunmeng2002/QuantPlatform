@@ -13,6 +13,8 @@
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -39,6 +41,10 @@ STUB_EXCHANGE = "sh"
 DEFAULT_CONTRACT_CODE = "sh.600519"
 DEFAULT_COVERED_START_DAY = "2019-01-01"
 DEFAULT_COVERED_END_DAY = "2031-12-31"
+
+#: 用例里的忙等上限. 真实的 5 秒是留给用户的"下载中途点一下"余量, 用例等满只是白等 —— 这一档要
+#: 验的是"等满之后被归到哪一类", 等多久与判据无关.
+TEST_BUSY_TIMEOUT_MILLISECONDS = 1
 
 
 # 桩脚本: 落到 `argv.json`、按文件决定退出码与延迟、可选地"入库"。
@@ -299,3 +305,26 @@ def build_covered_component(quote_hub_root: Path, contract_code: str = DEFAULT_C
     )
 
     return quote_hub_root
+
+
+@contextmanager
+def hold_database_write_lock(quote_hub_root: Path) -> Iterator[None]:
+    """像组件的写者那样**独占**它的库, 直到出块.
+
+    用 `BEGIN EXCLUSIVE` 而不是插一行就完事: 默认的回滚日志模式下, 写者中途那些 `INSERT` 拿的只是
+    RESERVED, 而 RESERVED 挡写者**不挡读者** —— 平台那几条读会照样读成功. 只有走到提交那一步写者
+    才升到 EXCLUSIVE, 那也正是"下载中途读库会失败"的那个窗口.
+
+    调用方几乎总要同时把 `quote_hub.SQLITE_BUSY_TIMEOUT_MILLISECONDS` 压到
+    `TEST_BUSY_TIMEOUT_MILLISECONDS`: 真实的忙等是留给用户重试的余量, 用例在这里等满只是白等.
+    """
+
+    holder = sqlite3.connect(
+        quote_hub_root / quote_hub.QUOTE_HUB_DATABASE_FILENAME, isolation_level=None
+    )
+
+    try:
+        holder.execute("BEGIN EXCLUSIVE")
+        yield
+    finally:
+        holder.close()

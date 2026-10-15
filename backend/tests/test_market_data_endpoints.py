@@ -9,13 +9,19 @@
 
 from pathlib import Path
 
+import pytest
 from httpx import AsyncClient
 
 from app.main import MARKET_DATA_PREFIX
 from app.services import quote_hub
+from app.services.market_data_preparation import MARKET_DATA_COMPONENT_BUSY_MESSAGE
 
 from .helpers import SignedInAccount, bearer_headers
-from .quote_hub_stub import DEFAULT_CONTRACT_CODE
+from .quote_hub_stub import (
+    DEFAULT_CONTRACT_CODE,
+    TEST_BUSY_TIMEOUT_MILLISECONDS,
+    hold_database_write_lock,
+)
 
 CONTRACTS_PATH = f"{MARKET_DATA_PREFIX}/contracts"
 COVERAGE_PATH = f"{MARKET_DATA_PREFIX}/coverage"
@@ -70,6 +76,33 @@ async def test_the_contract_list_degrades_when_the_component_database_is_missing
 
     assert body["available"] is False
     assert body["reason"]
+    assert body["contracts"] == []
+
+
+async def test_the_contract_list_says_busy_while_a_writer_holds_the_database(client: AsyncClient,
+    run_owner: SignedInAccount, quote_hub_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """组件正把库写满那一刻, 列表仍回 200 + 一句**"正忙"**.
+
+    这一档漏了**不会红**: 正忙是"不在位"的子类, 兜底那处会把它按"不在位"放行, 页面照常禁用下拉
+    框 —— 只是那句原因把人指向部署路径, 而那边什么问题都没有. 故断言取**相等**而不是"非空".
+
+    不走"忙等满"之外的第三条路同样要紧: 不加分类的话它是以 `sqlite3.OperationalError` 冒出来的
+    500, 页面把一次几秒后就会好的写入显示成一个需要用户去猜的加载失败.
+    """
+
+    monkeypatch.setattr(
+        quote_hub, "SQLITE_BUSY_TIMEOUT_MILLISECONDS", TEST_BUSY_TIMEOUT_MILLISECONDS
+    )
+
+    with hold_database_write_lock(quote_hub_root):
+        response = await client.get(CONTRACTS_PATH, headers=bearer_headers(run_owner.token))
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["available"] is False
+    assert body["reason"] == MARKET_DATA_COMPONENT_BUSY_MESSAGE
     assert body["contracts"] == []
 
 

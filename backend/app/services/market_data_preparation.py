@@ -49,6 +49,7 @@ YEAR_END_MONTH_DAY = "-12-31"
 
 
 MARKET_DATA_COMPONENT_MISSING_MESSAGE = "行情组件不在位 (目录、入口脚本或数据库缺失)"
+MARKET_DATA_COMPONENT_BUSY_MESSAGE = "行情组件正忙 (正在写入行情数据), 请稍后重试"
 MARKET_DATA_COMPONENT_START_FAILED_MESSAGE = "行情组件无法启动"
 MARKET_DATA_REQUEST_INCOMPLETE_MESSAGE = "该轮运行记录的行情准备参数不完整, 无法确定要准备哪段区间"
 MARKET_DATA_UNIVERSE_TOO_LARGE_MESSAGE = "需要一并刷新的合约过多, 超出单次命令的长度上限"
@@ -151,6 +152,28 @@ async def ensure_market_data_available(settings: PlatformSettings, request: Mark
     )
 
 
+def _translate_read_failure(error: quote_hub.QuoteHubUnavailableError) -> MarketDataUnavailableError:
+    """把"读不了组件"折成给用户的固定文案.
+
+    **正忙与不在位要给不同的话**: 不在位是要人去查路径的运维问题, 正忙只是重试一次 —— 说成前者会
+    把人送上一条查不出东西的路. 两者共用一条出口, 是因为调用方对它们的处置相同 (这一轮不跑).
+
+    这道兜底是必要的: 上面的存在性检查 (目录 / 入口脚本 / 库文件) 挡不住 schema 漂移, 也挡不住写者
+    占着库 —— 这两种都由 `open_quote_hub_database_readonly` 翻成 `QuoteHubUnavailableError` 一族,
+    故这里收的是**完整的**一处出口, 而不是"能认出来的那几种".
+    """
+
+    logger.error("读取行情组件数据库失败: %s", error)
+
+    message = (
+        MARKET_DATA_COMPONENT_BUSY_MESSAGE
+        if isinstance(error, quote_hub.QuoteHubBusyError)
+        else MARKET_DATA_COMPONENT_MISSING_MESSAGE
+    )
+
+    return MarketDataUnavailableError(message)
+
+
 async def _read_coverage_facts(quote_hub_root: Path, contract_code: str, frequency: str, start_day: str, end_day: str) -> quote_hub.CoverageFacts:
     """读判定要用的事实. 读库是阻塞 IO, 且一次开 40 MB 的库, 故整个丢进线程."""
 
@@ -164,9 +187,7 @@ async def _read_coverage_facts(quote_hub_root: Path, contract_code: str, frequen
             end_day,
         )
     except quote_hub.QuoteHubUnavailableError as error:
-        # 上面那道存在性检查挡不住 schema 漂移, 这里兜住并换成给用户的固定文案.
-        logger.error("读取行情组件数据库失败: %s", error)
-        raise MarketDataUnavailableError(MARKET_DATA_COMPONENT_MISSING_MESSAGE) from error
+        raise _translate_read_failure(error) from error
 
 
 def _judge(facts: quote_hub.CoverageFacts) -> CoverageVerdict:
@@ -283,8 +304,7 @@ async def _read_refresh_universe(quote_hub_root: Path, contract_code: str) -> li
             quote_hub.read_ingested_codes, quote_hub_root
         )
     except quote_hub.QuoteHubUnavailableError as error:
-        logger.error("读取行情组件数据库失败: %s", error)
-        raise MarketDataUnavailableError(MARKET_DATA_COMPONENT_MISSING_MESSAGE) from error
+        raise _translate_read_failure(error) from error
 
     return _merge_refresh_universe(ingested_codes, contract_code)
 

@@ -18,6 +18,7 @@ from app.config import (
     DEFAULT_LOGIN_THROTTLE_MAXIMUM_FAILURES,
     DEFAULT_RETAINED_RUNS_PER_USER,
     DEFAULT_RUN_RETENTION_ENABLED,
+    DEFAULT_STRATEGY_UPLOAD_ALLOWED,
     MAXIMUM_PORT,
     PlatformSettings,
     load_environment_file,
@@ -201,6 +202,8 @@ def test_valid_settings_are_accepted() -> None:
     assert settings.login_throttle_maximum_failures == DEFAULT_LOGIN_THROTTLE_MAXIMUM_FAILURES
     assert settings.login_throttle_lock_minutes == DEFAULT_LOGIN_THROTTLE_LOCK_MINUTES
     assert settings.trusted_proxy_addresses == ()
+    # 上传默认放行: 带自己的策略来是本平台的常规用法, 闸默认关着会把它变成另一个产品.
+    assert settings.strategy_upload_allowed is DEFAULT_STRATEGY_UPLOAD_ALLOWED
 
 
 @pytest.mark.parametrize(
@@ -306,6 +309,7 @@ def test_from_environment_applies_documented_defaults(monkeypatch: pytest.Monkey
         "QUANT_LOGIN_THROTTLE_MAXIMUM_FAILURES",
         "QUANT_LOGIN_THROTTLE_LOCK_MINUTES",
         "QUANT_TRUSTED_PROXY_ADDRESSES",
+        "QUANT_STRATEGY_UPLOAD_ALLOWED",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -324,6 +328,16 @@ def test_from_environment_applies_documented_defaults(monkeypatch: pytest.Monkey
     assert settings.login_throttle_lock_minutes == DEFAULT_LOGIN_THROTTLE_LOCK_MINUTES
     assert settings.trusted_proxy_addresses == ()
     assert settings.frontend_dist_root == DEFAULT_FRONTEND_DIST_ROOT
+    assert settings.strategy_upload_allowed is DEFAULT_STRATEGY_UPLOAD_ALLOWED
+
+
+def test_from_environment_reads_the_strategy_upload_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """上传闸要真的从环境里读得动 —— 它是**对外托管**那类部署唯一的关闭途径."""
+
+    monkeypatch.setenv(JWT_SECRET_ENVIRONMENT_NAME, "from-environment-key")
+    monkeypatch.setenv("QUANT_STRATEGY_UPLOAD_ALLOWED", "false")
+
+    assert PlatformSettings.from_environment().strategy_upload_allowed is False
 
 
 def test_from_environment_reads_the_login_throttle_settings(monkeypatch: pytest.MonkeyPatch) -> None:

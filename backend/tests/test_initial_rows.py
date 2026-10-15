@@ -7,6 +7,7 @@
 要验的正是"播种怎么读 CSV" —— 那份 CSV 长什么样、什么时候播, 得由用例自己说了算.
 """
 
+import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from app.catalog.models import (
     ProductModel,
 )
 from app.config import PlatformSettings
+from app.ids import generate_identifier
 from app.reference_data import initial_rows
 from app.reference_data.initial_rows import (
     convert_csv_cell,
@@ -224,6 +226,72 @@ async def test_a_table_that_already_has_rows_is_left_alone(seed_csv_directory: P
     assert len(
         await _read_catalog_rows(empty_database, COMMISSION_GROUP_TABLE)
     ) == 2
+
+
+async def test_a_rate_table_pointing_at_a_absent_group_is_skipped_alone(
+    seed_csv_directory: Path, empty_database: PlatformDatabase, caplog: pytest.LogCaptureFixture
+) -> None:
+    """费率明细指着库里没有的组号时, 只跳过这一张表, 前面播好的表不受牵连.
+
+    这份部署里管理员自建过组 (2 号), 组号不含 1, 而费率明细那一行硬指 1 号组: 照插会撞外键.
+    先问一句是为了让它只搭上自己 —— 否则连品种表一起回滚, 而用户只看见一行日志, 重启一次重来
+    一遍, 永远如此.
+    """
+
+    _write_csv(seed_csv_directory, PRODUCT_TABLE, PRODUCT_CSV_ROWS)
+    _write_csv(seed_csv_directory, COMMISSION_GROUP_TABLE, [["1", "默认组"]])
+    _write_csv(seed_csv_directory, BASE_COMMISSION_TABLE, BASE_COMMISSION_CSV_ROWS)
+
+    async with empty_database.session_scope() as session:
+        session.add(
+            CommissionGroupModel(
+                id=generate_identifier(),
+                commission_group_id=2,
+                commission_group_name="管理员自建的组",
+            )
+        )
+
+        await session.commit()
+
+    with caplog.at_level(logging.WARNING):
+        await ensure_initial_reference_data(empty_database)
+
+    assert await _read_catalog_rows(empty_database, PRODUCT_TABLE) == [
+        ("SSE", "600519", "贵州茅台", 6, 1, 0.01, 100, 1, 200, 1, "")
+    ]
+
+    assert await _read_catalog_rows(empty_database, COMMISSION_GROUP_TABLE) == [
+        (2, "管理员自建的组")
+    ]
+
+    assert await _read_catalog_rows(empty_database, BASE_COMMISSION_TABLE) == []
+
+    assert "BaseCommissions 指向库里没有的行 (CommissionGroupId=1)" in caplog.text
+
+
+async def test_a_rate_csv_referencing_a_group_this_package_never_defines_is_an_error(
+    seed_csv_directory: Path, empty_database: PlatformDatabase
+) -> None:
+    """随包那几份 CSV 自相矛盾时按"包有问题"办: 整体回滚, 不留一张静默空着的费率表.
+
+    与上一条的分界是**引用的行从哪儿来**: 库里有管理员自建的组、费率 CSV 引的不是它 → 跳过费率表;
+    全新库里费率 CSV 引了一个组表根本没定义的组号 → 那是这份包自己错了. 后者若也跳过, 结果是一张
+    空费率表配一个照常启动的平台, 而引擎查不到费率只按零费用算钱.
+    """
+
+    _write_csv(seed_csv_directory, PRODUCT_TABLE, PRODUCT_CSV_ROWS)
+    _write_csv(seed_csv_directory, COMMISSION_GROUP_TABLE, [["1", "默认组"]])
+    _write_csv(
+        seed_csv_directory,
+        BASE_COMMISSION_TABLE,
+        [["5"] + BASE_COMMISSION_CSV_ROWS[0][1:]],
+    )
+
+    with pytest.raises(ValueError):
+        await ensure_initial_reference_data(empty_database)
+
+    assert await _read_catalog_rows(empty_database, PRODUCT_TABLE) == []
+    assert await _read_catalog_rows(empty_database, COMMISSION_GROUP_TABLE) == []
 
 
 async def test_a_bad_header_leaves_every_table_untouched(seed_csv_directory: Path, empty_database: PlatformDatabase) -> None:

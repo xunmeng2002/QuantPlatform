@@ -39,6 +39,158 @@ Python 策略**。
 
 ## ✅ 已完成
 
+### D.45 · 2026-10-15 （第四十五批） 对外托管的上传闸：非管理员不得上传策略（+ 五份文件的行尾归一）
+
+- **触发**：用户先问「初版是提供无需登录的版本，还是提供默认的测试账号并自动填好账号密码？主要在
+  朋友圈分发一下……但我不想在朋友圈里写账号密码这种东西」，随后追问「你是担心上传的策略引入病毒
+  之类的问题吗？看看有没有什么解决方案。另外可能得限制一下上传策略的大小，避免空耗流量」，
+  裁定**「那行，先不给访客上传权限了」**。部署去向随后明确：腾讯云，公网可达。
+- **先把框定纠正过来（本次结论的立论）**：**不是"病毒"**。上传的策略不会被别的访客下载走，危险的
+  是**服务器把这份 Python 当程序执行**——`runs` 那一步用平台自己的解释器与操作系统账号跑它，
+  故一份 20 行的脚本就够读走 `backend/.env`（含初始管理员口令）、`jwt_secret.key`、`catalog.db`、
+  他人 `users/` 下的策略源码，并出站访问云厂商元数据服务；且本期隔离只到**目录级**，
+  `platform-plan.md` §5.2 自己写明「挡不住恶意读盘」。**上传大小因此不是安全手段**——`import os`
+  一行即可，限到 1 KiB 也拦不住。
+- **大小闸早已在位，不是本次新加**：源码 `MAXIMUM_SOURCE_BYTES = 1 MiB`（`routers/strategies.py`）、
+  配置 `MAXIMUM_CONFIGURATION_BYTES = 64 KiB`（`strategy_configuration.py`）、请求体总闸
+  `MAXIMUM_REQUEST_BODY_BYTES = 1 MiB + 64 KiB + 64 KiB`（`main.py`，多部分表单框架开销那一项）。
+  另有一件口径要摆正：**费流量的不是上传**（一份策略几十 KB，收一次就完），而是**每轮的 `runs/`
+  产物**——要控流量该控轮数与保留（`QUANT_RUN_RETENTION_ENABLED` / `RETAINED_RUNS_PER_USER`），
+  不是上传上限。
+- **落点（一处部署闸，不是一套新概念）**：`config.py` 加 `DEFAULT_STRATEGY_UPLOAD_ALLOWED = True`
+  与 `PlatformSettings.strategy_upload_allowed`（环境变量 `QUANT_STRATEGY_UPLOAD_ALLOWED`）；
+  `auth/dependencies.py` 加 `require_strategy_upload_allowed` 与 `StrategyUploadUserDependency`
+  （403 + `STRATEGY_UPLOAD_DISABLED_DETAIL`），挂在**两条落代码的路径**上——
+  `create_strategy_handler` 与 `upload_strategy_version_handler`。
+  **默认 true**：带自己的策略来是本平台的常规用法，闸默认关着等于把它变成另一个产品。
+  **管理员豁免**：关掉它的机器恰恰要靠管理员把策略配发进去。豁免**只到"能传"这一层**：
+  建新策略可以，给**别人**的既有策略传新版本仍走 `load_owned_strategy`，照样 404。
+- **为什么不连删除与授权一起管**：那两条不引入新代码，且归属人天然只有本人（`load_owned_strategy`）。
+  再广一层的名字（策略的增删改都收进一个开关）会多出一个概念，而多出来的那一层并不比现状更安全。
+- **顺带修掉一处会毁掉本批 diff 的事故（非用户所提，但必须先修）**：五份文件在工作区里被写成了
+  **整文件 CRLF** —— `PROGRESS.md` / `reference_seed/BaseCommissions.csv` /
+  `acceptance-checklist.md` / `deployment.md` / `platform-plan.md`，而它们的 `HEAD` 版本与
+  `.editorconfig`（`end_of_line = lf`）都是 LF。不归一的话，这次提交会夹进整文件行尾重写：
+  `PROGRESS.md` 的 diff 从真实的 108/42 变成 **921/855**，五份文件加起来把真正的改动彻底埋掉。
+  已按 `HEAD` 归一为 LF，并**全仓扫描受版本控制的文件确认再无一例 CRLF**。
+- **文档同步**：`.env.example`（新增「对外托管」一节）、`deployment.md`（§5 加第三条必读项：
+  交给不可信的人用就把这项设 false；§9 加一行 403 的归因）、`platform-plan.md` §5.2（在"目录级 /
+  系统级"两档之间写明这一步的**适用边界**：它只让"陌生人写的代码"不存在，挡不住运行侧，故不是
+  系统级隔离的替代品）。
+- **口径（审校后收窄，防下个会话再写回去）**：这道闸换的是**"陌生人此后写不进代码"**这一个前提，
+  **不是"机器上跑的代码全出自管理员之手"**——① 存量策略不受影响，已入库的仍以平台身份执行，
+  这正是它挡不住的运行侧；② 豁免只在建新策略那一层。四处文字（`config.py` 注释、`.env.example`、
+  `deployment.md` §5 第三条、`platform-plan.md` §5.2）都按此口径落笔，早期那版"全部出自管理员
+  之手"的写法已订正。
+- **验收**：后端 `pytest` **776 项全过**（772 基线 + 4 条新增：两条拒绝、一条管理员豁免、
+  一条配置读取）；前端**未动**（表单把服务端 403 的 `detail` 原样显示，`describeApiFailure` 即为此）。
+  版本被拒那条另钉了**盘上不出现 2 号版本目录**（原先只断言库里没有第 2 版，拒得太晚也照样绿）。
+- **仍未决 —— 演示形态本身**：① 入口机制（游客一键进入 vs 预置账号自动填充）**尚未定**，本次只
+  关了上传，未做入口；② `acceptance-checklist.md` §16 的手工验收与 **D.44 一并**欠着；
+  ③ 发布包是否重打（上一份 `RELEASE-INFO.txt` 标的是 `880e768 (工作区有未提交改动)`）。
+- **待用户定的一个取舍**：要不要**把上传按钮也藏起来**。藏需要前端拿到这个旗标，而现在**没有**任何
+  客户端可见的部署级旗标——`/api/health` 是**仅管理员**的，`/auth/me` 回的是用户形状（塞进去会
+  污染 `/users` 列表那一份响应）。故现在访客点「上传策略」会走完表单、再由服务端 403 拒绝，
+  文案是「本部署不接受用户上传策略, 请联系管理员配发」。要藏就得**新开一处 API**，属新概念，
+  故留给用户拍。
+
+### D.44 · 2026-10-15 （第四十四批） A 股基础费率随包播种 + 行情下载期间读库的锁争用归类
+
+- **触发**：用户跑完本地部署验收后提两条。①「我录入的这些费率记录，应该部署时就创建，作为 A 股
+  的基础费率，避免每次部署时手动添加」；②「我在回测时差点同时进行两个合约的回测，突然想到现在
+  使用的行情源不允许并发，会被拉黑，所以平台在使用 QuoteHub 下载行情时，不能并发的调用，得排队
+  下载」。用户当场拍三件：费率种子**用他手工录的那批数值**、Products.csv **补齐全 A 股品种码**、
+  「下载中读库可能拿到 `database is locked`」那个缺口**本批一起修**。
+- **关于②：平台自己的下载本来就是串行的**，`market_data_preparation.py` 的 `REFRESH_LOCK`
+  （D.27 起在）已经把「刷新够不够」这件事收成一次一个，两个并发作业不会各起一个组件进程去写同一
+  个库与同一批 parquet。**本次补的是另一半**：下载子进程提交事务那一瞬间，平台自己那几处**只读**
+  也会被写锁挡下（默认回滚日志模式下写者提交时独占全库）。
+- **落点①（种子数据，三份 CSV 全部由"只含表头/两行"改成带数据）**：
+  `Products.csv` 2 行 → **13 行**（SSE `600` / `601` / `603` / `605` 沪市主板、`688` / `689`
+  科创板，SZSE `000` / `001` / `002` / `003` 深市主板、`300` / `301` / `302` 创业板，一律
+  `,6,1,0.01,0,0,0,0,`）；`CommissionGroups.csv` 加 `1,A股默认费率`；`BaseCommissions.csv` 加
+  SSE / SZSE 两行**交易所级双向**（佣金按金额 `0.0001`、**平仓**印花税 `0.0005`、过户费
+  `0.00001`、佣金下限 `5`、上限 `0`）。**数值取自用户部署后那台机器的 `backend/data/catalog.db`**，
+  **一处例外见下**。播种机制（`ensure_initial_reference_data`）本身没动：仍是"该表为空才播、
+  幂等、每表 flush、单次 commit、失败不阻塞启动"。
+- **⚠ 过户费已订正（2026-10-15，用户拍板）**：从部署机读出来的是 `0.00005`（0.005%），**比法定值
+  大 5 倍**——疑似手录时多打一位。三处独立来源都是 `0.00001`（0.001% 双向）：引擎自带的 A 股基准
+  `QuantTrading/makeseeddb.py:62-64`、本仓夹具 `run_helpers.DEFAULT_TRANSFER_FEE_BY_MONEY`、
+  以及 A 股自 2022-04-29 起的法定费率；且**两台机器不一致**（开发仓那份 `catalog.db` 是
+  `0.000005`）。过户费是法定费、不随券商谈、买卖两边都收，按 `0.00005` 随包走等于每个新部署每笔
+  成交都多算 5 倍，故用户裁定取 `0.00001`，`deployment.md` 里那句"过户费 0.005%"同步改为 0.001%。
+  同行的佣金 / 印花税 / 下限三列核过无问题。
+- **落点②（锁争用归类）**：`config.py` 新增 `SQLITE_BUSY_TIMEOUT_MILLISECONDS = 5000`，**catalog
+  与行情库两处共用一个常量**（同一条策略，两侧取值必须一致；catalog 侧原本就有一份本地同名常量，
+  改为从 `config` 取）；`quote_hub.py` 加 `QuoteHubBusyError(QuoteHubUnavailableError)` 与
+  `_is_database_contention`（**按 `sqlite_errorcode` 判，不按文案**——文案随 SQLite 版本与语言
+  变），`open_quote_hub_database_readonly` 把等满之后的争用翻成它；`market_data_preparation.py`
+  加 `MARKET_DATA_COMPONENT_BUSY_MESSAGE` 与 `_translate_read_failure`（把两处重复的 `except`
+  块合并成一份，**正忙与不在位给不同的话**）；`routers/market_data.py` 加 `_unavailable_reason`
+  （两个端点共用）。**是子类**：认不出它的调用方按"不可用"处理也不算错，但认得出的要分开放行。
+- **⚠ 订正本会话早些时候的两处错误说法**（都曾对用户说过，此处留档以防复犯）：
+  ① 我说"只读连接**没设** `busy_timeout`" —— **错**。实测 `sqlite3.connect` 的 `timeout` 默认就是
+  `5.0` 秒，等价于 5000 ms 忙等，即用户批准的那个选项描述的**一半是空操作**。真正的缺口是**等满
+  之后**那个 `sqlite3.OperationalError` 没人接：在 `GET /api/market-data/contracts` 上变成 500，
+  在准备阶段被兜底译成"组件不在位"（把人送去查一个没问题的地方）。故本批实质是**归类**，不是
+  "补忙等"；那句 `PRAGMA busy_timeout` 仍**显式**给出（理由见该函数 docstring：靠默认值写成的
+  代码会在别人换连接参数时静默失效，症状是"偶尔 500"）。
+  ② 我说"`-1` 双向那一行能正确表达单边印花税，D.33 记的风险与界面提示『双向会让买入也收』被夸
+  大了" —— **错**。引擎 `CommissionCalculator.cpp:105` 明写「方向不参与取列」，开/平那一列由
+  `OffsetFlag` 选（`:112`）；双向是把十列**原样复制**给买、卖两行，故双向规则确实会让**买入平仓**
+  那一笔也收印花税。**D.33 那条风险与界面提示语是对的，本批不动它们**（改用户可见文案属产品决定，
+  不在本批授权内）。用户的种子取值在**A 股只做多**的用法下依然正确（平仓即卖出），故数值不改。
+- **测试侧连带**：`tests/helpers.py` 加 `read_seed_csv_rows`（用例凡断言"库的初始内容"一律以随包
+  CSV 为准，别在用例里另抄一份）；`test_reference_data_api.py` 的期望值全部改为**派生**（产品键集、
+  组行、费率行数），`UNREGISTERED_SHORT_PRODUCT_ID` 由 `601`（现已登记）改 `199`；`run_helpers.py`
+  的 `drop_contract_rates(direction=…)` 补上「**双向那一行也得跟着走**」（种子那行是 `-1`，只删
+  `0` 等于这一侧根本没缺）并把 `DEFAULT_COMMISSION_GROUP_NAME` 改名
+  `CREATED_COMMISSION_GROUP_NAME`（1 号组现由 CSV 播种，这个名字只管夹具自建的 2 号组那一类）；
+  `quote_hub_stub.py` 新增 `hold_database_write_lock`（`BEGIN EXCLUSIVE`，不是插一行——中途的
+  `RESERVED` 挡写者不挡读者）与 `TEST_BUSY_TIMEOUT_MILLISECONDS`。
+- **新增 4 条用例**：`test_market_data_coverage.py::test_a_database_held_by_a_writer_reports_busy`
+  （钉**类型**：写者占库 → `QuoteHubBusyError`，且它**是** `QuoteHubUnavailableError` 的子类）；
+  `test_market_data_coverage.py::test_a_file_that_is_not_a_database_reports_unavailable`（钉"库文件
+  在位但不是个库"也归"读不了"，不是 500）；`test_market_data_endpoints.py::
+  test_the_contract_list_says_busy_while_a_writer_holds_the_database`（钉**用户可见的那句话**：仍是
+  200 + `available=false`，原因是"正忙"而**不是**"不在位"、更不是 500）；
+  `test_initial_rows.py::test_a_rate_table_pointing_at_a_absent_group_is_skipped_alone`。
+- **审查后补的两处（第二批）**：
+  ① **`sqlite3.Error` 不再能逃到 500**：原先只有"争用"被翻成忙档，其余（库文件在位却不是库
+  `SQLITE_NOTADB`、读不动 `SQLITE_CANTOPEN`）原样冒到路由层 = 500 / 调度器内部异常。改为一律
+  翻成 `QuoteHubUnavailableError`（争用仍单独一档），并把 `_translate_read_failure` 的 docstring
+  改成实情——它原先声称的覆盖面比代码大。**按"是谁的问题"收口，不是按"是哪个异常类"**。
+  ② **播种撞外键不再拖垮别的表**：`ensure_initial_reference_data` 插行**之前**先问一句
+  `_read_missing_references`（走 SQLAlchemy 外键元数据，不写死表名）——CSV 引的组号在库里不存在
+  时（那份 `CommissionGroups.csv` 见表非空就整个没用上），只跳过这张表并留 WARNING，其余照播。
+  **一度用保存点（`begin_nested`）实现，实测退回来**：pysqlite 在发 `SAVEPOINT` 前会**隐式提交**
+  挂起的事务，于是"回滚"没发生、行反而落了库，`test_a_bad_header_leaves_every_table_untouched`
+  当场变红（1,2,0）—— 那一条钉的正是"CSV 读不懂时三张表一起回滚"，故改回无保存点的写法，
+  整体回滚那条语义一字未动。
+- **文档同步**：`deployment.md`（§3 目录行改成"A 股品种码 + 默认费率"；§6 加一条判据：进「基础
+  数据」页就该看见 13 个品种码与 1 号组那两行，**全新安装不必手工录任何费率**；§9 加一行"重启后
+  费率明细仍是空的"→ 库里组号不含 `1`）；
+  `platform-plan.md`（§14 第 2 条点明三份都带数据、§14.4「空表即播种」那条订正）；
+  `acceptance-checklist.md` §16（"那两行就是三位"改为"那些行"、§16.2 的**新建品种**改用未登记的
+  `SZSE/004`、**未登记短码**由 `601` 改 `SSE/602`、**删组**那步改按播种后的行数说、标题加 D.44）；
+  `initial_rows.py`（模块 docstring 里"费率表有意留空"那个例子已不成立，删掉；"两份 CSV 都只有
+  表头、这一行暂时无事可做"改为"费率那两份都带数据，这一步是必须的"）；
+  前端 `RunSubmitView.vue` / `.spec.ts`（"全新安装的组表就是空的"改为"播种会建出 1 号组；这是组
+  被删空之后的样子"）。
+- **验收**：后端 `pytest` **771 项全过**（767 基线 + 4 条新增；改种子数据时曾一次红 19 条，全部
+  是"库不再是空的"所致，已按上一条逐一收口）；前端 `type-check` 干净 + `vitest` **238 项全绿**。
+- **仍未决 —— 待用户手工验收**：`acceptance-checklist.md` §16 那一整套（现已改成**从非空表起**）；
+  以及**发布包是否需要重打**（上一份 `RELEASE-INFO.txt` 标的是 `880e768 (工作区有未提交改动)`，
+  与本批不是同一棵树）。
+- **已知风险（已接受）**：**费率表删空并重启会被 CSV 重新填回**（§14.4）—— 这正是"播种"的本意，
+  要彻底空掉得同时改那份 CSV。
+- **偶发、未追**：前端全量跑时 `src/router/index.spec.ts` 的「未登录时的守卫」那一组报过一次错，
+  本批收尾时**又碰上第二次**（238 里 237 过）：报的是 `beforeEach`（`:101` 那句
+  `router.replace('/__reset')` 热身导航）抛 `Error: STACK_TRACE_ERROR`，栈里还带着 vitest 的
+  `Object.collect` —— 即**归因到收集期**，而单跑该文件 9/9 全过。该文件里每一处 `router.push` /
+  `replace` 都 `await` 了，仍只在并行全量跑时出现，指向"某个导航的 promise 在用例结束后才结算"这
+  一类卫生问题。与本批无关（前端两处改动都是注释），**留给下一批**。
+
 ### D.43 · 2026-10-14 （第四十三批） 平台发布包与部署形态：后端同源托管前端 + 依赖冻结成锁 + 部署走查（附两处「换台机器才炸」的修）
 
 > 用户问「现在看看怎么部署，你需要提供平台项目的 release 包是吧」，并当场拍下三件：
@@ -208,85 +360,23 @@ Vite 代理缺口销账）。**本条的未决项**：前端仍无 e2e（P4 起�
 
 ### D.39 · 2026-10-14 （第三十九批） 同步上游两处契约：引擎表名一律复数 + QuoteHub 入口改名与建库前置
 
-- **触发**：用户「QuantTrading 做了较大的调整、尤其是数据库表名的变化，配置变化。另外就是
-  QuoteHub 这边应该也有调整。你先大致看一下，先从哪开始」。
-- **上游事实（实测，不采信记载）**：引擎 2026-10-13 起把 **21 张表名一律加 s**，准据是
-  `QuantTrading/src/Mdb/MdbStructs.cpp` 的 `GetSchema()` 里 `TableSchema::tableName`；
-  `BackTestInitDbTableList.h` / `BackTestTableList.h` 写的是 C++ 结构体名（**一直是单数**），
-  **不是表名的准据**。本机 `bin/Release/BackTest.dll` 于 2026-10-14 11:19 重编（在那次改名之后），
-  引擎根下的 `BackTestInit.db` 里已是复数表名。
-- **为什么种子库那三张是静默故障**：名字写错**不报错**——引擎查不到
-  `Products` / `CommissionGroups` / `BaseCommissions`，照跑完整轮并把 `Success` 报成 true，只是
-  费率按 0 计、合约乘数全部退化；唯一的线索是 `result.json` 的 `CommissionMissingCount`。结果库那
-  五张是**响的**（名字错即五个明细页签全 404），故两者危害不同级。
-- **落点（种子库）**：`reference_data/seed_contract.py` 三张表名改复数（并在 docstring 写明"表名与
-  C++ 结构体名逐字不同"）、`seed_database.py` 的 `SEED_TABLE_MODELS` 键与四处字面查找、
-  `reference_seed/*.csv` 三份 `git mv` 改名（文件名即表名，`initial_rows.py` 按 `table.table_name`
-  拼路径，不改名就找不到）。
-- **落点（结果库）**：`services/result_database.py` 的 `RESULT_TABLE_NAMES` 改复数，前端
-  `api/types.ts` 的镜像同步。「表名一律加双引号」那条理由原是"`Order` 是 SQLite 保留字"，
-  改名后不再成立，改成不受名字变化影响的统一引用（引号照加）。
-- **落点（QuoteHub）**：入口文件名 `BaoStockParquet.py` → `bao_stock_parquet.py`（只 `config.py`
-  一处常量；桩脚本按它派生名字，故一处生效）。**新增一类失败**——组件 v1.0.0 起**不建表、不迁移**，
-  库未建好或版本戳不符时退非零并指向 `init_database.py`（发生在联网登录**之前**），平台原本把它
-  混进"行情下载失败"，现单列 `MARKET_DATA_SCHEMA_NOT_INITIALIZED_MESSAGE`。
-- **新增两条"钉住上游"的断言**：本仓其余同类断言都是**自指**的（契约 ↔ 生成物 ↔ ORM 模型三处同源），
-  把契约改回单数照样全绿。故 `test_seed_contract.py::test_the_contract_pins_the_engine_table_names`
-  与 `test_run_results.py::test_the_whitelist_pins_the_engine_table_names` 把表名抄成**字面量**、
-  **故意与契约不同源**。
-- **文档同步**：`acceptance-checklist.md`（§14/§16 的表名、"引擎侧是单数表名"那句改为复数并点名
-  漂移对照的准据、`BaoStockParquet.py`、组件的建库前置）、`platform-plan.md`、`job-workspace.md`、
-  `.env.example`、以及本文件。**带日期的历史实测行有意保留原名**——那时确实是单数，改写会篡改实测
-  记录。
-- **验收**：后端 `pytest` **747 项全过**；真引擎验收 `pytest -m real_engine` **5 项全过**，且逐份看
-  作业目录里的 `result.json`：`BasicDataLoaded=true`、`CommissionMissingCount=0`、
-  `CommissionZeroRateKeyCount=0`、`VolumeMultipleFallbackProductCount=0`——**这一条才证明种子库
-  真被引擎装载**（`Success=true` 单独不够，它同时对错误的表名成立）。前端 `type-check` 干净 +
-  `vitest` **238 项全绿**。
-- **仍未决 —— 待用户手工验收**：`acceptance-checklist.md` §16.3 那三条 `sqlite3` 判据（现已改成复数
-  表名）与 §14 的组件建库前置走查。
-- **提交状态**：**已提交**（本批与上述文档同步同一棵树入库）。
+> **全条见归档 D.39**。一段话：引擎 2026-10-13 起 **21 张表名一律加 s**，准据是
+> `MdbStructs.cpp` 的 `GetSchema()`，**不是**那两个 `.h`（写的是 C++ 结构体名，一直是单数）。
+> 最要紧的一条口径：**种子库那三张表名写错是静默故障**——引擎查不到 `Products` /
+> `CommissionGroups` / `BaseCommissions`，照跑完整轮并把 `Success` 报成 true，只是费率按 0 计、
+> 合约乘数全部退化；结果库那五张是响的（名字错即五个页签全 404）。故补了两条**故意与契约不同源**
+> 的字面量表名断言。QuoteHub 侧入口改名（`BaoStockParquet.py` → `bao_stock_parquet.py`）并新增一类
+> 失败：组件 v1.0.0 起不建表、库未建好时退非零，且发生在联网登录**之前**。
+> **带日期的历史实测行保留原名**（那时确实是单数）。**本条无未决项**。
 
 ### D.38 · 2026-10-09 （第三十八批） 引擎 Linux 包改用 `RUNPATH: $ORIGIN`：家规进 `CMakeCommon` + 《引擎 Linux 发布包要求》
 
-- **触发**：用户问「离正式发布和上云还差什么」，一路追到「云主机是 Linux，Windows 做服务不太行」
-  → 审 `.pyd` 硬编码（见 D.37）→ 追问引擎 `.so` 里那把 RUNPATH 怎么办 → 最后问到点子上：
-  「既然是 `$ORIGIN` 方案，不是应该这些项目都改成这种吗……从整体来说，还是要统一的吧？」
-- **实测（WSL，`QuantTrading.cpython-312-x86_64-linux-gnu.so`）**：Linux 产物落在
-  `bin/$<CONFIG>`（扩展模块）与 `lib/$<CONFIG>`（7 个 `.so` + 15 个 `.a`）两处
-  （`QuantTrading/CMakeLists.txt:59-61`）。引擎那个 `lib/$<CONFIG>` 里**只有引擎自己的
-  7 个 `.so`**，Spark / DbAdapters 的库不在其中。各 `.so` 现有的 RUNPATH 是 **CMake 默认的
-  build RPATH**，即**构建机绝对路径**（`/home/xunmeng/.vs/...`），换机即废。四家仓
-  （QuantTrading / Spark / DbAdapters / CMakeCommon）**此前没有任何 RPATH 策略**——源码侧
-  一处都没有，`grep` 命中全来自生成的 `CMakeCache.txt` 默认值。
-- **改动①（引擎同族仓）**：`../CMakeCommon/CMakeCommon.cmake` 顶部加家规
-  `set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)`（需 CMake ≥ 3.14，三家现状 3.20 / 3.25）。三家产品仓
-  都在各自 `CMakeLists.txt` **第 2 行** include 它，故此开关对**全部 target** 一体生效——
-  这正是「统一」的落点：**一处改，三家下次构建全带**。**不需要重新打 tag**：`RUNPATH` 是
-  链接期写进 ELF 的字段，随各自**下一次构建**生效（是重链接而非重编译，`.o` 复用）。
-- **改动②（引擎仓）**：新增 `../QuantTrading/docs/engine-linux-release-package.md`
-  《引擎 Linux 发布包要求》——平台对上游引擎包的**验收契约**：扁平单目录 + 12 个文件、
-  **每个 `.so` 必自带 `RUNPATH: $ORIGIN`**（`RUNPATH` 不传递，故必须逐个设）、`bin/`+`lib/`
-  合一的一行改法、`engine-version.txt` 在 Linux 侧缺失的排查、以及「`ldd ./*.so` + 已知
-  dlopen 名单」的四条自检。
-- **三条硬结论**（**2026-10-09 当场订正过**：初稿据 `NEEDED` 表**误推**「Spark / DbAdapters
-  静态链入」，用户指出「我编的都是动态库」后重测，那条被推翻——记此以防复犯）：
-  ① **Spark / DbAdapters 是动态库，且正是引擎的运行时闭包**——`libBackTest.so` 直接
-  `NEEDED` 了 `libAsyncDbWriter` / `libDuckdbWrapper` / `libSerialization` / `libNetwork` /
-  `libCore` 五个；引擎 `lib/Release` 里**根本没有**这些 `.so`，它们靠**绝对 `RUNPATH`** 指到
-  `~/.vs/Libs/{Spark,DbAdapters}/x64-linux/lib` 加载。**带绝对 RUNPATH 的全是引擎自己的产物**
-  （扩展模块 + 7 个 `.so`），故本次 Release 只需重建引擎。
-  ② **「无需重打 tag」仍成立，但理由不同**：Spark / DbAdapters 的 ship 库要么**无**
-  `RUNPATH`，要么已自带正确的 `$ORIGIN`（`libDuckdbWrapper.so` 找 `libduckdb.so`）；其唯一的
-  非系统依赖 `libCore.so` 又恰好是**扩展模块的直接 `NEEDED`**、必先映射。这是**加载顺序的
-  巧合**，统一 `$ORIGIN` 后即消除。
-  ③ **`libSqliteWrapper.so` 与 6 个 API 中间层 `.so` 是 dyld 盲区**——按名 `dlopen`，
-  `ldd` **看不见**；清单须「`ldd` 结果 + 手工补的 dlopen 名单」两者合并。
-- **提交状态**：本批 3 个文件（`../CMakeCommon/CMakeCommon.cmake` +
-  `../QuantTrading/docs/engine-linux-release-package.md` + 本文件）。**未提交**（按惯例由用户执行）。
-  **2026-10-09 追记**：文档初稿误放在本仓 `docs/`（未提交），用户指出「我以为是放到
-  QuantTrading 里面去呢」后**迁到引擎仓**——`QuantTrading/docs/` 里已有
-  `backtest-run-contract.md`，跨仓契约本就住那儿。
+> **全条见归档 D.38**。一段话：四家仓此前**没有任何 RPATH 策略**，Linux 产物里写的是 CMake 默认
+> build RPATH，即**构建机绝对路径**，换机即废；故在 `../CMakeCommon/CMakeCommon.cmake` 顶部加家规
+> `set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)`（三家产品仓都在 `CMakeLists.txt` 第 2 行 include 它，
+> **一处改、全部 target 生效**），并在引擎仓新增《引擎 Linux 发布包要求》作为平台对上游包的验收
+> 契约。三条硬结论里有一条是**当场订正**的（初稿据 `NEEDED` 表误推「Spark / DbAdapters 静态链入」，
+> 用户指出「我编的都是动态库」后重测推翻）——记此以防复犯。**本条无未决项**；本仓零改动。
 
 ### D.37 · 2026-10-09 （第三十七批） 引擎探针改按解释器后缀表认扩展模块：迁 Linux 的前置
 
@@ -591,6 +681,13 @@ Vite 代理缺口销账）。**本条的未决项**：前端仍无 e2e（P4 起�
 
 ## ❓ 待讨论 / 待决策
 
+- **演示/对外托管的形态未定**（2026-10-15，D.45 引出；部署去向已明确：**腾讯云，公网可达**）。
+  已拍的部分：**不给访客上传策略**（`QUANT_STRATEGY_UPLOAD_ALLOWED=false`，见 D.45）。
+  **仍未决三条**：① **入口机制** —— 游客一键进入，还是预置账号并在登录页把口令填好；用户的硬
+  约束是「不想在朋友圈里写账号密码这种东西」；② **上传按钮是否也从界面上藏掉** —— 要藏就得新开
+  一处客户端可见的部署旗标（现有两处都不合适：`/api/health` 仅管理员、`/auth/me` 回的是用户形状，
+  塞进去会污染 `/users` 列表那一份响应）；③ 是否给演示账号加**每轮配额**（现在没有这个功能，
+  `max_concurrent_runs` 只是全局并发闸）并打开 `QUANT_RUN_RETENTION_ENABLED`。
 - **云主机定为 Linux，牵动一串旧前提**（2026-10-09 用户拍板：「云主机是 linux，windows 做服务
   不太行」）。本条**不改写**上面诸条的历史结论，只标出哪些前提作废、哪些要跟着改：
   - 下面「**系统级隔离的具体实现未定**」那条的「**Windows 下**」前提作废，须按 Linux 重议
@@ -846,10 +943,15 @@ Vite 代理缺口销账）。**本条的未决项**：前端仍无 e2e（P4 起�
     永远被压成 0（父级高度是 auto，百分比高度解析为 0px），图就画在零高容器里：
     界面全空，只留一句「Can't get DOM width or height」。**图表高度必须给外层 div**
     （`EquityChartPanel.vue` 里留了这条注释，日后任何图表容器照此办理）。
-- **本文件尺寸（2026-10-14，即 §9.1 那条「尺寸行」）**：**77.5 KB**（`✅` 40.0 / `🔄` 10.6 /
-  `❓` 5.7 / 备注 19.2），高于 §9.1 的 ≤ 50 KB 目标，**缺口是有意不补的**。可再砍的只剩备注区与
+- **本文件尺寸（2026-10-15，即 §9.1 那条「尺寸行」）**：**89.9 KB**（`✅` 50.7 / `🔄` 10.6 /
+  `❓` 6.7 / 备注 19.8），高于 §9.1 的 ≤ 50 KB 目标，**缺口是有意不补的**。可再砍的只剩备注区与
   `R.01` 里的**活约定** —— 砍了就是把跨批口径埋掉，正是 §9.1 立分层要防的那种损失。D.36 那轮
   记过同一条判断并把取舍留给用户，**那条「仍待用户定夺」随 2026-10-14 作废**：用户把本文件的
   维护权整个交给 AI 且明言不看，故由 AI 按 §6「简洁不越权」自行裁定 —— **砍行数不得砍掉口径。**
-  `✅` 区留**最近 5 批的全文**（D.43 / D.42 / D.40+41 / D.39 / D.38），更早的一律是短版加指针
-  （全文在归档，索引在 `PROGRESS-index.md`）。
+  `✅` 区留**最近 5 批的全文**（D.45 / D.44 / D.43 / D.42 / D.40+41），更早的一律是短版加指针
+  （全文在归档，索引在 `PROGRESS-index.md`）。D.39 于 2026-10-15 滚出，索引行已补。
+  （索引 14.8 KB、归档 219.4 KB，按 §9.1 **不计入**本目标。）
+- **行尾口径（2026-10-15 立）**：三份台账一律 **LF**（`.editorconfig` 的 `end_of_line = lf`，
+  `core.autocrlf` 未设）。D.45 发现工作区里五份文件被写成了整文件 CRLF（`HEAD` 却是 LF），
+  那会让 diff 从真实改动膨胀成整文件重写；已改回，并全仓扫描确认再无 CRLF。**写这三份文件时
+  先按字节核一遍行尾**，别只看内容对不对。

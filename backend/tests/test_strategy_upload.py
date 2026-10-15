@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import Message
 
+from app.auth.dependencies import STRATEGY_UPLOAD_DISABLED_DETAIL
 from app.catalog.database import PlatformDatabase
 from app.catalog.enums import StrategyVisibility
 from app.catalog.schemas import (
@@ -52,6 +53,7 @@ from app.strategy_configuration import (
     MAXIMUM_FILENAME_LENGTH,
 )
 
+from .conftest import TEST_ADMIN_PASSWORD, TEST_ADMIN_USERNAME
 from .helpers import (
     STRATEGIES_PATH,
     SignedInAccount,
@@ -60,13 +62,17 @@ from .helpers import (
     create_strategy_record,
     create_strategy_version_record,
     fetch_page,
+    list_visible_strategy_ids,
+    login,
     read_strategy_detail,
     read_strategy_status_code,
 )
+from .run_helpers import database_of, running_client, settings_with
 
 
 OWNER_USERNAME = "strategy-owner"
 OTHER_USERNAME = "strategy-other-owner"
+FORBIDDEN_UPLOADER_USERNAME = "demo-visitor"
 
 STRATEGY_NAME = "成对网格"
 ENTRY_FILENAME = "grid_entry.py"
@@ -1179,3 +1185,72 @@ async def test_deleting_a_strategy_does_not_release_another_owners_name(client: 
     )
 
     assert (await post_strategy(client, other_account.token)).status_code == 409
+
+
+async def test_a_deployment_that_forbids_uploads_rejects_a_new_strategy(platform_settings: PlatformSettings) -> None:
+    """关掉上传闸的部署上, 非管理员建不了策略, 且源码一个字节也没落盘.
+
+    这条闸守的是**代码入库**: 策略是任意 Python, 平台在回测时直接执行它, 而本期只有目录级隔离.
+    拒得太晚 (先落盘再删) 就等于把恶意源码写进过别人的机器, 故同时钉住盘上什么都没多出来.
+    """
+
+    async with running_client(
+        settings_with(platform_settings, strategy_upload_allowed=False)
+    ) as (application, client):
+        account = await create_signed_in_account(
+            database_of(application), client, FORBIDDEN_UPLOADER_USERNAME
+        )
+
+        response = await post_strategy(client, account.token)
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == STRATEGY_UPLOAD_DISABLED_DETAIL
+
+        assert await list_visible_strategy_ids(client, account.token) == []
+        assert not (platform_settings.user_library_root / account.user_id).exists()
+
+
+async def test_a_deployment_that_forbids_uploads_rejects_a_new_version(platform_settings: PlatformSettings) -> None:
+    """同一道闸也拦"给既有策略传新版本" —— 两条路径落的是同一种东西, 只堵前一条等于没堵.
+
+    策略与其 1 号版本由夹具直接落库 (闸关着时非管理员根本建不出它), 版本号由此停在 1:
+    新版本一旦被接受, 库里会多一行、盘上会多出一个版本目录, 故两边都钉住.
+    """
+
+    async with running_client(
+        settings_with(platform_settings, strategy_upload_allowed=False)
+    ) as (application, client):
+        database = database_of(application)
+
+        account = await create_signed_in_account(database, client, FORBIDDEN_UPLOADER_USERNAME)
+
+        strategy = await create_strategy_record(database, account.user, STRATEGY_NAME)
+
+        await create_strategy_version_record(database, strategy, account.user)
+
+        response = await post_strategy_version(client, account.token, strategy.id)
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == STRATEGY_UPLOAD_DISABLED_DETAIL
+
+        detail = await read_strategy_detail(client, account.token, strategy.id)
+
+        assert [version.version_no for version in detail.versions] == [1]
+        assert not version_directory(platform_settings, account.user_id, strategy.id, 2).exists()
+
+
+async def test_the_admin_can_still_upload_on_a_deployment_that_forbids_uploads(platform_settings: PlatformSettings) -> None:
+    """管理员不受这道闸限制 —— 关掉它的机器恰恰要靠管理员把策略配发进去.
+
+    没有管理员这一路豁免, 闸一关这台机器就**再也进不去任何策略**, 唯一的手段变成手工往盘上放
+    文件再改库, 而那绕开的正是平台自己那套落盘与留档.
+    """
+
+    async with running_client(
+        settings_with(platform_settings, strategy_upload_allowed=False)
+    ) as (application, client):
+        admin_token = await login(client, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD)
+
+        response = await post_strategy(client, admin_token)
+
+        assert response.status_code == 201, response.text

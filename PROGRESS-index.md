@@ -48,6 +48,8 @@
 | D.35 | 2026-10-08 | `DbInitHost` 改常量相对路径 + 策略脚本删「`__file__` 反推仓根」 | 作业目录的 `DbInitHost` 由提交侧算出的绝对路径改常量 `./BackTestInit.db` 并删 `seed_database_path` 形参（种子库由调度侧按轮搬进作业目录，相对值才指得对；两处各算一次必分叉，症状是引擎读不到种子库而整轮照跑完）/ 引擎仓同步删脚本里 `__file__` 反推 `bin/Release` 两行（`sys.path[0]` 压过 `PYTHONPATH`，会静默换掉引擎根）/ 顺带修一条自 2026-10-07 起必红的真引擎用例；后端 740、真引擎 5；**该条未决部分 2026-10-14 销账**：`_acc_tmp_relative_dbinit/` 已由 `.gitignore:166` 显式覆盖（目录仍在盘上、按 Harness §1 不删），短版仍在 `PROGRESS.md` |
 | D.36 | 2026-10-08 | 422 回执走 `jsonable_encoder` | 原编号 D.35（两台电脑撞号让号）；`UploadFile` 校验器把 `ValueError` 对象塞进 `ctx` → 422 在 `json.dumps` 处变 500 / 在 `app/main.py` 一处补编码器 / **订正 D.25 记的触发路径**：是 `filename` 整项缺失而非空串 / 含「归档滚动 57.7→62.9 KB、缺口有意不补」那条账 |
 | D.37 | 2026-10-09 | 引擎探针改按解释器后缀表认扩展模块 | 后缀表取自 `importlib.machinery.EXTENSION_SUFFIXES`（与 import 机制同源，跨平台不分档）/ 刻意不用 `endswith`（否则 `cp39-win_amd64.pyd` 也算合法绑定）/ 夹具 `BINDING_FILENAME` 随之按平台派生 / 同一族的第二处（运行时库名）见 D.42 |
+| D.38 | 2026-10-09 | 引擎 Linux 包改用 `RUNPATH: $ORIGIN`：家规进 `CMakeCommon` | 四家仓此前**没有任何 RPATH 策略**，Linux 产物里写的是 CMake 默认 build RPATH（**构建机绝对路径**，换机即废）/ 在 `../CMakeCommon/CMakeCommon.cmake` 顶部加 `set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)`，三家产品仓都在 `CMakeLists.txt` 第 2 行 include 它（**一处改、全部 target 生效**）/ 本仓**零改动**；**本条无未决项**（滚动出 `✅` 区，2026-10-15） |
+| D.39 | 2026-10-14 | 同步上游两处契约：引擎表名一律复数 + QuoteHub 入口改名与建库前置 | 准据是 `MdbStructs.cpp` 的 `GetSchema()` 而非两个 `.h`（写的是 C++ 结构体名）/ 种子库三张名字写错是**静默故障**（照跑完且报成功，费率按 0、乘数退化），结果库五张是响的 / 组件 v1.0.0 起不建表，库未建好时退非零且在联网登录**之前**，故单列一类失败 / 新增两条**故意与契约不同源**的字面量表名断言 / **带日期的历史实测行保留原名**（滚动出 `✅` 区，2026-10-15） |
 | Q.01 | 2026-09-25 | manifest 的 `params` schema 细节未定 | **已定案**，见 D.06；该机制已于 D.25 整个删除 |
 | Q.02 | 2026-09-25 | `permission_type` 判定语义未定 | **已拍板不判定**，见 D.06 |
 | Q.03 | 2026-09-25 | 归属人从哪儿得知同事的 `user_id` | **已拍板：受限用户目录** |

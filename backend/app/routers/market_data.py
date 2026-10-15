@@ -23,7 +23,10 @@ from ..config import MARKET_DATA_PRECISION_FREQUENCY
 from ..dependencies import SettingsDependency
 from ..services import quote_hub
 from ..services.market_data_coverage import judge_coverage
-from ..services.market_data_preparation import MARKET_DATA_COMPONENT_MISSING_MESSAGE
+from ..services.market_data_preparation import (
+    MARKET_DATA_COMPONENT_BUSY_MESSAGE,
+    MARKET_DATA_COMPONENT_MISSING_MESSAGE,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -31,6 +34,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 COMPONENT_UNAVAILABLE_REASON = MARKET_DATA_COMPONENT_MISSING_MESSAGE
+COMPONENT_BUSY_REASON = MARKET_DATA_COMPONENT_BUSY_MESSAGE
+
+
+def _unavailable_reason(error: quote_hub.QuoteHubUnavailableError) -> str:
+    """组件读不了时回给提交页的那句话.
+
+    **正忙与不在位分开**: 组件正在写库时读会被挡下, 那是几秒后重试就好的事; 说成"不在位"会把用户
+    送去查部署路径, 而那边什么问题都没有.
+    """
+
+    if isinstance(error, quote_hub.QuoteHubBusyError):
+        return COMPONENT_BUSY_REASON
+
+    return COMPONENT_UNAVAILABLE_REASON
 
 # 单次返回的合约条数不设上限: 股票就那五千来只, 且下拉框本来就要一次拿全才能本地筛选.
 class MarketDataContractResponse(BaseModel):
@@ -79,7 +96,7 @@ async def read_contracts_handler(settings: SettingsDependency, current_user: Cur
         logger.warning("行情组件不可用, 提交页无法列出合约: %s", error)
 
         return MarketDataContractListResponse(
-            available=False, reason=COMPONENT_UNAVAILABLE_REASON
+            available=False, reason=_unavailable_reason(error)
         )
 
     return MarketDataContractListResponse(
@@ -132,7 +149,7 @@ async def read_coverage_handler(settings: SettingsDependency, current_user: Curr
         logger.warning("行情组件不可用, 提交页无法预检覆盖情况: %s", error)
 
         return MarketDataCoverageResponse(
-            available=False, reason=COMPONENT_UNAVAILABLE_REASON
+            available=False, reason=_unavailable_reason(error)
         )
 
     verdict = judge_coverage(facts.expected_days, facts.asked_days, facts.has_bars)

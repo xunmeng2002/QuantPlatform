@@ -1,1 +1,3 @@
 CommissionGroupId,ExchangeId,InstrumentId,Direction,OpenByMoney,CloseByMoney,OpenByVolume,CloseByVolume,OpenStampTaxByMoney,CloseStampTaxByMoney,OpenTransferFeeByMoney,CloseTransferFeeByMoney,MinCommission,MaxCommission
+1,SSE,,-1,0.0001,0.0001,0,0,0,0.0005,0.00001,0.00001,5,0
+1,SZSE,,-1,0.0001,0.0001,0,0,0,0.0005,0.00001,0.00001,5,0

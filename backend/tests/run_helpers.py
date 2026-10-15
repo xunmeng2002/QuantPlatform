@@ -42,7 +42,10 @@ from app.catalog.schemas import RunDetailResponse
 from app.config import PlatformSettings
 from app.ids import generate_identifier
 from app.main import create_application
-from app.reference_data.rate_expansion import EXCHANGE_LEVEL_INSTRUMENT_ID
+from app.reference_data.rate_expansion import (
+    BOTH_DIRECTIONS,
+    EXCHANGE_LEVEL_INSTRUMENT_ID,
+)
 from app.reference_data.seed_database import SEED_DATABASE_STAGING_PREFIX
 from app.services.strategy_store import (
     UploadedStrategyVersion,
@@ -104,7 +107,11 @@ DEFAULT_START_TRADING_DAY = "20241001"
 DEFAULT_END_TRADING_DAY = "20241231"
 DEFAULT_INITIAL_CAPITAL = 1000000.0
 
-DEFAULT_COMMISSION_GROUP_NAME = "用例的费率组"
+# 夹具自己建的费率组叫什么. **只管 2 号组那一类**: 1 号组由随包发布的 `CommissionGroups.csv`
+# 播种成"A股默认费率", 而 `ensure_contract_rates` 见组已在就不建 —— 故这个名字只出现在"另起一个
+# 组"的用例里 (见 `test_run_submission` 那几条按 2 号组走的), 断言"1 号组叫什么"的用例该去读
+# 那份 CSV, 别读这里.
+CREATED_COMMISSION_GROUP_NAME = "用例的费率组"
 
 # 用例在这两个交易所下提交 A 股合约 (`test_run_prefill` 用的是深市那只), 故两处都要备好费率;
 # 交易所级那一档对任何合约都成立, 于是备的是一对而不是一份合约清单.
@@ -241,7 +248,7 @@ async def ensure_contract_rates(database: PlatformDatabase, exchange_id: str,
                 CommissionGroupModel(
                     id=generate_identifier(),
                     commission_group_id=commission_group_id,
-                    commission_group_name=DEFAULT_COMMISSION_GROUP_NAME,
+                    commission_group_name=CREATED_COMMISSION_GROUP_NAME,
                 )
             )
 
@@ -276,6 +283,10 @@ async def drop_contract_rates(database: PlatformDatabase, direction: CommissionD
 
     `direction` 留空即全部撤掉; 指定一个就只撤那一侧, 用来验"只有买缺"这种半个缺口. 组号留空即
     默认那一组: 撤掉别组对默认组那一轮毫无影响, 那种差别正是"组号现在真的被用到了"的证据.
+
+    **指定一侧时, 双向那一行 (`-1`) 也得跟着走**: 它管着买卖两侧, 留着它这一侧根本没缺 —— 展开
+    时照样命中, 用例收到的是一句"费率齐全". 另一侧不会因此落空, 因为引擎那两档各有一行是
+    `ensure_contract_rates` 铺的, 而这里只删管这一侧的行.
     """
 
     conditions = [
@@ -284,7 +295,9 @@ async def drop_contract_rates(database: PlatformDatabase, direction: CommissionD
     ]
 
     if direction is not None:
-        conditions.append(BaseCommissionModel.direction == direction.value)
+        conditions.append(
+            BaseCommissionModel.direction.in_((direction.value, BOTH_DIRECTIONS))
+        )
 
     async with database.session_scope() as session:
         rows = (

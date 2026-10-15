@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from ..config import SQLITE_BUSY_TIMEOUT_MILLISECONDS
 from .migrations import add_missing_columns
 from .models import Base
 
@@ -30,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 SQLITE_DIALECT = "sqlite"
 SQLITE_MEMORY_DATABASE = ":memory:"
-SQLITE_BUSY_TIMEOUT_MILLISECONDS = 5000
 
 
 class PlatformDatabase:

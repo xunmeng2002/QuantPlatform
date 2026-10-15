@@ -6,6 +6,9 @@
 
 写操作一律经 visibility 的归属收口 (`load_owned_strategy`): 传新版本、删除与改授权都只对
 归属人开放, 非归属人一律 404, 不区分"无权"与"不存在".
+
+**两条落代码的路径** (新建策略与上传新版本) 另受一道部署闸: `strategy_upload_allowed` 为假时
+只有管理员能传. 删除与改授权不受它管——那两条不引入新的代码, 且归属人天然只有本人.
 """
 
 import ast
@@ -16,7 +19,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.dependencies import CurrentUserDependency
+from ..auth.dependencies import CurrentUserDependency, StrategyUploadUserDependency
 from ..catalog.enums import StrategyVisibility
 from ..catalog.models import (
     StrategyGrantModel,
@@ -338,7 +341,7 @@ async def list_strategies_handler(session: SessionDependency, current_user: Curr
     "", response_model=StrategyDetailResponse, status_code=status.HTTP_201_CREATED
 )
 async def create_strategy_handler(session: SessionDependency, settings: SettingsDependency,
-    current_user: CurrentUserDependency, source_file: Annotated[UploadFile, File(alias="source")],
+    current_user: StrategyUploadUserDependency, source_file: Annotated[UploadFile, File(alias="source")],
     configuration_file: Annotated[UploadFile, File(alias="configuration")],
     name: Annotated[str, Form(min_length=1, max_length=MAXIMUM_STRATEGY_NAME_LENGTH)],
     description: Annotated[str, Form(max_length=MAXIMUM_STRATEGY_DESCRIPTION_LENGTH)] = "",
@@ -384,7 +387,7 @@ async def create_strategy_handler(session: SessionDependency, settings: Settings
     status_code=status.HTTP_201_CREATED,
 )
 async def upload_strategy_version_handler(strategy_id: str, session: SessionDependency, settings: SettingsDependency,
-    current_user: CurrentUserDependency, source_file: Annotated[UploadFile, File(alias="source")],
+    current_user: StrategyUploadUserDependency, source_file: Annotated[UploadFile, File(alias="source")],
     configuration_file: Annotated[UploadFile, File(alias="configuration")]) -> StrategyVersionModel:
     """给既有策略上传一个新版本.
 
