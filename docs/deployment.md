@@ -8,6 +8,9 @@
 发布包里带着**前端构建产物**，后端因此同源托管前端与 API：一个进程、一个端口，不需要 Node，
 不需要反向代理，也不存在跨域（后端没有任何 CORS 中间件，同源是它成立的前提）。
 
+> **注意**：本文件随包交付。文中若指向 `platform-plan.md`（设计记录），那是**仓内**的文件，
+> **不随包交付**——部署机上翻不到，故凡运维真要用的结论，本文件都就地写全。
+
 引擎与行情组件**不在这个包里**。它们各自有发布包，平台按路径引用：
 
 | 件 | 谁提供 | 平台怎么用它 |
@@ -95,8 +98,9 @@ D:\QuantPlatform\                              ← 部署根（解压平台包�
    **5b 不能省，且必须在这个入口跑。** 平台自己调的是组件**另一个**入口 `bao_stock_parquet.py`，
    它只写 `MinuteBars` / `QueriedBarSpans`，**不碰** `Securities` / `TradeDates`；而提交页的合约
    下拉框读的正是 `Securities`。空库上于是形成一个**闭环缺口**：下拉框空 → 选不出合约 → 提交不了
-   → 触达不到平台那次下载 → `Securities` 永远是空的。两条命令都要 BaoStock 联网登录（实测全市场
-   7430 只，落到平台侧可选的股票 5214 只）。
+   → 触达不到平台那次下载 → `Securities` 永远是空的。两条命令都要 BaoStock 联网登录
+   （2026-10-15 实测：全市场 7425 只，落到平台侧可选的 5212 只——两个数每次同步都会变，
+   量级对得上即可）。
 
 6. 按 §5 写 `backend/.env`。
 7. 起服务：`.\start-platform.ps1`（WSL 用 `./start-platform.sh`）。
@@ -138,7 +142,7 @@ QUANT_INITIAL_ADMIN_PASSWORD=换成你自己的口令
 ## 6. 判据
 
 最省事的一条是读 `/api/health`——它一次把本进程与三件外部件（引擎、行情数据、会话文件）的
-关系全报出来，`ready` 只是这几项的总闸。浏览器里进「设置」页看的是同一份数据；要在命令行看：
+关系全报出来。浏览器里进「设置」页看的是同一份数据；要在命令行看：
 
 ```shell
 # 取管理员令牌（口令就是写进 .env 的那个）
@@ -149,15 +153,24 @@ curl -s -X POST http://127.0.0.1:8000/api/auth/login -H 'Content-Type: applicati
 curl -s http://127.0.0.1:8000/api/health -H 'Authorization: Bearer <令牌>'
 ```
 
-要看的几项：
+`ready` **只看这张表里的三项**，别把它当总闸：
 
 | 字段 | 期望 | 不是这样说明什么 |
 | ---- | ---- | ---- |
-| `engine_root_exists` | `true` | `QUANT_ENGINE_ROOT` 指错 |
-| `engine_version` | 版本号（如 `1.0.0`） | 显示 `sha256:…` 摘要 = 引擎包缺 `engine-version.txt`（仍能跑） |
+| `python_binding_filename` | 非 `null`（形如 `…cp314-win_amd64.pyd`） | 引擎根里没有与当前解释器匹配的扩展模块——多半是 Python 小版本与引擎包对不上 |
 | `missing_runtime_filenames` | `[]` | 引擎包解压不完整 |
+| `runs_root_writable` | `true` | `runs/` 建不出来或不可写（权限，或部署根是只读挂载） |
+
+下面两项**独立于 `ready`**——单列出来才分得清「跑不了」与「跑得了但行情不全」（理由见
+`routers/health.py` 的模块说明）：
+
+| 字段 | 期望 | 不是这样说明什么 |
+| ---- | ---- | ---- |
 | `session_file_exists` | `true` | 引擎包里的 `Sessions.json` 没解压出来 |
 | `market_data_root_exists` | `true` | `market-data\` 没建（§4 第 3 步） |
+
+另两个只作参考：`engine_root_exists`（`true`；假即 `QUANT_ENGINE_ROOT` 指错）与 `engine_version`
+（版本号如 `1.0.0`；显示 `sha256:…` 摘要 = 引擎包缺 `engine-version.txt`，仍能跑）。
 
 再走一遍功能面：
 
@@ -182,6 +195,7 @@ curl -s http://127.0.0.1:8000/api/health -H 'Authorization: Bearer <令牌>'
 > **2026-10-15 补记**：上一条演练用的是开发机上**已经填好**的 QuoteHub，故没撞上 §4 的 5b——
 > 那一版本节让读者直接「提交一轮回测」，而在空机器上这一步**到不了**。本轮部署到空机才暴露，
 > 缺口已就地补上；「提交一轮到 `succeeded`」这条判据现在可达。
+
 ## 7. 升级
 
 **引擎**：解压新版本到一个**新目录**（名字里带版本），把 `QUANT_ENGINE_ROOT` 指过去、重启。
@@ -231,5 +245,5 @@ curl -s http://127.0.0.1:8000/api/health -H 'Authorization: Bearer <令牌>'
 | 每一轮都失败，提示行情组件不在位 | `QUANT_QUOTE_HUB_ROOT` 指错，或组件的库没建（§4 第 5 步） |
 | 上传策略返回 403「本部署不接受用户上传策略」 | 这台部署把 `QUANT_STRATEGY_UPLOAD_ALLOWED` 设成了 false，且当前账号不是管理员（§5 第三条）。要传就用管理员，或把那项改回 true |
 | 下载行情那一步 `ModuleNotFoundError: baostock` | venv 里没装组件依赖（没照 `requirements.deploy.txt` 装） |
-| `/api/health` 的 `ready` 为假 | 逐项对着 §6 那张表看：引擎路径 / 运行时库 / `Sessions.json` / `market-data` |
+| `/api/health` 的 `ready` 为假 | 对着 §6 第一张表看：扩展模块 / 运行时库 / `runs` 可写 |
 | 别的机器打不开 | `QUANT_HTTP_HOST` 还是 `127.0.0.1`（改之前先读 §5 的第二条） |
