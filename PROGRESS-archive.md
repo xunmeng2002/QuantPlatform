@@ -2068,6 +2068,78 @@
   表名）与 §14 的组件建库前置走查。
 - **提交状态**：**已提交**（本批与上述文档同步同一棵树入库）。
 
+## D.40 + D.41 · 2026-10-14 （第四十、四十一批，合并成一条记录） 编码规范基线自查 → 前端按 web-style.md 重构：`@/` 别名 + 目录分层 + 事件处理器改名 + 行尾归一
+
+> 用户点名「前端的代码，按着规则去重构」，把 D.40 记下「查了但有意没动」的前端几处逐条落地。
+> **全批无功能改动**（只有名字与位置变），验收口径不变：`npm run type-check` 通过 + `npm test` 238/30。
+
+- **`@/` 路径别名**（`f694ac3`，66 文件 +529/−514）：`vite.config.ts` 配 `resolve.alias` 一处，
+  单测与构建共用（`test` 键就在这份配置里，不必再配一遍）；`tsconfig.app.json` 补 `paths` 跟上。
+  **284 处**跨目录引用改走 `@/`，同目录仍写 `./x`（100 处）。顺带修掉 4 处漏网的跨目录 `./`
+  （`App.vue` / `App.spec.ts` / `main.ts` 两处）与 8 处 `vi.mock('../…')` 调用点。
+- **目录分层**（`fd9795b`，51 文件）：24 个组件按「**是否认识业务域**」（有没有 import `@/api` /
+  `@/domain` / `@/stores`）拆进 `components/common/`（10 个）与 `components/business/`（13 个），
+  页面骨架 `AppLayout.vue` 上移 `layouts/`，`style.css` → `styles/global.css`（它本就是 Tailwind 的
+  `@theme` 令牌与全局焦点/动效，属 §0 的全局样式一层）。93 处说明符按新位置重取向；6 处注释/文档里的
+  旧路径引用与 `platform-plan.md` 的目录树一并更新。**`dir=` 分类的边界**：`StatusBadge` 虽
+  `import type { StatusTone }`，但它自己的 docstring 写明「不认识任何枚举」，归 `common/`。
+- **模板事件处理器改名**（`9833800`，18 文件 +102/−102）：**27 个名字 / 93 处**改 `handle` + 动宾短语（§1）。
+  判据是「**纯事件入口**」——模板 `@` 绑定之外再无别的调用点。故 `runSearch`（`onMounted` 里也调）、
+  `loadComparison`（`watch` + `onMounted`）、`refreshCoverageNotice`（被两个兄弟函数调）**保持原名**：
+  它们同时是**操作**，冠 `handle` 会把「谁在调它」这层信息改错。`useReferenceTable` 的三个返回成员
+  （`handleGoToOffset` / `handleSubmitForm` / `handleRemoveRecord`）随改——它们唯一的调用点就是模板；
+  `refresh` / `cancelEditing` / `beginEditing` 保留（前两个组合式函数内部也在调，第三个在三个面板里
+  已被别名成 `markRowAsEditing`，名字到不了模板）。两个易踩处已加保护：`@submit.prevent` 与
+  `native-type="submit"` 里的 `submit` 是**属性名/取值不是引用**；`RouterLink` 的
+  `v-slot="{ navigate }"` 是外部 API 的具名插槽，本仓无此函数。
+- **行尾归一**（`d56af47`）：4 个 CRLF 文件（`.gitignore` 与三份台账）归 LF，全仓 229 个跟踪文件
+  至此**清一色 LF**；`RunSubmitView.spec.ts` 早在别名那一笔里随说明符重写落回 LF。备注里那条
+  「三份台账是 CRLF、写回要照原样」的提醒随之作废。
+- **有意保留**：`main.ts` 两处 `console.error` —— §5 禁的是 `console.log` / `debugger`，这两处正是
+  §9 要求的全局兜底（`app.config.errorHandler` 与 401 跳转失败），本仓无日志上报通道，加一层
+  「logger」只会多造一个概念（Harness §6）。
+- **已提交、未推送**：本批四笔都在 `master` 上，推送按既定分工由用户做。
+
+**D.40（第四十批）· 编码规范基线自查：Python 3.14 收口 + 前端 kebab-case 与版本钉死**
+（与 D.41 同日，两条**合并成一条记录**以压 `✅` 区的批次数；段头保留两个 ID，条目原文一字未删。）
+
+> **本批无功能改动**：用户更新了全局 `~/.claude/rules/` 下的三份规范，要求本仓按新规范自查。
+> 下面只记「按规范动了什么」与「查了但**有意没动**」两类，后者按 Harness §1「禁止擅自重构」待用户点名
+> （用户当日即点名「前端的代码，按着规则去重构」，逐条落地见上方 **D.41** 那半）。
+
+- **Python 侧四笔**（`641d84f` / `5d72b8a` / `bddeb98` / `b11759a`，均**纯格式与类型**改动）：
+  - **3.14 语法基线**（`641d84f`，92 文件 +24/−228）：删掉**全部** `from __future__ import annotations`
+    （3.14 起 PEP 649 延迟注解是默认行为）；`typing.List/Dict/Optional/Tuple/Set/Type` 换内置泛型与
+    `X | None`；一处类型别名改 `type` 语句（PEP 695）。
+  - **`Any` 收窄 + `@override` + 解释器基线**（`5d72b8a`，5 文件）：新增 `backend/pyproject.toml`，
+    **只声明 `requires-python = ">=3.14"`**（有意不写 `build-system`、不搬 `pytest.ini`，本仓非可安装包）；
+    两处 `Any` 收窄；两处补 `@override`（PEP 698）。
+  - **签名换行 + 类内 0 空行**（`bddeb98`，74 文件 +921/−2887）：签名按「整行（含缩进）≤150 单行、超出
+    则横向填至 ≤120、**严禁**每参数一行」重排；类内方法之间空行收成 **0**。**类定义之间 / 模块级函数
+    之间保留 PEP 8 的 2 空行**（用户拍板，那两行不动）。
+  - **测试补注解 + 成员次序 + import 次序**（`b11759a`，8 文件）：补全 27 个函数的注解（`dict[str, Any]`
+    而非 `object` —— `json.load` 返回 `Any`，收窄会打断下游每一处下标与 `.get`，那是把类型噪声从一处
+    搬成十处）；类内次序统一为 `__init__` → 特殊方法 → 公有方法 → `@property` → 私有方法；
+    `app/main.py` 的 `import uvicorn` 与模块级 logger 各自归位。**模块级「常量在类之后」那几处是
+    依赖倒逼**（常量要引用类），不是违规，未动。
+- **前端侧一笔（`aaacdbe`）**：两个 composable 文件名改 kebab-case（函数名仍按 §1 保持 `use` +
+  PascalCase）、`package.json` 补 `engines.node` 与新增 `.nvmrc`、三个组件改 `defineModel()`。
+- **验收**：后端 **747 全过**；前端 `npm run type-check` 通过、`npm test` **30 文件 / 238 项全过**。
+  Python 侧另机扫「星号导入 / 函数内导入 / 可变默认参 / 生产 `assert` / `global` / 裸 `except` /
+  `eval`·`pickle`·`shell=True` / 未 await 的 `create_task` / 手写 `super(Class, self)`」诸项无命中；
+  最长行恰为 150。
+- **前端六处的处置**（初查按 Harness §1「未授权不擅自重构」只记不动，用户当日点名后逐条落地，见 **D.41**）：
+  ① `@/` 路径别名**原缺**——§2 要求跨目录走别名、禁 `../../`，而本仓 204 处相对导入**全是单层 `../x`**，
+  故那块禁令本身未被违反，配别名属一次性大改；② `AppLayout.vue` 不在 `src/layouts/`；③ 未分
+  `components/common` 与 `business/`；④ 模板事件处理器未用 `handle` + 动宾短语（§1）；⑤ `style.css`
+  不在 `src/styles/`；⑥ `main.ts` 两处 `console.error`——§5 禁 `console.*`，但这两处正是 §9 要求的
+  全局兜底，本仓无日志通道，**六项里只有这一项有意保留**。
+  **④ 的计数订正**：初查报的「20 个」是拿**裸标识符**绑定 `@x="name"` 正则扫出来的，两头都不准 ——
+  既漏了 `@click="foo(...)"` 这类带括号的绑定与 `@submit.prevent="submit"`，又把 `RouterLink` 的
+  `v-slot="{ navigate }"` 当成仓内函数（那是外部 API 的具名插槽）。按「模板之外再无调用点」重扫后是
+  **27 个名字 / 93 处**。**`strict: true` 已由 `@vue/tsconfig` 基座开启**，非缺失。
+- **已提交、未推送**：五笔都在 `master` 上，推送按既定分工由用户做。
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型
