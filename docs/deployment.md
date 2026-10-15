@@ -78,12 +78,25 @@ D:\QuantPlatform\                              ← 部署根（解压平台包�
    ./.venv/bin/python -m pip install -r requirements.deploy.txt
    ```
 
-5. 初始化行情组件的库（**唯一一处要跨仓同步的动作**）：
+5. 初始化行情组件的库（**唯一一处要跨仓同步的动作**）。这件事有**两半**，缺了第二半平台
+   照常启动、但**跑不起任何一轮**：
 
    ```shell
    cd QuoteHub
+
+   # 5a. 建库：24 张表，全部是空的
    ../.venv/Scripts/python.exe init_database.py --create    # WSL 用 ../.venv/bin/python
+
+   # 5b. 引导同步：填 Securities（合约清单）与 TradeDates（交易日历）
+   ../.venv/Scripts/python.exe bao_stock.py --sync-securities
+   ../.venv/Scripts/python.exe bao_stock.py --update-trade-dates
    ```
+
+   **5b 不能省，且必须在这个入口跑。** 平台自己调的是组件**另一个**入口 `bao_stock_parquet.py`，
+   它只写 `MinuteBars` / `QueriedBarSpans`，**不碰** `Securities` / `TradeDates`；而提交页的合约
+   下拉框读的正是 `Securities`。空库上于是形成一个**闭环缺口**：下拉框空 → 选不出合约 → 提交不了
+   → 触达不到平台那次下载 → `Securities` 永远是空的。两条命令都要 BaoStock 联网登录（实测全市场
+   7430 只，落到平台侧可选的股票 5214 只）。
 
 6. 按 §5 写 `backend/.env`。
 7. 起服务：`.\start-platform.ps1`（WSL 用 `./start-platform.sh`）。
@@ -154,7 +167,10 @@ curl -s http://127.0.0.1:8000/api/health -H 'Authorization: Bearer <令牌>'
 > **提示**：本节与 §4 的步骤在 2026-10-14 用 `QuantPlatform-0.1.0-2026-10-14.zip` 原样走过一遍
 > （引擎与行情组件用开发机那份，只改路径），启动日志、首页、深链接、未知 `/api` 路径、
 > `/api/health` 逐条符合预期。行情组件那条下载链路不在这次演练内。
-
+>
+> **2026-10-15 补记**：上一条演练用的是开发机上**已经填好**的 QuoteHub，故没撞上 §4 的 5b——
+> 那一版本节让读者直接「提交一轮回测」，而在空机器上这一步**到不了**。本轮部署到空机才暴露，
+> 缺口已就地补上；「提交一轮到 `succeeded`」这条判据现在可达。
 ## 7. 升级
 
 **引擎**：解压新版本到一个**新目录**（名字里带版本），把 `QUANT_ENGINE_ROOT` 指过去、重启。
@@ -198,6 +214,7 @@ curl -s http://127.0.0.1:8000/api/health -H 'Authorization: Bearer <令牌>'
 | 页面白屏、控制台一堆资源 404 | 浏览器缓存了旧的 `index.html`（强刷一次）；或前端产物与源码对不上 |
 | 启动即 `RuntimeError`（初始管理员口令） | 空库且没给 `QUANT_INITIAL_ADMIN_PASSWORD` |
 | 提交回测 400「行情数据根目录不存在」 | `market-data/` 没建（§4 第 3 步；它不会自建） |
+| 提交页的**合约下拉框是空的** | 没跑 §4 的 5b：`Securities` 是空的。平台自己那条下载命令填不上它 |
 | 提交回测 400「会话表文件不存在」 | 引擎包没解压全：`Sessions.json` 是它包里的件 |
 | 每一轮都失败，提示行情组件不在位 | `QUANT_QUOTE_HUB_ROOT` 指错，或组件的库没建（§4 第 5 步） |
 | 下载行情那一步 `ModuleNotFoundError: baostock` | venv 里没装组件依赖（没照 `requirements.deploy.txt` 装） |
