@@ -3,6 +3,6 @@
 # 测试配置走 pytest.ini (pytest 的配置发现以 pytest.ini 优先, 故不在此重复一份).
 [project]
 name = "quant-platform-backend"
-version = "0.0.0"
+version = "1.0.0"
 description = "薪火量化平台的 FastAPI 后端."
 requires-python = ">=3.14"
