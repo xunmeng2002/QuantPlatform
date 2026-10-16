@@ -49,6 +49,8 @@ FRONTEND_DIRECTORY_NAME = "frontend"
 
 BACKEND_SOURCE_DIRECTORY_NAME = "app"
 REFERENCE_SEED_DIRECTORY_NAME = "reference_seed"
+BUILTIN_STRATEGY_DIRECTORY_NAME = "builtin_strategies"
+BUILTIN_STRATEGY_TEMPLATE_FILENAME = "grid_strategy.json"
 BACKEND_ROOT_FILENAMES = ("requirements.txt", "pyproject.toml", ".env.example")
 FRONTEND_BUILD_DIRECTORY_NAME = "dist"
 FRONTEND_ASSET_DIRECTORY_NAME = "assets"
@@ -238,6 +240,7 @@ def copy_backend(release_root: Path) -> None:
         ignore=shutil.ignore_patterns(*FORBIDDEN_DIRECTORY_NAMES),
     )
     shutil.copytree(backend_source / REFERENCE_SEED_DIRECTORY_NAME, backend_destination / REFERENCE_SEED_DIRECTORY_NAME)
+    shutil.copytree(backend_source / BUILTIN_STRATEGY_DIRECTORY_NAME, backend_destination / BUILTIN_STRATEGY_DIRECTORY_NAME)
 
     for filename in BACKEND_ROOT_FILENAMES:
         shutil.copy2(backend_source / filename, backend_destination / filename)
@@ -374,6 +377,7 @@ def verify_release_contents(release_root: Path) -> None:
         f"{BACKEND_DIRECTORY_NAME}/{REFERENCE_SEED_DIRECTORY_NAME}/BaseCommissions.csv",
         f"{BACKEND_DIRECTORY_NAME}/{REFERENCE_SEED_DIRECTORY_NAME}/CommissionGroups.csv",
         f"{BACKEND_DIRECTORY_NAME}/{REFERENCE_SEED_DIRECTORY_NAME}/Products.csv",
+        f"{BACKEND_DIRECTORY_NAME}/{BUILTIN_STRATEGY_DIRECTORY_NAME}/{BUILTIN_STRATEGY_TEMPLATE_FILENAME}",
         f"{FRONTEND_DIRECTORY_NAME}/{FRONTEND_BUILD_DIRECTORY_NAME}/{FRONTEND_INDEX_FILENAME}",
         DEPENDENCY_LOCK_FILENAME,
         RELEASE_INFORMATION_FILENAME,

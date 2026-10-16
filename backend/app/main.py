@@ -24,6 +24,7 @@ from starlette.types import Scope
 
 from .auth.login_throttle import LoginAttemptThrottle
 from .bootstrap import ensure_initial_admin
+from .builtin_strategy import ensure_builtin_strategy
 from .catalog.database import PlatformDatabase
 from .config import PlatformSettings, resolve_platform_settings
 from .errors import (
@@ -181,6 +182,11 @@ async def _application_lifespan(application: FastAPI) -> AsyncIterator[None]:
     await _run_startup_step(
         "基础数据初始化 (空表按初始化 CSV 播种)",
         lambda: ensure_initial_reference_data(database),
+    )
+    # 紧接着基础数据一步: 两者都是"把库补成一个可用的初始状态", 与运行恢复没有顺序关系.
+    await _run_startup_step(
+        "内置策略播种 (源码取引擎包, 参数模板随平台包)",
+        lambda: ensure_builtin_strategy(database, settings),
     )
     await recover_interrupted_runs(database)
     await _prune_retained_runs(database, settings)

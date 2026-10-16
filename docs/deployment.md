@@ -42,6 +42,7 @@ D:\QuantPlatform\                              ← 部署根（解压平台包�
 ├── backend\
 │   ├── app\                                   包内：后端源码
 │   ├── reference_seed\                        包内：三份初始化 CSV（A 股品种码 + 默认费率，首次播种用）
+│   ├── builtin_strategies\                    包内：内置策略的参数模板（首次启动播种用）
 │   ├── requirements.txt  pyproject.toml  .env.example
 │   ├── .env                                   部署时写（不在包里）
 │   └── data\catalog.db  data\jwt_secret.key   首次启动自建（不在包里）
@@ -186,6 +187,10 @@ curl -s http://127.0.0.1:8000/api/health -H 'Authorization: Bearer <令牌>'
   这三项按 2026 年的现行标准给：印花税 0.05% 卖出单边，过户费 0.001% 买卖双向（沪深已统一），
   佣金那一列按**全佣**填（含经手费与证管费），最低 5 元是监管硬性规定。佣金是三项里唯一可协商的
   ——0.01%(万1) 是优惠账户的常见档，你的券商不是这个数就在这一页改。
+- 登管理员进「策略库」页：已有一条**内置策略**「网格策略（内置）」，可见性「公开」——源码取自
+  引擎包（`<引擎根>/grid_strategy.py`），参数模板随平台包发（`backend/builtin_strategies\`）。
+  引擎包缺那份源码时不播种，启动日志留一行 WARNING，其余一切照常；它只在**首次**播种，此后归
+  管理员所有（可传新版本、可删），不会再被播种步骤改回去。
 - 平台自身的功能验收走 `docs/acceptance-checklist.md`。
 
 > **提示**：本节与 §4 的步骤在 2026-10-14 用 `QuantPlatform-0.1.0-2026-10-14.zip` 原样走过一遍

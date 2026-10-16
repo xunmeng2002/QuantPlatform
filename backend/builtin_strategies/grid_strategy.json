@@ -1,0 +1,7 @@
+{
+  "LogLevel": 2,
+  "AccountId": "模板占位账号",
+  "GridStep": 0.01,
+  "GridCount": 5,
+  "VolumePerGrid": 1
+}

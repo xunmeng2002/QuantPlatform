@@ -22,6 +22,11 @@ PLATFORM_ROOT = BACKEND_ROOT.parent
 # 不一致", 而那种不一致没有任何东西能看出来.
 REFERENCE_SEED_CSV_DIRECTORY = BACKEND_ROOT / "reference_seed"
 
+# 内置策略的参数模板所在目录, 与上面三份 CSV 同一性质: 代码资产, 随版本发布, 不是可覆盖的设置项.
+# 模板是平台与策略作者之间的契约 (见 `strategy_configuration`), 且引擎侧那份同名配置里写着真实
+# 资金账号 —— 故它由平台出, 不从引擎包里取.
+BUILTIN_STRATEGY_TEMPLATE_DIRECTORY = BACKEND_ROOT / "builtin_strategies"
+
 # 两处 SQLite 读数共用的忙等上限: 平台自己的 catalog 库, 以及行情组件那个库的**只读**连接. 后者的
 # 写者是组件自己那条下载子进程, 它提交时独占全库, 而 SQLite 的默认日志模式下写锁会挡住读者 ——
 # 不等就是把一次正常的提交撞成 `database is locked` 报给用户. 值为 0 则关上忙等, 退回"立即失败".
