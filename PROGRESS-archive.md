@@ -2176,6 +2176,66 @@
   `test_real_engine_acceptance.py` 的警示）。
 
 
+## D.43 · 2026-10-14 （第四十三批） 平台发布包与部署形态：后端同源托管前端 + 依赖冻结成锁 + 部署走查（附两处「换台机器才炸」的修）
+
+> 用户问「现在看看怎么部署，你需要提供平台项目的 release 包是吧」，并当场拍下三件：
+> ① 前端**由后端同源托管**（`frontend/dist` 随包走，一个进程一个端口，不引 CORS 也不引反向代理）；
+> ② 依赖**冻成锁文件**（`requirements.deploy.txt`），部署时 `pip install -r` 联网装；
+> ③ **现在就修** `strategy_store` 的撞号缺陷。部署根定为 `D:\QuantPlatform` —— 平台包解压即得
+> 这一层，引擎包与行情组件包解压成它的**子目录**，靠 `QUANT_ENGINE_ROOT` / `QUANT_QUOTE_HUB_ROOT`
+> 指定（这两项默认值指向部署根的**上一级**，那是仓内同级开发的形状，部署时不改就是每轮必败）。
+
+**落地的件**（走查全文见新增的 [`docs/deployment.md`](docs/deployment.md)，本条不复述）：
+
+- `package_release.py`（仓根）：显式白名单、缺项点名并非零退出、单层目录、zip 只装那一层、
+  自检全过才产出 —— 骨架与引擎侧三个打包脚本同族。三处差异来自产物性质：**纯源码故一份包两平台通吃**；
+  依赖不进包，改为**现建干净 venv 冻出锁文件**；自检必须连**行情组件那四个依赖**一起 `import`
+  （平台跑组件命令行传的是 `sys.executable`，用的是后端的解释器）。版本号从 `main.py` 的
+  `APPLICATION_VERSION` **解析**出来：不 import 本包、也不另设 VERSION 文件。
+- `backend/app/main.py`：新增 `SinglePageApplicationFiles`，**挂在全部路由之后**（路由按注册次序匹配，
+  挂在 `/` 上那条会吞掉一切），无扩展名的未知路径回退 `index.html`（history 模式的深链接与 F5 只有
+  这一条出路），带扩展名的照常 404（否则「静态资源 404」会变成浏览器里一句 MIME 报错）。
+- `backend/app/config.py`：新增 `frontend_dist_root`（默认 `<仓根>/frontend/dist`）；产物不在位时
+  自动退回「只提供 API」，开发形态与生产形态共用同一份装配代码。
+- `start-platform.ps1` / `start-platform.sh`：**故意不自动建 venv** —— 建环境要联网装依赖，那是部署步骤。
+- 测试新增三份：`test_frontend_hosting.py`（8）、`test_release_packaging.py`（6）、
+  `test_strategy_store.py`（3）。
+
+**修掉的两个缺陷**（都是「开发机上不显形、换台机器才炸」那一类，且都由本批的新闸门抓出来）：
+
+- **POSIX 上的撞号会被静默吞掉**：`write_strategy_version` 原用「写临时目录再整目录改名」占号，
+  而 POSIX 的 `rename(2)` 对**空目录**目标是**静默替换** —— 撞号不再报错，变成两次上传共用一个版本
+  目录、后一次的回滚删掉前一次仍在用的目录。改为 `mkdir()` **占位**（两平台共同语义：目标在就
+  `FileExistsError`），并写明「版本目录的可见性由库里的行决定」，故不必靠改名做原子发布。
+  **这是 WSL 部署的前置**。作业目录那侧仍用 staging + 整目录改名，因为那边的目录名是随机 UUID4。
+- **`greenlet` 没被声明**：`requirements.txt` 只写 `sqlalchemy>=2.0`，而 `sqlalchemy.ext.asyncio`
+  没有 greenlet 直接 `ImportError`；开发机上它是别处手工装上的（3.5.6），干净 venv 一装就露。
+  改成 `sqlalchemy[asyncio]>=2.0`（额外项才是 greenlet 的来源）。**打包自检抓的就是这一条。**
+
+**发布包实测**（`QuantPlatform-0.1.0-2026-10-14.zip`，109 文件 / 730 KB）：解压当部署根、引擎与
+行情组件只改路径指过去、`python -m venv` + 装锁文件 + 跑 `start-platform.ps1`，逐条核对 ——
+启动日志两行（`.env` 读入 4 项 / 前端产物同源托管）、首页 200 HTML、`/runs` 与 `/strategies/<id>`
+深链接回退 200、未知 `/api/...` 保持 JSON 404、真资源 200 而缺资源 404 不回退、`/api/health` 的
+`ready=true` / `engine_version=1.0.0` / `missing_runtime_filenames=[]` / `session_file_exists=true`。
+**行情组件的下载链路不在这次演练内。**
+
+**发布包的两处安全加固**（代码审查提出，均已修并复验）：
+
+- **zip 权限位**：`ZipInfo.from_file` 在 Windows 上写 `create_system=0`（MS-DOS），high 16 位的
+  Unix 权限位会被 unzip **整段忽略**，`.sh` 解出来不可执行 —— 而 `deployment.md` 正让 WSL 用户跑它。
+  改为每个条目显式 `create_system=3` + 模式位（`.sh` 0755、其余 0644；只声明 Unix 而不给模式位会更糟，
+  那些文件会被建成 mode 0）。实测 `unzip -Z` 由 `-rw---- 2.0 fat` 变 `-rwxr-xr-x 2.0 unx`。
+- **`--force` 的删除面**：原护栏只拒「仓根或其上级」，于是 `--output backend --force` 会把
+  `backend/data/`（`catalog.db` + `jwt_secret.key`）与 `backend/.env` 一并递归删掉 —— 那些在 git
+  之外、删了取不回来。改为照同族脚本的形状整体拒（空值 / `.` / `..`、符号链接、仓根与家目录及其上级、
+  已存在的非目录），并**在清空前逐项核对顶层条目**：认不出的一个都不清。
+
+**判据**：后端 **767 全过**（2026-10-15 复跑实测；原记 765 是「D.42 基线 748 + 新增 17 个测试函数」
+算出来的，漏了 `test_release_packaging.py:54` 那个 `parametrize` 三值展开 —— 收集数比分函数数多 2）；
+打包脚本端到端跑通两次（含 `--zip`）；发布包按 `docs/deployment.md`
+§4 走查如上。同批订正 `platform-plan.md` 三处（§5.1「Linux 无解」、§8.1 补生产形态、§12.17 的
+Vite 代理缺口销账）。**本条的未决项**：前端仍无 e2e（P4 起的老缺口，不在本批）。
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型
