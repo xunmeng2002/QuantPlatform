@@ -2236,6 +2236,103 @@
 §4 走查如上。同批订正 `platform-plan.md` 三处（§5.1「Linux 无解」、§8.1 补生产形态、§12.17 的
 Vite 代理缺口销账）。**本条的未决项**：前端仍无 e2e（P4 起的老缺口，不在本批）。
 
+## D.44 · 2026-10-15 （第四十四批） A 股基础费率随包播种 + 行情下载期间读库的锁争用归类
+
+- **触发**：用户跑完本地部署验收后提两条。①「我录入的这些费率记录，应该部署时就创建，作为 A 股
+  的基础费率，避免每次部署时手动添加」；②「我在回测时差点同时进行两个合约的回测，突然想到现在
+  使用的行情源不允许并发，会被拉黑，所以平台在使用 QuoteHub 下载行情时，不能并发的调用，得排队
+  下载」。用户当场拍三件：费率种子**用他手工录的那批数值**、Products.csv **补齐全 A 股品种码**、
+  「下载中读库可能拿到 `database is locked`」那个缺口**本批一起修**。
+- **关于②：平台自己的下载本来就是串行的**，`market_data_preparation.py` 的 `REFRESH_LOCK`
+  （D.27 起在）已经把「刷新够不够」这件事收成一次一个，两个并发作业不会各起一个组件进程去写同一
+  个库与同一批 parquet。**本次补的是另一半**：下载子进程提交事务那一瞬间，平台自己那几处**只读**
+  也会被写锁挡下（默认回滚日志模式下写者提交时独占全库）。
+- **落点①（种子数据，三份 CSV 全部由"只含表头/两行"改成带数据）**：
+  `Products.csv` 2 行 → **13 行**（SSE `600` / `601` / `603` / `605` 沪市主板、`688` / `689`
+  科创板，SZSE `000` / `001` / `002` / `003` 深市主板、`300` / `301` / `302` 创业板，一律
+  `,6,1,0.01,0,0,0,0,`）；`CommissionGroups.csv` 加 `1,A股默认费率`；`BaseCommissions.csv` 加
+  SSE / SZSE 两行**交易所级双向**（佣金按金额 `0.0001`、**平仓**印花税 `0.0005`、过户费
+  `0.00001`、佣金下限 `5`、上限 `0`）。**数值取自用户部署后那台机器的 `backend/data/catalog.db`**，
+  **一处例外见下**。播种机制（`ensure_initial_reference_data`）本身没动：仍是"该表为空才播、
+  幂等、每表 flush、单次 commit、失败不阻塞启动"。
+- **⚠ 过户费已订正（2026-10-15，用户拍板）**：从部署机读出来的是 `0.00005`（0.005%），**比法定值
+  大 5 倍**——疑似手录时多打一位。三处独立来源都是 `0.00001`（0.001% 双向）：引擎自带的 A 股基准
+  `QuantTrading/makeseeddb.py:62-64`、本仓夹具 `run_helpers.DEFAULT_TRANSFER_FEE_BY_MONEY`、
+  以及 A 股自 2022-04-29 起的法定费率；且**两台机器不一致**（开发仓那份 `catalog.db` 是
+  `0.000005`）。过户费是法定费、不随券商谈、买卖两边都收，按 `0.00005` 随包走等于每个新部署每笔
+  成交都多算 5 倍，故用户裁定取 `0.00001`，`deployment.md` 里那句"过户费 0.005%"同步改为 0.001%。
+  同行的佣金 / 印花税 / 下限三列核过无问题。
+- **落点②（锁争用归类）**：`config.py` 新增 `SQLITE_BUSY_TIMEOUT_MILLISECONDS = 5000`，**catalog
+  与行情库两处共用一个常量**（同一条策略，两侧取值必须一致；catalog 侧原本就有一份本地同名常量，
+  改为从 `config` 取）；`quote_hub.py` 加 `QuoteHubBusyError(QuoteHubUnavailableError)` 与
+  `_is_database_contention`（**按 `sqlite_errorcode` 判，不按文案**——文案随 SQLite 版本与语言
+  变），`open_quote_hub_database_readonly` 把等满之后的争用翻成它；`market_data_preparation.py`
+  加 `MARKET_DATA_COMPONENT_BUSY_MESSAGE` 与 `_translate_read_failure`（把两处重复的 `except`
+  块合并成一份，**正忙与不在位给不同的话**）；`routers/market_data.py` 加 `_unavailable_reason`
+  （两个端点共用）。**是子类**：认不出它的调用方按"不可用"处理也不算错，但认得出的要分开放行。
+- **⚠ 订正本会话早些时候的两处错误说法**（都曾对用户说过，此处留档以防复犯）：
+  ① 我说"只读连接**没设** `busy_timeout`" —— **错**。实测 `sqlite3.connect` 的 `timeout` 默认就是
+  `5.0` 秒，等价于 5000 ms 忙等，即用户批准的那个选项描述的**一半是空操作**。真正的缺口是**等满
+  之后**那个 `sqlite3.OperationalError` 没人接：在 `GET /api/market-data/contracts` 上变成 500，
+  在准备阶段被兜底译成"组件不在位"（把人送去查一个没问题的地方）。故本批实质是**归类**，不是
+  "补忙等"；那句 `PRAGMA busy_timeout` 仍**显式**给出（理由见该函数 docstring：靠默认值写成的
+  代码会在别人换连接参数时静默失效，症状是"偶尔 500"）。
+  ② 我说"`-1` 双向那一行能正确表达单边印花税，D.33 记的风险与界面提示『双向会让买入也收』被夸
+  大了" —— **错**。引擎 `CommissionCalculator.cpp:105` 明写「方向不参与取列」，开/平那一列由
+  `OffsetFlag` 选（`:112`）；双向是把十列**原样复制**给买、卖两行，故双向规则确实会让**买入平仓**
+  那一笔也收印花税。**D.33 那条风险与界面提示语是对的，本批不动它们**（改用户可见文案属产品决定，
+  不在本批授权内）。用户的种子取值在**A 股只做多**的用法下依然正确（平仓即卖出），故数值不改。
+- **测试侧连带**：`tests/helpers.py` 加 `read_seed_csv_rows`（用例凡断言"库的初始内容"一律以随包
+  CSV 为准，别在用例里另抄一份）；`test_reference_data_api.py` 的期望值全部改为**派生**（产品键集、
+  组行、费率行数），`UNREGISTERED_SHORT_PRODUCT_ID` 由 `601`（现已登记）改 `199`；`run_helpers.py`
+  的 `drop_contract_rates(direction=…)` 补上「**双向那一行也得跟着走**」（种子那行是 `-1`，只删
+  `0` 等于这一侧根本没缺）并把 `DEFAULT_COMMISSION_GROUP_NAME` 改名
+  `CREATED_COMMISSION_GROUP_NAME`（1 号组现由 CSV 播种，这个名字只管夹具自建的 2 号组那一类）；
+  `quote_hub_stub.py` 新增 `hold_database_write_lock`（`BEGIN EXCLUSIVE`，不是插一行——中途的
+  `RESERVED` 挡写者不挡读者）与 `TEST_BUSY_TIMEOUT_MILLISECONDS`。
+- **新增 4 条用例**：`test_market_data_coverage.py::test_a_database_held_by_a_writer_reports_busy`
+  （钉**类型**：写者占库 → `QuoteHubBusyError`，且它**是** `QuoteHubUnavailableError` 的子类）；
+  `test_market_data_coverage.py::test_a_file_that_is_not_a_database_reports_unavailable`（钉"库文件
+  在位但不是个库"也归"读不了"，不是 500）；`test_market_data_endpoints.py::
+  test_the_contract_list_says_busy_while_a_writer_holds_the_database`（钉**用户可见的那句话**：仍是
+  200 + `available=false`，原因是"正忙"而**不是**"不在位"、更不是 500）；
+  `test_initial_rows.py::test_a_rate_table_pointing_at_a_absent_group_is_skipped_alone`。
+- **审查后补的两处（第二批）**：
+  ① **`sqlite3.Error` 不再能逃到 500**：原先只有"争用"被翻成忙档，其余（库文件在位却不是库
+  `SQLITE_NOTADB`、读不动 `SQLITE_CANTOPEN`）原样冒到路由层 = 500 / 调度器内部异常。改为一律
+  翻成 `QuoteHubUnavailableError`（争用仍单独一档），并把 `_translate_read_failure` 的 docstring
+  改成实情——它原先声称的覆盖面比代码大。**按"是谁的问题"收口，不是按"是哪个异常类"**。
+  ② **播种撞外键不再拖垮别的表**：`ensure_initial_reference_data` 插行**之前**先问一句
+  `_read_missing_references`（走 SQLAlchemy 外键元数据，不写死表名）——CSV 引的组号在库里不存在
+  时（那份 `CommissionGroups.csv` 见表非空就整个没用上），只跳过这张表并留 WARNING，其余照播。
+  **一度用保存点（`begin_nested`）实现，实测退回来**：pysqlite 在发 `SAVEPOINT` 前会**隐式提交**
+  挂起的事务，于是"回滚"没发生、行反而落了库，`test_a_bad_header_leaves_every_table_untouched`
+  当场变红（1,2,0）—— 那一条钉的正是"CSV 读不懂时三张表一起回滚"，故改回无保存点的写法，
+  整体回滚那条语义一字未动。
+- **文档同步**：`deployment.md`（§3 目录行改成"A 股品种码 + 默认费率"；§6 加一条判据：进「基础
+  数据」页就该看见 13 个品种码与 1 号组那两行，**全新安装不必手工录任何费率**；§9 加一行"重启后
+  费率明细仍是空的"→ 库里组号不含 `1`）；
+  `platform-plan.md`（§14 第 2 条点明三份都带数据、§14.4「空表即播种」那条订正）；
+  `acceptance-checklist.md` §16（"那两行就是三位"改为"那些行"、§16.2 的**新建品种**改用未登记的
+  `SZSE/004`、**未登记短码**由 `601` 改 `SSE/602`、**删组**那步改按播种后的行数说、标题加 D.44）；
+  `initial_rows.py`（模块 docstring 里"费率表有意留空"那个例子已不成立，删掉；"两份 CSV 都只有
+  表头、这一行暂时无事可做"改为"费率那两份都带数据，这一步是必须的"）；
+  前端 `RunSubmitView.vue` / `.spec.ts`（"全新安装的组表就是空的"改为"播种会建出 1 号组；这是组
+  被删空之后的样子"）。
+- **验收**：后端 `pytest` **771 项全过**（767 基线 + 4 条新增；改种子数据时曾一次红 19 条，全部
+  是"库不再是空的"所致，已按上一条逐一收口）；前端 `type-check` 干净 + `vitest` **238 项全绿**。
+- **仍未决 —— 待用户手工验收**：`acceptance-checklist.md` §16 那一整套（现已改成**从非空表起**）；
+  以及**发布包是否需要重打**（上一份 `RELEASE-INFO.txt` 标的是 `880e768 (工作区有未提交改动)`，
+  与本批不是同一棵树）。
+- **已知风险（已接受）**：**费率表删空并重启会被 CSV 重新填回**（§14.4）—— 这正是"播种"的本意，
+  要彻底空掉得同时改那份 CSV。
+- **偶发、未追**：前端全量跑时 `src/router/index.spec.ts` 的「未登录时的守卫」那一组报过一次错，
+  本批收尾时**又碰上第二次**（238 里 237 过）：报的是 `beforeEach`（`:101` 那句
+  `router.replace('/__reset')` 热身导航）抛 `Error: STACK_TRACE_ERROR`，栈里还带着 vitest 的
+  `Object.collect` —— 即**归因到收集期**，而单跑该文件 9/9 全过。该文件里每一处 `router.push` /
+  `replace` 都 `await` 了，仍只在并行全量跑时出现，指向"某个导航的 promise 在用例结束后才结算"这
+  一类卫生问题。与本批无关（前端两处改动都是注释），**留给下一批**。
+
 ## Q.01 · 策略 manifest 里 `params` 项的 schema 细节未定（2026-09-25）
 
 > 归档于 2026-09-25（D.06 拆分时）。**已了结**：P3 开工前定案——四类型
