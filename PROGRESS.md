@@ -89,10 +89,19 @@ Python 策略**。
   并**重启后端**，而本机后端是用户**前台**跑着的 —— AI 不杀用户进程，故这条留给用户。**§15.2
   第二条**（后端日志里那条 warning）同样只能看用户那个窗口：平台只走 `logging.basicConfig`、
   **不落日志文件**。
-- **留给用户**：§11、§12、§16.2/§16.3 的页面各条、§16.3 末那条引擎漂移对照（人工读
-  `../QuantTrading/src/Mdb/MdbStructs.cpp`）、§15.2 后两条。**顺带提醒**：本节跑完把 `127.0.0.1`
-  的登录锁了 15 分钟（`Retry-After: 900`），要立刻用就 Ctrl+C 重启 `start-platform.ps1`（计数在
-  **进程内存**里，重启即清）。
+- **§16.3 末那条「引擎漂移对照」也做了**（本轮 AI 侧关掉的最后一条）：逐列核过
+  `../QuantTrading/src/Mdb/MdbStructs.cpp` —— `ProductFields[]`（:75 起，11 列）对
+  `seed_contract.py` 的 `PRODUCT_TABLE`、`CommissionGroupFields[]`（:889，2 列）、
+  `BaseCommissionFields[]`（:919，14 列）对另两张表，**列名、列序、列数逐字相同**；
+  三处 `GetSchema()`（:109 / :914 / :956）的 `TableSchema::tableName` 是
+  `Products` / `CommissionGroups` / `BaseCommissions`，与声明里的表名一致；PK 下标组
+  `{0,1}` / `{0}` / `{0,1,2,3}` 也对得上。**这份源码里没有漂移**。顺带印证清单那句提醒：
+  `BackTestInitDbTableList.h` 写的是 C++ 结构体名（`Product` / `CommissionGroup` /
+  `BaseCommission`，一直单数），拿它核**表名**会把复数 `s` 判成漂移 —— 准据确实只在
+  `GetSchema()` 一处。
+- **留给用户**：§11、§12、§16.2/§16.3 的页面各条、§15.2 后两条。**顺带提醒**：本节跑完把
+  `127.0.0.1` 的登录锁了 15 分钟（`Retry-After: 900`），要立刻用就 Ctrl+C 重启
+  `start-platform.ps1`（计数在**进程内存**里，重启即清）。
 
 ### D.47 · 2026-10-15 （第四十七批） 全新部署到 `D:\QuantPlatform`：空库起, 逐条判据全绿
 
